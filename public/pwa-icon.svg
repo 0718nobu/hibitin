@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ロヒ活 icon">
+  <rect width="512" height="512" rx="96" fill="#1f7a5a" />
+  <circle cx="140" cy="142" r="54" fill="#f5fbf7" opacity="0.95" />
+  <path
+    fill="#f5fbf7"
+    d="M128 276c0-69 56-125 125-125h67c36 0 65 29 65 65s-29 65-65 65h-67c-15 0-28 13-28 28v70h-97V276Zm125-28h67c18 0 32-14 32-32s-14-32-32-32h-67c-51 0-92 41-92 92v70h31v-37c0-34 27-61 61-61Z"
+  />
+  <path fill="#b7f0cf" d="M248 325h138v54H248z" />
+</svg>
