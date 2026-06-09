@@ -48,12 +48,12 @@ type ResolvedEditTarget =
   | { kind: 'template'; template: TemplateKind }
   | { kind: 'date'; dateKey: string; baseTemplate: TemplateKind };
 
-const LEGACY_ROUTINES_STORAGE_KEY = 'rohi-katsu-routines:v1';
-const TEMPLATES_STORAGE_KEY = 'rohi-katsu:templates:v1';
-const DATE_SNAPSHOTS_STORAGE_KEY = 'rohi-katsu:dateSnapshots:v1';
-const DATE_OVERRIDES_STORAGE_KEY = 'rohi-katsu:dateOverrides:v1';
-const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'rohi-katsu:lifestyleSettings:v1';
-const RHYTHM_SETTINGS_STORAGE_KEY = 'rohi-katsu:rhythmSettings:v1';
+const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
+const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
+const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
+const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
+const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
+const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 
 type RhythmConfig = {
   wakeTime: string;
@@ -424,7 +424,7 @@ const createDateFromKey = (dateKey: string) => {
   return new Date(year, month - 1, day);
 };
 
-const getChecksStorageKey = (date: Date) => `rohi-katsu:checks:${getDateKey(date)}`;
+const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
 
 const isDateKeyBefore = (dateKey: string, compareDateKey: string) => dateKey < compareDateKey;
 
@@ -1009,7 +1009,7 @@ function App() {
       <div className="app-content">
         <header className="app-header">
           <div className="top-bar">
-            <p className="project-name">ロヒ活プロジェクト</p>
+            <p className="project-name">hibitin</p>
             <button
               className="settings-button"
               onClick={() => {
@@ -1027,7 +1027,7 @@ function App() {
               {page === 'main' ? '設定' : '戻る'}
             </button>
           </div>
-          <h1>{page === 'main' ? '今日のルーティンチェック表' : '設定'}</h1>
+          <h1>{page === 'main' ? '日々のルーティンチェック帳' : '設定'}</h1>
           {page === 'main' && (
             <div className="date-panel" data-completion-rate={selectedDateCompletionRate}>
               <div className="date-heading">

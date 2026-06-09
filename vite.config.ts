@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['pwa-icon.svg'],
       manifest: {
-        name: 'ロヒ活',
-        short_name: 'ロヒ活',
-        description: 'ロヒ活のPWAアプリ',
+        name: '日々のルーティンチェック帳',
+        short_name: '日々ティン',
+        description: '日々のルーティンをチェックするPWA',
         theme_color: '#1f7a5a',
         background_color: '#f5fbf7',
         display: 'standalone',
