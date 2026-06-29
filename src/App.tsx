@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
@@ -48,12 +48,71 @@ type ResolvedEditTarget =
   | { kind: 'template'; template: TemplateKind }
   | { kind: 'date'; dateKey: string; baseTemplate: TemplateKind };
 
+type BackupFile = {
+  backupVersion: 1;
+  exportedAt: string;
+  appName: 'hibitin';
+  data: {
+    storage: Record<string, unknown>;
+  };
+};
+
+type BackupDownload = {
+  url: string;
+  fileName: string;
+};
+
+const BACKUP_VERSION = 1;
 const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
 const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
 const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
 const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
+
+const isHibitinStorageKey = (key: string) =>
+  key.startsWith('hibitin:') || key.startsWith('hibitin-');
+
+const isBackupFile = (value: unknown): value is BackupFile => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const backup = value as Partial<BackupFile>;
+
+  if (
+    backup.backupVersion !== BACKUP_VERSION ||
+    backup.appName !== 'hibitin' ||
+    typeof backup.exportedAt !== 'string' ||
+    Number.isNaN(Date.parse(backup.exportedAt)) ||
+    !backup.data ||
+    typeof backup.data !== 'object' ||
+    !backup.data.storage ||
+    typeof backup.data.storage !== 'object' ||
+    Array.isArray(backup.data.storage)
+  ) {
+    return false;
+  }
+
+  const storage = backup.data.storage;
+  const requiredKeys = [
+    TEMPLATES_STORAGE_KEY,
+    DATE_SNAPSHOTS_STORAGE_KEY,
+    DATE_OVERRIDES_STORAGE_KEY,
+    RHYTHM_SETTINGS_STORAGE_KEY,
+  ];
+
+  return (
+    Object.keys(storage).every(isHibitinStorageKey) &&
+    requiredKeys.every(
+      (key) =>
+        key in storage &&
+        storage[key] !== null &&
+        typeof storage[key] === 'object' &&
+        !Array.isArray(storage[key]),
+    )
+  );
+};
 
 type RhythmConfig = {
   wakeTime: string;
@@ -75,6 +134,23 @@ const defaultRhythmSettings: RhythmSettings = {
 };
 
 const fixedRoutineIds = new Set(['morning-wake-up', 'night-sleep']);
+
+const sectionIconLabels: Record<string, string> = {
+  morning: '🌅',
+  noon: '☀️',
+  evening: '🌇',
+  night: '🌙',
+  advanced: '⚙️',
+};
+
+const dailyMessages = [
+  '🌅 今日もゲームスタート。',
+  '🎲 さて、今日はどんな一日になる？',
+  '🌱 昨日より1%前へ。',
+  '☀️ 今日のクエストを始めよう。',
+  '🎯 完璧じゃなくて、前進。',
+  '🧭 迷ったら、今できる一個から。',
+];
 
 const weekdayOptions: { key: WeekdayKey; label: string }[] = [
   { key: 'monday', label: '月' },
@@ -167,7 +243,12 @@ const defaultRoutineSections: RoutineSection[] = [
   },
 ];
 
-const dateFormatter = new Intl.DateTimeFormat('ja-JP', {
+const monthFormatter = new Intl.DateTimeFormat('ja-JP', {
+  year: 'numeric',
+  month: 'long',
+});
+
+const questDateFormatter = new Intl.DateTimeFormat('ja-JP', {
   year: 'numeric',
   month: 'long',
   day: 'numeric',
@@ -418,22 +499,46 @@ const getDateKey = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-const createDateFromKey = (dateKey: string) => {
-  const [year, month, day] = dateKey.split('-').map(Number);
-
-  return new Date(year, month - 1, day);
-};
-
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
+
+const getDailyMessage = (dateKey: string) => {
+  const messageIndex = [...dateKey].reduce(
+    (total, character) => total + character.charCodeAt(0),
+    0,
+  ) % dailyMessages.length;
+
+  return dailyMessages[messageIndex];
+};
 
 const isDateKeyBefore = (dateKey: string, compareDateKey: string) => dateKey < compareDateKey;
 
-const addDays = (date: Date, days: number) => {
-  const nextDate = new Date(date);
+const addMonths = (date: Date, months: number) => {
+  const nextDate = new Date(date.getFullYear(), date.getMonth(), 1);
 
-  nextDate.setDate(nextDate.getDate() + days);
+  nextDate.setMonth(nextDate.getMonth() + months);
 
   return nextDate;
+};
+
+const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const getMonthDateCells = (monthDate: Date) => {
+  const firstDate = getMonthStart(monthDate);
+  const daysInMonth = new Date(
+    firstDate.getFullYear(),
+    firstDate.getMonth() + 1,
+    0,
+  ).getDate();
+  const leadingBlankCount = (firstDate.getDay() + 6) % 7;
+  const dates = Array.from(
+    { length: daysInMonth },
+    (_, index) => new Date(firstDate.getFullYear(), firstDate.getMonth(), index + 1),
+  );
+
+  return [
+    ...Array.from({ length: leadingBlankCount }, () => null),
+    ...dates,
+  ];
 };
 
 const getWeekdayKey = (date: Date): WeekdayKey => {
@@ -583,28 +688,69 @@ const buildDisplaySections = (
     );
 };
 
-const calculateCompletionRate = (
+const calculateCompletionStats = (
   sections: RoutineSection[],
   checks: Record<string, boolean>,
 ) => {
   const routineItems = sections.flatMap((section) => section.items);
+  const totalCount = routineItems.length;
 
-  if (routineItems.length === 0) {
-    return 0;
+  if (totalCount === 0) {
+    return { completedCount: 0, totalCount, rate: null };
   }
 
   const completedCount = routineItems.filter((item) => checks[item.id]).length;
 
-  return Math.round((completedCount / routineItems.length) * 100);
+  return {
+    completedCount,
+    totalCount,
+    rate: Math.round((completedCount / totalCount) * 100),
+  };
+};
+
+const getCompletionRank = (rate: number | null) => {
+  if (rate === null) {
+    return { icon: '', label: '', level: 'empty' };
+  }
+
+  if (rate === 100) {
+    return { icon: '🏆', label: 'PERFECT!!', level: 'perfect' };
+  }
+
+  if (rate >= 90) {
+    return { icon: '⭐', label: 'EXCELLENT!!', level: 'excellent' };
+  }
+
+  if (rate >= 80) {
+    return { icon: '🎉', label: 'GREAT!!', level: 'great' };
+  }
+
+  if (rate >= 60) {
+    return { icon: '👍', label: 'GOOD!', level: 'good' };
+  }
+
+  if (rate >= 30) {
+    return { icon: '🌱', label: 'KEEP GOING!', level: 'keep' };
+  }
+
+  if (rate >= 1) {
+    return { icon: '🚀', label: 'START!', level: 'start' };
+  }
+
+  return { icon: '☕', label: 'READY?', level: 'ready' };
 };
 
 function App() {
   const today = useMemo(() => new Date(), []);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+  const backupDownloadUrlRef = useRef<string | null>(null);
   const todayKey = getDateKey(today);
   const [page, setPage] = useState<PageName>('main');
   const [selectedDate, setSelectedDate] = useState(() => today);
+  const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const selectedDateKey = getDateKey(selectedDate);
-  const dateLabel = dateFormatter.format(selectedDate);
+  const questDateLabel = questDateFormatter.format(selectedDate);
+  const dailyMessage = getDailyMessage(selectedDateKey);
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const isToday = selectedDateKey === todayKey;
   const [templateSettings, setTemplateSettings] = useState<RoutineTemplateSettings>(() =>
@@ -635,6 +781,8 @@ function App() {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() =>
     loadCheckedItems(today),
   );
+  const [backupMessage, setBackupMessage] = useState('');
+  const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -667,7 +815,56 @@ function App() {
   const displaySections = buildDisplaySections(routineSections, rhythmForDisplay);
   const isCheckMode = page === 'main';
   const canEditRoutines = page === 'settings' || isEditMode;
-  const selectedDateCompletionRate = calculateCompletionRate(displaySections, checkedItems);
+  const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
+  const selectedDateRank = getCompletionRank(selectedDateStats.rate);
+  const calendarMonthLabel = monthFormatter.format(calendarMonth);
+  const completionCalendarDays = useMemo(() => (
+    getMonthDateCells(calendarMonth).map((date) => {
+      if (!date) {
+        return null;
+      }
+
+      const dateKey = getDateKey(date);
+      const baseTemplate = getBaseTemplateForDate(templateSettings, date);
+      const target = resolveDateTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        date,
+        todayKey,
+      );
+      const sections = removeFixedRoutineItems(getSectionsForTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        target,
+        todayKey,
+      ));
+      const daySections = buildDisplaySections(sections, rhythmSettings[baseTemplate]);
+      const stats = calculateCompletionStats(daySections, loadCheckedItems(date));
+      const rank = getCompletionRank(stats.rate);
+
+      return {
+        date,
+        dateKey,
+        day: date.getDate(),
+        rate: stats.rate,
+        rankIcon: rank.icon,
+        rankLevel: rank.level,
+        totalCount: stats.totalCount,
+        isToday: dateKey === todayKey,
+        isSelected: dateKey === selectedDateKey,
+      };
+    })
+  ), [
+    calendarMonth,
+    dateOverrides,
+    dateSnapshots,
+    rhythmSettings,
+    selectedDateKey,
+    templateSettings,
+    todayKey,
+  ]);
   useEffect(() => {
     setCheckedItems(loadCheckedItems(selectedDate));
   }, [selectedDate]);
@@ -712,6 +909,12 @@ function App() {
   useEffect(() => {
     localStorage.setItem(checksStorageKey, JSON.stringify(checkedItems));
   }, [checkedItems, checksStorageKey]);
+
+  useEffect(() => () => {
+    if (backupDownloadUrlRef.current) {
+      URL.revokeObjectURL(backupDownloadUrlRef.current);
+    }
+  }, []);
 
   const updateSectionsForTarget = (
     target: ResolvedEditTarget,
@@ -998,9 +1201,100 @@ function App() {
     }
   };
 
-  const selectDateFromInput = (dateKey: string) => {
-    if (dateKey) {
-      setSelectedDate(createDateFromKey(dateKey));
+  const exportBackup = () => {
+    const storage: Record<string, unknown> = {};
+    const hibitinKeys = Array.from({ length: window.localStorage.length }, (_, index) =>
+      window.localStorage.key(index),
+    )
+      .filter((key): key is string => key !== null && isHibitinStorageKey(key))
+      .sort();
+
+    try {
+      hibitinKeys.forEach((key) => {
+        const savedValue = window.localStorage.getItem(key);
+
+        if (savedValue !== null) {
+          storage[key] = JSON.parse(savedValue) as unknown;
+        }
+      });
+    } catch {
+      setBackupMessage('');
+      window.alert('保存データの一部を読み取れなかったため、バックアップを作成できませんでした。');
+      return;
+    }
+
+    const backup: BackupFile = {
+      backupVersion: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      appName: 'hibitin',
+      data: { storage },
+    };
+    const fileName = `hibitin-backup-${getDateKey(new Date())}.json`;
+    const backupJson = JSON.stringify(backup, null, 2);
+    const blob = new Blob([backupJson], {
+      type: 'application/json;charset=utf-8',
+    });
+
+    const downloadUrl = URL.createObjectURL(blob);
+    backupDownloadUrlRef.current = downloadUrl;
+    setBackupDownload({ url: downloadUrl, fileName });
+
+    const downloadLink = document.createElement('a');
+
+    downloadLink.href = downloadUrl;
+    downloadLink.download = fileName;
+    downloadLink.textContent = fileName;
+    downloadLink.style.position = 'fixed';
+    downloadLink.style.left = '-9999px';
+    downloadLink.style.top = '0';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    window.setTimeout(() => {
+      downloadLink.remove();
+    }, 0);
+    setBackupMessage('バックアップを書き出しました。ダウンロードが始まらない場合は下のリンクを押してください。');
+  };
+
+  const importBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const backupFile = event.target.files?.[0];
+
+    if (!backupFile) {
+      return;
+    }
+
+    try {
+      const parsedBackup = JSON.parse(await backupFile.text()) as unknown;
+
+      if (!isBackupFile(parsedBackup)) {
+        setBackupMessage('');
+        window.alert('hibitinの正しいバックアップファイルではないため、復元しませんでした。');
+        return;
+      }
+
+      const shouldRestore = window.confirm(
+        'バックアップを復元しますか？現在のhibitin保存データは上書きされます。',
+      );
+
+      if (!shouldRestore) {
+        return;
+      }
+
+      Array.from({ length: window.localStorage.length }, (_, index) =>
+        window.localStorage.key(index),
+      )
+        .filter((key): key is string => key !== null && isHibitinStorageKey(key))
+        .forEach((key) => window.localStorage.removeItem(key));
+
+      Object.entries(parsedBackup.data.storage).forEach(([key, value]) => {
+        window.localStorage.setItem(key, JSON.stringify(value));
+      });
+
+      window.location.reload();
+    } catch {
+      setBackupMessage('');
+      window.alert('JSONファイルを読み取れなかったため、復元しませんでした。');
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -1028,37 +1322,7 @@ function App() {
             </button>
           </div>
           <h1>{page === 'main' ? '日々のルーティンチェック帳' : '設定'}</h1>
-          {page === 'main' && (
-            <div className="date-panel" data-completion-rate={selectedDateCompletionRate}>
-              <div className="date-heading">
-                <label className="date-label" htmlFor="date-picker">
-                  {dateLabel}
-                </label>
-                <div className="calendar-picker">
-                  <span>カレンダー</span>
-                  <input
-                    aria-label="日付を選択"
-                    id="date-picker"
-                    onChange={(event) => selectDateFromInput(event.currentTarget.value)}
-                    onInput={(event) => selectDateFromInput(event.currentTarget.value)}
-                    type="date"
-                    value={selectedDateKey}
-                  />
-                </div>
-              </div>
-              <div className="date-actions" aria-label="日付切り替え">
-                <button onClick={() => setSelectedDate((date) => addDays(date, -1))} type="button">
-                  昨日
-                </button>
-                <button disabled={isToday} onClick={() => setSelectedDate(today)} type="button">
-                  今日
-                </button>
-                <button onClick={() => setSelectedDate((date) => addDays(date, 1))} type="button">
-                  明日
-                </button>
-              </div>
-            </div>
-          )}
+          {page === 'main' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
         {page === 'settings' && (
@@ -1131,6 +1395,43 @@ function App() {
         )}
 
         <div className="routine-list">
+          {page === 'main' && (
+            <div className="quest-list-title">
+              <div className="quest-title-text">
+                <span aria-hidden="true">🎮</span>
+                <h2>今日のクエスト</h2>
+              </div>
+            </div>
+          )}
+          {page === 'main' && (
+            <p className="quest-date-label">📅 {questDateLabel}</p>
+          )}
+          {page === 'main' && (
+            <section
+              className="result-panel"
+              data-rank-level={selectedDateRank.level}
+              aria-label={isToday ? '今日の達成率' : '選択日の達成率'}
+            >
+              {selectedDateStats.rate === null ? (
+                <>
+                  <p className="result-rank">ルーティン未設定</p>
+                  <p className="result-rate">--</p>
+                  <p className="result-count">0 / 0 完了</p>
+                </>
+              ) : (
+                <>
+                  <p className="result-rank">
+                    <span aria-hidden="true">{selectedDateRank.icon}</span>
+                    {selectedDateRank.label}
+                  </p>
+                  <p className="result-rate">{selectedDateStats.rate}%</p>
+                  <p className="result-count">
+                    {selectedDateStats.completedCount} / {selectedDateStats.totalCount} 完了
+                  </p>
+                </>
+              )}
+            </section>
+          )}
           {(page === 'settings' || isEditMode) && (
             <div className="routine-context" data-quiet={page === 'main' ? 'true' : 'false'}>
               <p>
@@ -1148,7 +1449,10 @@ function App() {
           {displaySections.map((section) => (
             <section className="routine-section" key={section.id}>
               <div className="section-header">
-                <h2>{section.title}</h2>
+                <h2>
+                  <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
+                  {section.title}
+                </h2>
                 {canEditRoutines && (
                   <div className="section-actions">
                     <button
@@ -1346,40 +1650,8 @@ function App() {
               </div>
             </section>
           ))}
-        </div>
-
-        {(page === 'main' || page === 'settings') && (
-          <div
-            className="main-actions"
-            data-editing={page === 'settings' || isEditMode ? 'true' : 'false'}
-          >
-            {page === 'settings' || isEditMode ? (
-              <>
-                <button
-                  className="default-template-button"
-                  onClick={() => saveDisplayedRoutineAsTemplate('normal')}
-                  type="button"
-                >
-                  編集内容をノーマルルーティンにコピー
-                </button>
-                <button
-                  className="default-template-button"
-                  onClick={() => saveDisplayedRoutineAsTemplate('holiday')}
-                  type="button"
-                >
-                  編集内容を休日ルーティンにコピー
-                </button>
-                {page === 'main' && (
-                  <button
-                    className="end-edit-button"
-                    onClick={closeEditMode}
-                    type="button"
-                  >
-                    編集を終了
-                  </button>
-                )}
-              </>
-            ) : (
+          {page === 'main' && !isEditMode && (
+            <div className="quest-edit-action">
               <button
                 className="edit-mode-button"
                 onClick={openEditMode}
@@ -1387,9 +1659,147 @@ function App() {
               >
                 編集モード
               </button>
+            </div>
+          )}
+        </div>
+
+        {page === 'main' && (
+          <section className="completion-calendar" aria-label="今月の達成率カレンダー">
+            <div className="completion-calendar-header">
+              <div>
+                <h2>今月のプレイ履歴</h2>
+                <p>{calendarMonthLabel}</p>
+              </div>
+              <div className="month-actions">
+                <button
+                  onClick={() => setCalendarMonth((month) => addMonths(month, -1))}
+                  type="button"
+                >
+                  前月
+                </button>
+                <button
+                  disabled={
+                    calendarMonth.getFullYear() === today.getFullYear() &&
+                    calendarMonth.getMonth() === today.getMonth()
+                  }
+                  onClick={() => setCalendarMonth(getMonthStart(today))}
+                  type="button"
+                >
+                  今月
+                </button>
+                <button
+                  onClick={() => setCalendarMonth((month) => addMonths(month, 1))}
+                  type="button"
+                >
+                  翌月
+                </button>
+              </div>
+            </div>
+            <div className="completion-calendar-grid">
+              {weekdayOptions.map((weekday) => (
+                <div className="calendar-weekday" key={weekday.key}>
+                  {weekday.label}
+                </div>
+              ))}
+              {completionCalendarDays.map((day, index) => {
+                if (!day) {
+                  return <div className="calendar-day-empty" key={`blank-${index}`} />;
+                }
+
+                return (
+                  <button
+                    aria-label={`${day.dateKey}のチェック表を表示`}
+                    className="calendar-day"
+                    data-rate-level={day.rankLevel}
+                    data-selected={day.isSelected ? 'true' : 'false'}
+                    data-today={day.isToday ? 'true' : 'false'}
+                    key={day.dateKey}
+                    onClick={() => setSelectedDate(day.date)}
+                    type="button"
+                  >
+                    <span className="calendar-day-number">{day.day}</span>
+                    <span className="calendar-day-rate">
+                      {day.rate === null ? '' : `${day.rate}%`}
+                    </span>
+                    <span className="calendar-day-rank" aria-hidden="true">
+                      {day.rankIcon}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {(page === 'settings' || isEditMode) && (
+          <div
+            className="main-actions"
+            data-editing={page === 'settings' || isEditMode ? 'true' : 'false'}
+          >
+            <button
+              className="default-template-button"
+              onClick={() => saveDisplayedRoutineAsTemplate('normal')}
+              type="button"
+            >
+              編集内容をノーマルルーティンにコピー
+            </button>
+            <button
+              className="default-template-button"
+              onClick={() => saveDisplayedRoutineAsTemplate('holiday')}
+              type="button"
+            >
+              編集内容を休日ルーティンにコピー
+            </button>
+            {page === 'main' && (
+              <button
+                className="end-edit-button"
+                onClick={closeEditMode}
+                type="button"
+              >
+                編集を終了
+              </button>
             )}
           </div>
         )}
+
+        {page === 'settings' && (
+          <details className="data-management">
+            <summary>データ管理</summary>
+            <div className="data-management-content">
+              <p>ルーティン、チェック履歴、設定をJSONファイルで保存・復元します。</p>
+              <div className="backup-actions">
+                <button onClick={exportBackup} type="button">
+                  バックアップを書き出す
+                </button>
+                <button onClick={() => backupInputRef.current?.click()} type="button">
+                  バックアップを読み込む
+                </button>
+                <input
+                  accept="application/json,.json"
+                  aria-label="バックアップファイルを選択"
+                  hidden
+                  onChange={importBackup}
+                  ref={backupInputRef}
+                  type="file"
+                />
+              </div>
+              {backupMessage && <p className="backup-message">{backupMessage}</p>}
+              {backupDownload && (
+                <a
+                  className="backup-download-link"
+                  download={backupDownload.fileName}
+                  href={backupDownload.url}
+                >
+                  バックアップファイルを保存
+                </a>
+              )}
+              <p className="backup-warning">
+                読み込み時は、現在この端末に保存されているhibitinデータを上書きします。
+              </p>
+            </div>
+          </details>
+        )}
+
       </div>
 
       {pendingDelete && (
