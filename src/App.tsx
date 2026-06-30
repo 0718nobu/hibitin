@@ -2,7 +2,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 're
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
-type PageName = 'main' | 'settings';
+type PageName = 'today' | 'history' | 'achievements' | 'settings';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
   | 'monday'
@@ -745,11 +745,14 @@ function App() {
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
   const todayKey = getDateKey(today);
-  const [page, setPage] = useState<PageName>('main');
-  const [selectedDate, setSelectedDate] = useState(() => today);
+  const [page, setPage] = useState<PageName>('today');
+  const [selectedDate] = useState(() => today);
+  const [historySelectedDate, setHistorySelectedDate] = useState(() => today);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const selectedDateKey = getDateKey(selectedDate);
   const questDateLabel = questDateFormatter.format(selectedDate);
+  const historySelectedDateKey = getDateKey(historySelectedDate);
+  const historyDateLabel = questDateFormatter.format(historySelectedDate);
   const dailyMessage = getDailyMessage(selectedDateKey);
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const isToday = selectedDateKey === todayKey;
@@ -781,6 +784,9 @@ function App() {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() =>
     loadCheckedItems(today),
   );
+  const [historyCheckedItems, setHistoryCheckedItems] = useState<Record<string, boolean>>(() =>
+    loadCheckedItems(today),
+  );
   const [backupMessage, setBackupMessage] = useState('');
   const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
   const editTarget = resolveEditTarget(editTargetKey);
@@ -798,7 +804,7 @@ function App() {
     todayKey,
   );
   const displayedTarget =
-    page === 'main'
+    page === 'today'
       ? isEditMode
         ? selectedDateEditTarget
         : selectedDateTarget
@@ -811,12 +817,36 @@ function App() {
     todayKey,
   ));
   const rhythmForDisplay =
-    page === 'main' ? rhythmSettings[selectedDateTemplate] : rhythmSettings[editTargetKey];
+    page === 'today' ? rhythmSettings[selectedDateTemplate] : rhythmSettings[editTargetKey];
   const displaySections = buildDisplaySections(routineSections, rhythmForDisplay);
-  const isCheckMode = page === 'main';
-  const canEditRoutines = page === 'settings' || isEditMode;
+  const isCheckMode = page === 'today';
+  const canEditRoutines = page === 'settings' || (page === 'today' && isEditMode);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
+  const historyDateTemplate = getBaseTemplateForDate(templateSettings, historySelectedDate);
+  const historyDateTarget = resolveDateTarget(
+    templateSettings,
+    dateOverrides,
+    dateSnapshots,
+    historySelectedDate,
+    todayKey,
+  );
+  const historySections = removeFixedRoutineItems(getSectionsForTarget(
+    templateSettings,
+    dateOverrides,
+    dateSnapshots,
+    historyDateTarget,
+    todayKey,
+  ));
+  const historyDisplaySections = buildDisplaySections(
+    historySections,
+    rhythmSettings[historyDateTemplate],
+  );
+  const historyDateStats = calculateCompletionStats(
+    historyDisplaySections,
+    historyCheckedItems,
+  );
+  const historyDateRank = getCompletionRank(historyDateStats.rate);
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
   const completionCalendarDays = useMemo(() => (
     getMonthDateCells(calendarMonth).map((date) => {
@@ -853,21 +883,27 @@ function App() {
         rankLevel: rank.level,
         totalCount: stats.totalCount,
         isToday: dateKey === todayKey,
-        isSelected: dateKey === selectedDateKey,
+        isSelected: dateKey === historySelectedDateKey,
       };
     })
   ), [
     calendarMonth,
     dateOverrides,
     dateSnapshots,
+    checkedItems,
+    historyCheckedItems,
+    historySelectedDateKey,
     rhythmSettings,
-    selectedDateKey,
     templateSettings,
     todayKey,
   ]);
   useEffect(() => {
     setCheckedItems(loadCheckedItems(selectedDate));
   }, [selectedDate]);
+
+  useEffect(() => {
+    setHistoryCheckedItems(loadCheckedItems(historySelectedDate));
+  }, [historySelectedDate]);
 
   useEffect(() => {
     localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templateSettings));
@@ -951,10 +987,38 @@ function App() {
   };
 
   const toggleItem = (id: string) => {
-    setCheckedItems((current) => ({
-      ...current,
-      [id]: !current[id],
-    }));
+    setCheckedItems((current) => {
+      const nextChecks = {
+        ...current,
+        [id]: !current[id],
+      };
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setHistoryCheckedItems(nextChecks);
+      }
+
+      return nextChecks;
+    });
+  };
+
+  const toggleHistoryItem = (id: string) => {
+    setHistoryCheckedItems((current) => {
+      const nextChecks = {
+        ...current,
+        [id]: !current[id],
+      };
+
+      localStorage.setItem(
+        getChecksStorageKey(historySelectedDate),
+        JSON.stringify(nextChecks),
+      );
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setCheckedItems(nextChecks);
+      }
+
+      return nextChecks;
+    });
   };
 
   const openAddForm = (sectionId: string) => {
@@ -1170,7 +1234,7 @@ function App() {
       return;
     }
 
-    const targetTemplate = page === 'main' ? selectedDateTemplate : editTargetKey;
+    const targetTemplate = page === 'today' ? selectedDateTemplate : editTargetKey;
     const field = item.fixedKind === 'wake' ? 'wakeTime' : 'sleepTime';
 
     updateRhythmConfig(targetTemplate, field, time);
@@ -1196,7 +1260,7 @@ function App() {
       },
     }));
 
-    if (page === 'main' && isEditMode) {
+    if (page === 'today' && isEditMode) {
       setLastCopiedSections(copiedSections);
     }
   };
@@ -1298,31 +1362,36 @@ function App() {
     }
   };
 
+  const resetEditUiState = () => {
+    setIsEditMode(false);
+    setEditModeStartSections(null);
+    setLastCopiedSections(null);
+    setDraftSectionId(null);
+    setSortingSectionId(null);
+    setDraggedItemId(null);
+    setEditingItemId(null);
+    setEditingLabel('');
+  };
+
+  const changePage = (nextPage: PageName) => {
+    resetEditUiState();
+    setPage(nextPage);
+  };
+
   return (
     <main className="app">
       <div className="app-content">
         <header className="app-header">
           <div className="top-bar">
             <p className="project-name">hibitin</p>
-            <button
-              className="settings-button"
-              onClick={() => {
-                setPage((currentPage) => (currentPage === 'main' ? 'settings' : 'main'));
-                setIsEditMode(false);
-                setEditModeStartSections(null);
-                setLastCopiedSections(null);
-                setDraftSectionId(null);
-                setSortingSectionId(null);
-                setEditingItemId(null);
-                setEditingLabel('');
-              }}
-              type="button"
-            >
-              {page === 'main' ? '設定' : '戻る'}
-            </button>
           </div>
-          <h1>{page === 'main' ? '日々のルーティンチェック帳' : '設定'}</h1>
-          {page === 'main' && <p className="daily-message">{dailyMessage}</p>}
+          <h1>
+            {page === 'today' && '日々のルーティンチェック帳'}
+            {page === 'history' && 'スタンプ帳'}
+            {page === 'achievements' && '実績'}
+            {page === 'settings' && '設定'}
+          </h1>
+          {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
         {page === 'settings' && (
@@ -1394,8 +1463,9 @@ function App() {
           </section>
         )}
 
+        {(page === 'today' || page === 'settings') && (
         <div className="routine-list">
-          {page === 'main' && (
+          {page === 'today' && (
             <div className="quest-list-title">
               <div className="quest-title-text">
                 <span aria-hidden="true">🎮</span>
@@ -1403,10 +1473,10 @@ function App() {
               </div>
             </div>
           )}
-          {page === 'main' && (
+          {page === 'today' && (
             <p className="quest-date-label">📅 {questDateLabel}</p>
           )}
-          {page === 'main' && (
+          {page === 'today' && (
             <section
               className="result-panel"
               data-rank-level={selectedDateRank.level}
@@ -1433,11 +1503,11 @@ function App() {
             </section>
           )}
           {(page === 'settings' || isEditMode) && (
-            <div className="routine-context" data-quiet={page === 'main' ? 'true' : 'false'}>
+            <div className="routine-context" data-quiet={page === 'today' ? 'true' : 'false'}>
               <p>
-                {page === 'main' && isEditMode
+                {page === 'today' && isEditMode
                   ? '編集モード中'
-                  : page === 'main'
+                  : page === 'today'
                   ? `${selectedDateKey}だけの変更があります`
                   : `${getTargetLabel(editTarget)}を編集中`}
               </p>
@@ -1650,7 +1720,7 @@ function App() {
               </div>
             </section>
           ))}
-          {page === 'main' && !isEditMode && (
+          {page === 'today' && !isEditMode && (
             <div className="quest-edit-action">
               <button
                 className="edit-mode-button"
@@ -1662,12 +1732,13 @@ function App() {
             </div>
           )}
         </div>
+        )}
 
-        {page === 'main' && (
-          <section className="completion-calendar" aria-label="今月の達成率カレンダー">
+        {page === 'history' && (
+          <section className="completion-calendar" aria-label="今月のスタンプ帳">
             <div className="completion-calendar-header">
               <div>
-                <h2>今月のプレイ履歴</h2>
+                <h2>今月のスタンプ帳</h2>
                 <p>{calendarMonthLabel}</p>
               </div>
               <div className="month-actions">
@@ -1714,7 +1785,7 @@ function App() {
                     data-selected={day.isSelected ? 'true' : 'false'}
                     data-today={day.isToday ? 'true' : 'false'}
                     key={day.dateKey}
-                    onClick={() => setSelectedDate(day.date)}
+                    onClick={() => setHistorySelectedDate(day.date)}
                     type="button"
                   >
                     <span className="calendar-day-number">{day.day}</span>
@@ -1728,13 +1799,80 @@ function App() {
                 );
               })}
             </div>
+            <div className="history-detail">
+              <p className="history-date-label">📅 {historyDateLabel}</p>
+              <section
+                className="result-panel"
+                data-rank-level={historyDateRank.level}
+                aria-label="選択日の達成率"
+              >
+                {historyDateStats.rate === null ? (
+                  <>
+                    <p className="result-rank">ルーティン未設定</p>
+                    <p className="result-rate">--</p>
+                    <p className="result-count">0 / 0 完了</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="result-rank">
+                      <span aria-hidden="true">{historyDateRank.icon}</span>
+                      {historyDateRank.label}
+                    </p>
+                    <p className="result-rate">{historyDateStats.rate}%</p>
+                    <p className="result-count">
+                      {historyDateStats.completedCount} / {historyDateStats.totalCount} 完了
+                    </p>
+                  </>
+                )}
+              </section>
+              <div className="history-routine-list">
+                {historyDisplaySections.map((section) => (
+                  <section className="history-routine-section" key={section.id}>
+                    <h3>
+                      <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
+                      {section.title}
+                    </h3>
+                    <div className="history-routine-items">
+                      {section.items.map((item) => (
+                        <div
+                          className="history-routine-item"
+                          data-checked={historyCheckedItems[item.id] ? 'true' : 'false'}
+                          key={item.id}
+                        >
+                          <input
+                            aria-label={`${item.label}のチェック状態`}
+                            checked={Boolean(historyCheckedItems[item.id])}
+                            onChange={() => toggleHistoryItem(item.id)}
+                            type="checkbox"
+                          />
+                          <span className="history-routine-name">
+                            <span>{item.label}</span>
+                            {item.time && (
+                              <span className="fixed-time-display">{item.time}</span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
           </section>
         )}
 
-        {(page === 'settings' || isEditMode) && (
+        {page === 'achievements' && (
+          <section className="placeholder-panel">
+            <span aria-hidden="true">🏆</span>
+            <h2>実績は準備中</h2>
+            <p>連続達成日数やバッジを、ここに追加していく予定です。</p>
+          </section>
+        )}
+
+        {(page === 'settings' || (page === 'today' && isEditMode)) && (
           <div
             className="main-actions"
-            data-editing={page === 'settings' || isEditMode ? 'true' : 'false'}
+            data-editing={page === 'settings' || (page === 'today' && isEditMode) ? 'true' : 'false'}
           >
             <button
               className="default-template-button"
@@ -1750,7 +1888,7 @@ function App() {
             >
               編集内容を休日ルーティンにコピー
             </button>
-            {page === 'main' && (
+            {page === 'today' && (
               <button
                 className="end-edit-button"
                 onClick={closeEditMode}
@@ -1801,6 +1939,26 @@ function App() {
         )}
 
       </div>
+
+      <nav className="bottom-tab-nav" aria-label="メインナビゲーション">
+        {([
+          ['today', '🎮', '今日'],
+          ['history', '📅', 'スタンプ帳'],
+          ['achievements', '🏆', '実績'],
+          ['settings', '⚙️', '設定'],
+        ] as [PageName, string, string][]).map(([tabPage, icon, label]) => (
+          <button
+            aria-current={page === tabPage ? 'page' : undefined}
+            data-active={page === tabPage ? 'true' : 'false'}
+            key={tabPage}
+            onClick={() => changePage(tabPage)}
+            type="button"
+          >
+            <span aria-hidden="true">{icon}</span>
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {pendingDelete && (
         <div className="dialog-backdrop" role="presentation">
