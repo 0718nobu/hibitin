@@ -23,6 +23,8 @@ type RoutineItem = {
   createdAt: string;
   fixedKind?: 'wake' | 'sleep';
   time?: string;
+  timerMinutes?: number;
+  difficulty?: number;
 };
 
 type RoutineSection = {
@@ -63,6 +65,23 @@ type BackupDownload = {
   url: string;
   fileName: string;
 };
+
+type ActiveTimer = {
+  itemId: string;
+  label: string;
+  totalSeconds: number;
+  remainingSeconds: number;
+  isRunning: boolean;
+  isComplete: boolean;
+};
+
+type PausedTimer = {
+  label: string;
+  totalSeconds: number;
+  remainingSeconds: number;
+};
+
+type TimerNotificationPermission = NotificationPermission | 'unsupported';
 
 const BACKUP_VERSION = 1;
 const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
@@ -144,6 +163,8 @@ const sectionIconLabels: Record<string, string> = {
   night: '🌙',
   advanced: '⚙️',
 };
+
+const timerPresetMinutes = [5, 10, 15, 20, 30];
 
 const dailyMessages = [
   '🌅 今日もゲームスタート。',
@@ -753,6 +774,38 @@ const getCompletionRank = (rate: number | null) => {
   return { icon: '☕', label: 'READY?', level: 'ready' };
 };
 
+const formatTimerMinutes = (minutes: number) => {
+  if (Number.isInteger(minutes)) {
+    return `${minutes}分`;
+  }
+
+  return `${minutes.toFixed(1).replace(/\.0$/, '')}分`;
+};
+
+const formatTimerSeconds = (seconds: number) => {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const restSeconds = safeSeconds % 60;
+
+  return `${minutes}:${String(restSeconds).padStart(2, '0')}`;
+};
+
+const getTimerSelectValue = (minutes?: number) => {
+  if (!minutes) {
+    return 'none';
+  }
+
+  return timerPresetMinutes.includes(minutes) ? String(minutes) : 'custom';
+};
+
+const formatDifficulty = (difficulty?: number) => {
+  if (!difficulty) {
+    return '';
+  }
+
+  return `${'★'.repeat(difficulty)}${'☆'.repeat(5 - difficulty)}`;
+};
+
 function App() {
   const today = useMemo(() => new Date(), []);
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -790,6 +843,18 @@ function App() {
     useState<RoutineSection[] | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
+  const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
+  const [pausedTimers, setPausedTimers] = useState<Record<string, PausedTimer>>({});
+  const [timerAlertSilenced, setTimerAlertSilenced] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<TimerNotificationPermission>(() => {
+      if (!('Notification' in window)) {
+        return 'unsupported';
+      }
+
+      return window.Notification.permission;
+    });
   const [sortingSectionId, setSortingSectionId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -969,6 +1034,130 @@ function App() {
     localStorage.setItem(checksStorageKey, JSON.stringify(checkedItems));
   }, [checkedItems, checksStorageKey]);
 
+  const playTimerAlertSound = () => {
+    try {
+      const AudioContextClass =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      if (!AudioContextClass) {
+        return;
+      }
+
+      const audioContext = new AudioContextClass();
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.28);
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.3);
+      window.setTimeout(() => {
+        void audioContext.close();
+      }, 450);
+    } catch {
+      // 音が鳴らない環境でも、画面内アラートは必ず表示します。
+    }
+  };
+
+  const vibrateTimerAlert = () => {
+    try {
+      const vibrate = (navigator as Navigator & {
+        vibrate?: (pattern: VibratePattern) => boolean;
+      }).vibrate;
+
+      vibrate?.([180, 80, 180]);
+    } catch {
+      // iPhone PWAなど、振動に未対応の環境では何もしません。
+    }
+  };
+
+  const showTimerBrowserNotification = (label: string) => {
+    if (window.Notification?.permission !== 'granted') {
+      return;
+    }
+
+    new Notification('hibitin', {
+      body: `${label} お疲れさま！`,
+    });
+  };
+
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+
+    const permission = await window.Notification.requestPermission();
+
+    setNotificationPermission(permission);
+  };
+
+  useEffect(() => {
+    if (!activeTimer?.isRunning || activeTimer.isComplete) {
+      return undefined;
+    }
+
+    const timerId = window.setInterval(() => {
+      setActiveTimer((currentTimer) => {
+        if (!currentTimer || !currentTimer.isRunning || currentTimer.isComplete) {
+          return currentTimer;
+        }
+
+        const nextSeconds = currentTimer.remainingSeconds - 1;
+
+        if (nextSeconds > 0) {
+          return {
+            ...currentTimer,
+            remainingSeconds: nextSeconds,
+          };
+        }
+
+        setTimerAlertSilenced(false);
+        playTimerAlertSound();
+        vibrateTimerAlert();
+        showTimerBrowserNotification(currentTimer.label);
+
+        setPausedTimers((currentTimers) => {
+          const nextTimers = { ...currentTimers };
+
+          delete nextTimers[currentTimer.itemId];
+
+          return nextTimers;
+        });
+
+        return {
+          ...currentTimer,
+          remainingSeconds: 0,
+          isRunning: false,
+          isComplete: true,
+        };
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timerId);
+  }, [activeTimer?.isComplete, activeTimer?.isRunning]);
+
+  useEffect(() => {
+    if (!activeTimer?.isComplete || timerAlertSilenced) {
+      return undefined;
+    }
+
+    const alertId = window.setInterval(() => {
+      playTimerAlertSound();
+      vibrateTimerAlert();
+    }, 4000);
+
+    return () => window.clearInterval(alertId);
+  }, [activeTimer?.isComplete, timerAlertSilenced]);
+
   useEffect(() => () => {
     if (backupDownloadUrlRef.current) {
       URL.revokeObjectURL(backupDownloadUrlRef.current);
@@ -1071,6 +1260,209 @@ function App() {
     });
   };
 
+  const completeActiveTimerItem = () => {
+    if (!activeTimer) {
+      return;
+    }
+
+    setTimerAlertSilenced(true);
+    setCheckedItems((current) => {
+      const nextChecks = {
+        ...current,
+        [activeTimer.itemId]: true,
+      };
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setHistoryCheckedItems(nextChecks);
+      }
+
+      return nextChecks;
+    });
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      delete nextTimers[activeTimer.itemId];
+
+      return nextTimers;
+    });
+    setActiveTimer(null);
+  };
+
+  const updateItemTimerMinutes = (
+    sectionId: string,
+    itemId: string,
+    timerMinutes?: number,
+  ) => {
+    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
+      currentSections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+
+          if (!timerMinutes) {
+            const itemWithoutTimer = { ...item };
+
+            delete itemWithoutTimer.timerMinutes;
+
+            return itemWithoutTimer;
+          }
+
+          return {
+            ...item,
+            timerMinutes,
+          };
+        }),
+      })),
+    );
+
+    if (activeTimer?.itemId === itemId) {
+      setTimerAlertSilenced(true);
+      setActiveTimer(null);
+    }
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      delete nextTimers[itemId];
+
+      return nextTimers;
+    });
+  };
+
+  const updateItemDifficulty = (
+    sectionId: string,
+    itemId: string,
+    difficulty?: number,
+  ) => {
+    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
+      currentSections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+
+          if (!difficulty) {
+            const itemWithoutDifficulty = { ...item };
+
+            delete itemWithoutDifficulty.difficulty;
+
+            return itemWithoutDifficulty;
+          }
+
+          return {
+            ...item,
+            difficulty,
+          };
+        }),
+      })),
+    );
+  };
+
+  const startItemTimer = (item: RoutineItem) => {
+    if (!item.timerMinutes) {
+      return;
+    }
+
+    setTimerAlertSilenced(true);
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      if (
+        activeTimer &&
+        !activeTimer.isComplete &&
+        activeTimer.remainingSeconds > 0 &&
+        activeTimer.itemId !== item.id
+      ) {
+        nextTimers[activeTimer.itemId] = {
+          label: activeTimer.label,
+          totalSeconds: activeTimer.totalSeconds,
+          remainingSeconds: activeTimer.remainingSeconds,
+        };
+      }
+
+      delete nextTimers[item.id];
+
+      return nextTimers;
+    });
+
+    const pausedTimer = pausedTimers[item.id];
+    const totalSeconds = Math.round(item.timerMinutes * 60);
+
+    setActiveTimer({
+      itemId: item.id,
+      label: item.label,
+      totalSeconds: pausedTimer?.totalSeconds ?? totalSeconds,
+      remainingSeconds: pausedTimer?.remainingSeconds ?? totalSeconds,
+      isRunning: true,
+      isComplete: false,
+    });
+  };
+
+  const pauseActiveTimer = () => {
+    setActiveTimer((currentTimer) => {
+      if (!currentTimer) {
+        return currentTimer;
+      }
+
+      setPausedTimers((currentTimers) => ({
+        ...currentTimers,
+        [currentTimer.itemId]: {
+          label: currentTimer.label,
+          totalSeconds: currentTimer.totalSeconds,
+          remainingSeconds: currentTimer.remainingSeconds,
+        },
+      }));
+
+      return { ...currentTimer, isRunning: false };
+    });
+  };
+
+  const resumeActiveTimer = () => {
+    setActiveTimer((currentTimer) => {
+      if (!currentTimer || currentTimer.isComplete) {
+        return currentTimer;
+      }
+
+      setTimerAlertSilenced(true);
+      setPausedTimers((currentTimers) => {
+        const nextTimers = { ...currentTimers };
+
+        delete nextTimers[currentTimer.itemId];
+
+        return nextTimers;
+      });
+
+      return { ...currentTimer, isRunning: true };
+    });
+  };
+
+  const resetActiveTimer = () => {
+    setTimerAlertSilenced(true);
+    setActiveTimer((currentTimer) => {
+      if (!currentTimer) {
+        return currentTimer;
+      }
+
+      setPausedTimers((currentTimers) => ({
+        ...currentTimers,
+        [currentTimer.itemId]: {
+          label: currentTimer.label,
+          totalSeconds: currentTimer.totalSeconds,
+          remainingSeconds: currentTimer.totalSeconds,
+        },
+      }));
+
+      return {
+        ...currentTimer,
+        remainingSeconds: currentTimer.totalSeconds,
+        isRunning: false,
+        isComplete: false,
+      };
+    });
+  };
+
   const startEditingItem = (item: RoutineItem) => {
     setEditingItemId(item.id);
     setEditingLabel(item.label);
@@ -1145,6 +1537,7 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setTimerSettingItemId(null);
   };
 
   const openEditMode = () => {
@@ -1180,6 +1573,7 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setTimerSettingItemId(null);
   };
 
   const addRoutine = (sectionId: string) => {
@@ -1215,6 +1609,7 @@ function App() {
     setSortingSectionId(null);
     setEditingItemId(newItemId);
     setEditingLabel(newItemLabel);
+    setTimerSettingItemId(null);
   };
 
   const deleteRoutine = () => {
@@ -1252,6 +1647,17 @@ function App() {
       }
 
       return remainingChecks;
+    });
+    if (activeTimer?.itemId === pendingDelete.id) {
+      setTimerAlertSilenced(true);
+      setActiveTimer(null);
+    }
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      delete nextTimers[pendingDelete.id];
+
+      return nextTimers;
     });
     setPendingDelete(null);
   };
@@ -1429,6 +1835,7 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setTimerSettingItemId(null);
   };
 
   const changePage = (nextPage: PageName) => {
@@ -1560,6 +1967,66 @@ function App() {
               )}
             </section>
           )}
+          {page === 'today' && activeTimer && (
+            <section
+              className="timer-panel"
+              data-complete={activeTimer.isComplete ? 'true' : 'false'}
+              aria-label="実行中のタイマー"
+            >
+              {activeTimer.isComplete ? (
+                <>
+                  <p className="timer-finished">🎉 時間です！</p>
+                  <p className="timer-title">{activeTimer.label} お疲れさま！</p>
+                  <p className="timer-alert-note">
+                    このルーティンを完了にしますか？通知は閉じるまで残ります。
+                  </p>
+                  <div className="timer-actions">
+                    <button onClick={() => setTimerAlertSilenced(true)} type="button">
+                      通知を停止
+                    </button>
+                    {notificationPermission === 'default' && (
+                      <button onClick={requestNotificationPermission} type="button">
+                        通知を許可
+                      </button>
+                    )}
+                    <button onClick={completeActiveTimerItem} type="button">
+                      このルーティンを完了にする
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTimerAlertSilenced(true);
+                        setActiveTimer(null);
+                      }}
+                      type="button"
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="timer-title">{activeTimer.label}</p>
+                  <p className="timer-remaining">
+                    残り {formatTimerSeconds(activeTimer.remainingSeconds)}
+                  </p>
+                  <div className="timer-actions">
+                    {activeTimer.isRunning ? (
+                      <button onClick={pauseActiveTimer} type="button">
+                        ⏸ 一時停止
+                      </button>
+                    ) : (
+                      <button onClick={resumeActiveTimer} type="button">
+                        ▶ 再開
+                      </button>
+                    )}
+                    <button onClick={resetActiveTimer} type="button">
+                      ↺ リセット
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
           {(page === 'settings' || isEditMode) && (
             <div className="routine-context" data-quiet={page === 'today' ? 'true' : 'false'}>
               <p>
@@ -1612,6 +2079,15 @@ function App() {
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
+                  const canConfigureTimer = page === 'settings' || (page === 'today' && isEditMode);
+                  const canConfigureDifficulty = canConfigureTimer;
+                  const pausedTimer = pausedTimers[item.id];
+                  const activeItemTimer =
+                    activeTimer?.itemId === item.id ? activeTimer : null;
+                  const showTimerStart =
+                    page === 'today' &&
+                    !isEditMode &&
+                    Boolean(item.timerMinutes);
 
                   return (
                     <div
@@ -1749,6 +2225,142 @@ function App() {
                           </button>
                         )}
                       </div>
+                      {page === 'today' && !isEditMode && item.difficulty && (
+                        <span className="difficulty-badge">
+                          {formatDifficulty(item.difficulty)}
+                        </span>
+                      )}
+                      {showTimerStart && (
+                        <div className="timer-start-control">
+                          <span>
+                            {activeItemTimer && !activeItemTimer.isComplete
+                              ? `⏱残り ${formatTimerSeconds(activeItemTimer.remainingSeconds)}`
+                              : pausedTimer
+                              ? `⏱残り ${formatTimerSeconds(pausedTimer.remainingSeconds)}`
+                              : `⏱${formatTimerMinutes(item.timerMinutes ?? 0)}`}
+                          </span>
+                          <button
+                            onClick={() => {
+                              if (activeItemTimer?.isRunning) {
+                                pauseActiveTimer();
+                                return;
+                              }
+
+                              if (activeItemTimer && !activeItemTimer.isComplete) {
+                                resumeActiveTimer();
+                                return;
+                              }
+
+                              startItemTimer(item);
+                            }}
+                            type="button"
+                          >
+                            {activeItemTimer?.isRunning ? '⏸' : '▶'}
+                          </button>
+                        </div>
+                      )}
+                      {canConfigureTimer && (
+                        <div className="timer-setting-control">
+                          <button
+                            aria-label={`${item.label}のタイマーを設定`}
+                            className="timer-settings-toggle"
+                            onClick={() =>
+                              setTimerSettingItemId((currentId) =>
+                                currentId === item.id ? null : item.id,
+                              )
+                            }
+                            type="button"
+                          >
+                            ⏱
+                          </button>
+                          {timerSettingItemId === item.id && (
+                            <div className="timer-setting-menu">
+                              <select
+                                aria-label={`${item.label}のタイマー時間`}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+
+                                  if (nextValue === 'none') {
+                                    updateItemTimerMinutes(section.id, item.id);
+                                    return;
+                                  }
+
+                                  if (nextValue === 'custom') {
+                                    updateItemTimerMinutes(
+                                      section.id,
+                                      item.id,
+                                      item.timerMinutes && !timerPresetMinutes.includes(item.timerMinutes)
+                                        ? item.timerMinutes
+                                        : 1,
+                                    );
+                                    return;
+                                  }
+
+                                  updateItemTimerMinutes(
+                                    section.id,
+                                    item.id,
+                                    Number(nextValue),
+                                  );
+                                }}
+                                value={getTimerSelectValue(item.timerMinutes)}
+                              >
+                                <option value="none">タイマーなし</option>
+                                {timerPresetMinutes.map((minutes) => (
+                                  <option key={minutes} value={minutes}>
+                                    {minutes}分
+                                  </option>
+                                ))}
+                                <option value="custom">自由入力</option>
+                              </select>
+                              {getTimerSelectValue(item.timerMinutes) === 'custom' && (
+                                <input
+                                  aria-label={`${item.label}のタイマー自由入力`}
+                                  min="0.01"
+                                  onChange={(event) => {
+                                    const nextMinutes = Number(event.target.value);
+
+                                    updateItemTimerMinutes(
+                                      section.id,
+                                      item.id,
+                                      Number.isFinite(nextMinutes) && nextMinutes > 0
+                                        ? nextMinutes
+                                        : undefined,
+                                    );
+                                  }}
+                                  step="0.01"
+                                  type="number"
+                                  value={item.timerMinutes ?? ''}
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {canConfigureDifficulty && (
+                        <label className="difficulty-setting-control">
+                          <span>★</span>
+                          <select
+                            aria-label={`${item.label}の難易度`}
+                            onChange={(event) => {
+                              const nextDifficulty = Number(event.target.value);
+
+                              updateItemDifficulty(
+                                section.id,
+                                item.id,
+                                nextDifficulty > 0 ? nextDifficulty : undefined,
+                              );
+                            }}
+                            value={item.difficulty ?? 0}
+                          >
+                            <option value={0}>未設定</option>
+                            {[1, 2, 3, 4, 5].map((difficulty) => (
+                              <option key={difficulty} value={difficulty}>
+                                {formatDifficulty(difficulty)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       {!isFixedItem && canEditSection && (
                         <button
                           aria-label={`${item.label}を削除`}
@@ -2050,6 +2662,119 @@ function App() {
                               <span className="fixed-time-display">{item.time}</span>
                             )}
                           </span>
+                          {item.difficulty && !isHistoryEditMode && (
+                            <span className="difficulty-badge">
+                              {formatDifficulty(item.difficulty)}
+                            </span>
+                          )}
+                          {item.timerMinutes && !isHistoryEditMode && (
+                            <span className="timer-badge">
+                              ⏱{formatTimerMinutes(item.timerMinutes)}
+                            </span>
+                          )}
+                          {isHistoryEditMode && (
+                            <label className="difficulty-setting-control">
+                              <span>★</span>
+                              <select
+                                aria-label={`${item.label}の難易度`}
+                                onChange={(event) => {
+                                  const nextDifficulty = Number(event.target.value);
+
+                                  updateItemDifficulty(
+                                    section.id,
+                                    item.id,
+                                    nextDifficulty > 0 ? nextDifficulty : undefined,
+                                  );
+                                }}
+                                value={item.difficulty ?? 0}
+                              >
+                                <option value={0}>未設定</option>
+                                {[1, 2, 3, 4, 5].map((difficulty) => (
+                                  <option key={difficulty} value={difficulty}>
+                                    {formatDifficulty(difficulty)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {isHistoryEditMode && (
+                            <div className="timer-setting-control">
+                              <button
+                                aria-label={`${item.label}のタイマーを設定`}
+                                className="timer-settings-toggle"
+                                onClick={() =>
+                                  setTimerSettingItemId((currentId) =>
+                                    currentId === item.id ? null : item.id,
+                                  )
+                                }
+                                type="button"
+                              >
+                                ⏱
+                              </button>
+                              {timerSettingItemId === item.id && (
+                                <div className="timer-setting-menu">
+                                  <select
+                                    aria-label={`${item.label}のタイマー時間`}
+                                    onChange={(event) => {
+                                      const nextValue = event.target.value;
+
+                                      if (nextValue === 'none') {
+                                        updateItemTimerMinutes(section.id, item.id);
+                                        return;
+                                      }
+
+                                      if (nextValue === 'custom') {
+                                        updateItemTimerMinutes(
+                                          section.id,
+                                          item.id,
+                                          item.timerMinutes &&
+                                            !timerPresetMinutes.includes(item.timerMinutes)
+                                            ? item.timerMinutes
+                                            : 1,
+                                        );
+                                        return;
+                                      }
+
+                                      updateItemTimerMinutes(
+                                        section.id,
+                                        item.id,
+                                        Number(nextValue),
+                                      );
+                                    }}
+                                    value={getTimerSelectValue(item.timerMinutes)}
+                                  >
+                                    <option value="none">タイマーなし</option>
+                                    {timerPresetMinutes.map((minutes) => (
+                                      <option key={minutes} value={minutes}>
+                                        {minutes}分
+                                      </option>
+                                    ))}
+                                    <option value="custom">自由入力</option>
+                                  </select>
+                                  {getTimerSelectValue(item.timerMinutes) === 'custom' && (
+                                    <input
+                                      aria-label={`${item.label}のタイマー自由入力`}
+                                      min="0.01"
+                                      onChange={(event) => {
+                                        const nextMinutes = Number(event.target.value);
+
+                                        updateItemTimerMinutes(
+                                          section.id,
+                                          item.id,
+                                          Number.isFinite(nextMinutes) && nextMinutes > 0
+                                            ? nextMinutes
+                                            : undefined,
+                                        );
+                                      }}
+                                      step="0.01"
+                                      type="number"
+                                      value={item.timerMinutes ?? ''}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {!isFixedItem && isHistoryEditMode && (
                             <button
                               aria-label={`${item.label}を削除`}
