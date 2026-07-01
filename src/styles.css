@@ -32,7 +32,7 @@ select {
 
 .app {
   min-height: 100vh;
-  padding: 12px 10px 92px;
+  padding: 12px 10px calc(116px + env(safe-area-inset-bottom));
   background:
     linear-gradient(180deg, #e8fff4 0%, #f7fbf4 38%),
     #f6f7f4;
@@ -168,8 +168,6 @@ h1 {
 .routine-name input:focus-visible,
 .fixed-time-input:focus-visible,
 .routine-check input:focus-visible,
-.add-form input:focus-visible,
-.add-form button:focus-visible,
 .dialog-actions button:focus-visible {
   outline: 3px solid #9bd7b6;
   outline-offset: 2px;
@@ -449,6 +447,7 @@ h1 {
 }
 
 .calendar-day {
+  position: relative;
   display: grid;
   align-content: center;
   gap: 2px;
@@ -461,9 +460,27 @@ h1 {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 52%);
 }
 
+.calendar-day[data-routine-kind='holiday'] {
+  border-color: #c4c9f2;
+  background: rgb(236 239 255 / 76%);
+}
+
+.calendar-day[data-routine-kind='custom'] {
+  border-color: #e0b55a;
+  background: rgb(255 246 214 / 86%);
+}
+
 .calendar-day[data-rate-level='ready'] {
   background: rgb(255 255 255 / 50%);
   color: #8a7c68;
+}
+
+.calendar-day[data-rate-level='ready'][data-routine-kind='holiday'] {
+  background: rgb(236 239 255 / 70%);
+}
+
+.calendar-day[data-rate-level='ready'][data-routine-kind='custom'] {
+  background: rgb(255 246 214 / 84%);
 }
 
 .calendar-day[data-rate-level='start'] {
@@ -536,6 +553,17 @@ h1 {
   font-weight: 900;
 }
 
+.calendar-day[data-routine-kind='holiday']::before {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  color: #666db0;
+  content: "休";
+  font-size: 0.62rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .calendar-day[data-selected='true'] {
   outline: 3px solid #7b4d00;
   outline-offset: 1px;
@@ -544,6 +572,14 @@ h1 {
 .calendar-day-number {
   font-size: 0.76rem;
   font-weight: 800;
+  line-height: 1;
+}
+
+.calendar-day-kind {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 0.68rem;
   line-height: 1;
 }
 
@@ -574,6 +610,48 @@ h1 {
   color: #745913;
   font-size: 0.9rem;
   font-weight: 900;
+}
+
+.history-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-routine-kind {
+  display: inline-flex;
+  margin: 5px 0 0;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgb(255 255 255 / 62%);
+  color: #715514;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.history-routine-kind[data-routine-kind='holiday'] {
+  background: #ecefff;
+  color: #51599a;
+}
+
+.history-routine-kind[data-routine-kind='custom'] {
+  background: #fff0bd;
+  color: #895d00;
+}
+
+.history-edit-button {
+  min-width: 98px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: #e2bd63;
+  background: #fff5d8;
+  color: #895d00;
+  box-shadow: none;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .history-detail .result-panel {
@@ -607,6 +685,13 @@ h1 {
   line-height: 1.2;
 }
 
+.history-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .history-routine-items {
   display: grid;
   gap: 3px;
@@ -627,12 +712,16 @@ h1 {
   color: #69746f;
 }
 
-.history-routine-item input {
+.history-routine-item input[type='checkbox'] {
   width: 17px;
   height: 17px;
   margin: 0;
   accent-color: #c98a00;
   cursor: pointer;
+}
+
+.history-routine-item[data-dragging='true'] {
+  opacity: 0.55;
 }
 
 .history-routine-name {
@@ -647,7 +736,32 @@ h1 {
   line-height: 1.35;
 }
 
-.history-routine-item[data-checked='true'] .history-routine-name > span:first-child {
+.history-routine-name-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: text;
+  text-align: left;
+}
+
+.history-routine-name-button:disabled {
+  cursor: default;
+}
+
+.history-routine-name input[type='text'] {
+  width: min(100%, 220px);
+  min-height: 30px;
+  border: 1px solid #c8b16b;
+  border-radius: 6px;
+  padding: 0 7px;
+  background: #ffffff;
+  color: #202623;
+}
+
+.history-routine-item[data-checked='true'] .history-routine-name-button {
   text-decoration: line-through;
   text-decoration-thickness: 2px;
   text-decoration-color: #c7a95e;
@@ -699,7 +813,7 @@ h1 {
 .bottom-tab-nav {
   position: fixed;
   right: 10px;
-  bottom: 10px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
   left: 10px;
   z-index: 20;
   display: grid;
@@ -987,6 +1101,14 @@ h1 {
   padding-bottom: 0;
 }
 
+.routine-section[data-bonus='true'] {
+  margin-top: 4px;
+  border-bottom: 0;
+  border-radius: 8px;
+  padding: 12px 9px 10px;
+  background: #fffaf0;
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -1009,6 +1131,14 @@ h1 {
 .section-header h2 span {
   font-size: 1rem;
   line-height: 1;
+}
+
+.section-note {
+  margin: 3px 0 0 28px;
+  color: #9a6a12;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
 .section-actions {
@@ -1034,6 +1164,21 @@ h1 {
   white-space: nowrap;
 }
 
+.section-add-button {
+  width: 100%;
+  margin-top: 7px;
+  border: 1px dashed #a9d6bd;
+  background: #f2fbf6;
+  color: #1f7a5a;
+  font-size: 0.86rem;
+}
+
+.routine-section[data-bonus='true'] .section-add-button {
+  border-color: #e2bd63;
+  background: #fff5d8;
+  color: #895d00;
+}
+
 .sort-button {
   min-height: 30px;
   padding: 0 9px;
@@ -1052,49 +1197,12 @@ h1 {
   white-space: nowrap;
 }
 
-.add-form {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 8px;
-  border: 1px solid #cfe4d7;
-  border-radius: 8px;
-  background: #f5fbf7;
-}
-
-.add-form input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid #c8d6cf;
-  border-radius: 8px;
-  padding: 0 12px;
-  background: #ffffff;
-  color: #202623;
-}
-
-.add-form-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.add-form-actions button,
 .dialog-actions button {
   min-height: 34px;
   border: 0;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 700;
-}
-
-.add-form-actions button:first-child {
-  background: #1f7a5a;
-  color: #ffffff;
-}
-
-.add-form-actions button:last-child {
-  background: #e8ece8;
-  color: #53615a;
 }
 
 .routine-items {
@@ -1311,7 +1419,7 @@ h1 {
 
 @media (max-width: 640px) {
   .app {
-    padding: 10px 8px;
+    padding: 10px 8px calc(116px + env(safe-area-inset-bottom));
   }
 
   .app-header {
@@ -1364,7 +1472,6 @@ h1 {
     min-height: 30px;
   }
 
-  .add-form-actions,
   .dialog-actions {
     grid-template-columns: 1fr;
   }

@@ -1,8 +1,9 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type PageName = 'today' | 'history' | 'achievements' | 'settings';
+type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
   | 'monday'
@@ -42,6 +43,7 @@ type RoutineTemplateSettings = {
 type PendingDelete = {
   id: string;
   label: string;
+  sectionId: string;
 };
 
 type ResolvedEditTarget =
@@ -630,7 +632,16 @@ const getTargetLabel = (target: ResolvedEditTarget) => {
 const getTemplateLabel = (template: TemplateKind) =>
   template === 'normal' ? 'ノーマル' : '休日';
 
+const getRoutineKindLabel = (kind: RoutineKind) => {
+  if (kind === 'custom') {
+    return '個別カスタム';
+  }
+
+  return kind === 'normal' ? 'ノーマルルーティン' : '休日ルーティン';
+};
+
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
+const bonusSectionId = 'advanced';
 
 const sectionOrderByStartSection: Record<StartSection, string[]> = {
   morning: ['morning', 'noon', 'evening', 'night', 'advanced'],
@@ -692,7 +703,9 @@ const calculateCompletionStats = (
   sections: RoutineSection[],
   checks: Record<string, boolean>,
 ) => {
-  const routineItems = sections.flatMap((section) => section.items);
+  const routineItems = sections
+    .filter((section) => section.id !== bonusSectionId)
+    .flatMap((section) => section.items);
   const totalCount = routineItems.length;
 
   if (totalCount === 0) {
@@ -769,9 +782,8 @@ function App() {
     loadRhythmSettings(),
   );
   const [editTargetKey, setEditTargetKey] = useState<EditTargetKey>('normal');
-  const [draftSectionId, setDraftSectionId] = useState<string | null>(null);
-  const [draftLabel, setDraftLabel] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
+  const [isHistoryEditMode, setIsHistoryEditMode] = useState(false);
   const [editModeStartSections, setEditModeStartSections] =
     useState<RoutineSection[] | null>(null);
   const [lastCopiedSections, setLastCopiedSections] =
@@ -824,6 +836,10 @@ function App() {
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const historyDateTemplate = getBaseTemplateForDate(templateSettings, historySelectedDate);
+  const historyRoutineKind: RoutineKind = dateOverrides[historySelectedDateKey]
+    ? 'custom'
+    : historyDateTemplate;
+  const historyRoutineKindLabel = getRoutineKindLabel(historyRoutineKind);
   const historyDateTarget = resolveDateTarget(
     templateSettings,
     dateOverrides,
@@ -831,6 +847,11 @@ function App() {
     historySelectedDate,
     todayKey,
   );
+  const historyDateEditTarget: ResolvedEditTarget = {
+    kind: 'date',
+    dateKey: historySelectedDateKey,
+    baseTemplate: historyDateTemplate,
+  };
   const historySections = removeFixedRoutineItems(getSectionsForTarget(
     templateSettings,
     dateOverrides,
@@ -856,6 +877,7 @@ function App() {
 
       const dateKey = getDateKey(date);
       const baseTemplate = getBaseTemplateForDate(templateSettings, date);
+      const routineKind: RoutineKind = dateOverrides[dateKey] ? 'custom' : baseTemplate;
       const target = resolveDateTarget(
         templateSettings,
         dateOverrides,
@@ -884,6 +906,7 @@ function App() {
         totalCount: stats.totalCount,
         isToday: dateKey === todayKey,
         isSelected: dateKey === historySelectedDateKey,
+        routineKind,
       };
     })
   ), [
@@ -964,11 +987,26 @@ function App() {
         target,
         todayKey,
       ));
+      const fallbackSections = removeFixedRoutineItems(
+        (
+          isDateKeyBefore(target.dateKey, todayKey)
+            ? dateSnapshots[target.dateKey]
+            : undefined
+        ) ?? templateSettings.templates[target.baseTemplate],
+      );
+      const nextSections = removeFixedRoutineItems(updater(currentSections));
 
-      setDateOverrides((currentOverrides) => ({
-        ...currentOverrides,
-        [target.dateKey]: removeFixedRoutineItems(updater(currentSections)),
-      }));
+      setDateOverrides((currentOverrides) => {
+        const nextOverrides = { ...currentOverrides };
+
+        if (areSectionsEqual(nextSections, fallbackSections)) {
+          delete nextOverrides[target.dateKey];
+        } else {
+          nextOverrides[target.dateKey] = nextSections;
+        }
+
+        return nextOverrides;
+      });
 
       return;
     }
@@ -984,6 +1022,18 @@ function App() {
         },
       };
     });
+  };
+
+  const getUpdateTargetForSection = (sectionId: string) => {
+    if (page === 'history') {
+      return historyDateEditTarget;
+    }
+
+    if (page === 'today' && sectionId === bonusSectionId) {
+      return selectedDateEditTarget;
+    }
+
+    return displayedTarget;
   };
 
   const toggleItem = (id: string) => {
@@ -1021,17 +1071,12 @@ function App() {
     });
   };
 
-  const openAddForm = (sectionId: string) => {
-    setDraftSectionId(sectionId);
-    setDraftLabel('');
-  };
-
   const startEditingItem = (item: RoutineItem) => {
     setEditingItemId(item.id);
     setEditingLabel(item.label);
   };
 
-  const finishEditingItem = (item: RoutineItem) => {
+  const finishEditingItem = (item: RoutineItem, sectionId: string) => {
     if (editingItemId !== item.id) {
       return;
     }
@@ -1039,7 +1084,7 @@ function App() {
     const nextLabel = editingLabel.trim();
 
     if (nextLabel && nextLabel !== item.label) {
-      updateSectionsForTarget(displayedTarget, (currentSections) =>
+      updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
         currentSections.map((section) => ({
           ...section,
           items: section.items.map((routineItem) =>
@@ -1064,7 +1109,7 @@ function App() {
       return;
     }
 
-    updateSectionsForTarget(displayedTarget, (currentSections) =>
+    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
       currentSections.map((section) => {
         if (section.id !== sectionId) {
           return section;
@@ -1131,23 +1176,17 @@ function App() {
     setIsEditMode(false);
     setEditModeStartSections(null);
     setLastCopiedSections(null);
-    setDraftSectionId(null);
     setSortingSectionId(null);
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
   };
 
-  const addRoutine = (event: FormEvent<HTMLFormElement>, sectionId: string) => {
-    event.preventDefault();
+  const addRoutine = (sectionId: string) => {
+    const newItemId = createRoutineId(sectionId);
+    const newItemLabel = '新しいルーティン';
 
-    const trimmedLabel = draftLabel.trim();
-
-    if (!trimmedLabel) {
-      return;
-    }
-
-    updateSectionsForTarget(displayedTarget, (currentSections) =>
+    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
       currentSections.map((section) => {
         if (section.id !== sectionId) {
           return section;
@@ -1163,8 +1202,8 @@ function App() {
           items: [
             ...section.items,
             {
-              id: createRoutineId(section.id),
-              label: trimmedLabel,
+              id: newItemId,
+              label: newItemLabel,
               order: nextOrder,
               source: 'user',
               createdAt: new Date().toISOString(),
@@ -1173,8 +1212,9 @@ function App() {
         };
       }),
     );
-    setDraftLabel('');
-    setDraftSectionId(null);
+    setSortingSectionId(null);
+    setEditingItemId(newItemId);
+    setEditingLabel(newItemLabel);
   };
 
   const deleteRoutine = () => {
@@ -1182,7 +1222,7 @@ function App() {
       return;
     }
 
-    updateSectionsForTarget(displayedTarget, (currentSections) =>
+    updateSectionsForTarget(getUpdateTargetForSection(pendingDelete.sectionId), (currentSections) =>
       currentSections.map((section) => ({
         ...section,
         items: section.items.filter((item) => item.id !== pendingDelete.id),
@@ -1192,6 +1232,24 @@ function App() {
       const remainingChecks = { ...currentChecks };
 
       delete remainingChecks[pendingDelete.id];
+
+      return remainingChecks;
+    });
+    setHistoryCheckedItems((currentChecks) => {
+      const remainingChecks = { ...currentChecks };
+
+      delete remainingChecks[pendingDelete.id];
+
+      if (page === 'history') {
+        localStorage.setItem(
+          getChecksStorageKey(historySelectedDate),
+          JSON.stringify(remainingChecks),
+        );
+      }
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setCheckedItems(remainingChecks);
+      }
 
       return remainingChecks;
     });
@@ -1364,9 +1422,9 @@ function App() {
 
   const resetEditUiState = () => {
     setIsEditMode(false);
+    setIsHistoryEditMode(false);
     setEditModeStartSections(null);
     setLastCopiedSections(null);
-    setDraftSectionId(null);
     setSortingSectionId(null);
     setDraggedItemId(null);
     setEditingItemId(null);
@@ -1516,13 +1574,27 @@ function App() {
               )}
             </div>
           )}
-          {displaySections.map((section) => (
-            <section className="routine-section" key={section.id}>
+          {displaySections.map((section) => {
+            const isBonusSection = section.id === bonusSectionId;
+            const canEditSection =
+              canEditRoutines || (page === 'today' && isBonusSection);
+
+            return (
+            <section
+              className="routine-section"
+              data-bonus={isBonusSection ? 'true' : 'false'}
+              key={section.id}
+            >
               <div className="section-header">
-                <h2>
-                  <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
-                  {section.title}
-                </h2>
+                <div>
+                  <h2>
+                    <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
+                    {section.title}
+                  </h2>
+                  {isBonusSection && (
+                    <p className="section-note">追加でやったこと</p>
+                  )}
+                </div>
                 {canEditRoutines && (
                   <div className="section-actions">
                     <button
@@ -1532,36 +1604,9 @@ function App() {
                     >
                       {sortingSectionId === section.id ? '完了' : '並び替え'}
                     </button>
-                    <button
-                      className="add-button"
-                      onClick={() => openAddForm(section.id)}
-                      type="button"
-                    >
-                      ＋追加
-                    </button>
                   </div>
                 )}
               </div>
-              {canEditRoutines && draftSectionId === section.id && (
-                <form className="add-form" onSubmit={(event) => addRoutine(event, section.id)}>
-                  <input
-                    autoFocus
-                    onChange={(event) => setDraftLabel(event.target.value)}
-                    placeholder="ルーティン名"
-                    type="text"
-                    value={draftLabel}
-                  />
-                  <div className="add-form-actions">
-                    <button type="submit">追加</button>
-                    <button
-                      onClick={() => setDraftSectionId(null)}
-                      type="button"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </form>
-              )}
               <div className="routine-items">
                 {section.items.map((item) => {
                   const inputId = `routine-${item.id}`;
@@ -1656,10 +1701,10 @@ function App() {
                         />
                       </label>
                       <div className="routine-name">
-                        {isEditing && !isFixedItem && canEditRoutines ? (
+                        {isEditing && !isFixedItem && canEditSection ? (
                           <input
                             autoFocus
-                            onBlur={() => finishEditingItem(item)}
+                            onBlur={() => finishEditingItem(item, section.id)}
                             onChange={(event) => setEditingLabel(event.target.value)}
                             onKeyDown={(event) => {
                               if (event.key === 'Enter') {
@@ -1692,9 +1737,9 @@ function App() {
                         ) : (
                           <button
                             className="routine-name-button"
-                            disabled={isFixedItem || !canEditRoutines}
+                            disabled={isFixedItem || !canEditSection}
                             onClick={() => {
-                              if (!isFixedItem && canEditRoutines) {
+                              if (!isFixedItem && canEditSection) {
                                 startEditingItem(item);
                               }
                             }}
@@ -1704,11 +1749,17 @@ function App() {
                           </button>
                         )}
                       </div>
-                      {!isFixedItem && canEditRoutines && (
+                      {!isFixedItem && canEditSection && (
                         <button
                           aria-label={`${item.label}を削除`}
                           className="delete-button"
-                          onClick={() => setPendingDelete({ id: item.id, label: item.label })}
+                          onClick={() =>
+                            setPendingDelete({
+                              id: item.id,
+                              label: item.label,
+                              sectionId: section.id,
+                            })
+                          }
                           type="button"
                         >
                           削除
@@ -1718,8 +1769,18 @@ function App() {
                   );
                 })}
               </div>
+              {canEditSection && (
+                <button
+                  className="add-button section-add-button"
+                  onClick={() => addRoutine(section.id)}
+                  type="button"
+                >
+                  ＋追加
+                </button>
+              )}
             </section>
-          ))}
+            );
+          })}
           {page === 'today' && !isEditMode && (
             <div className="quest-edit-action">
               <button
@@ -1782,13 +1843,26 @@ function App() {
                     aria-label={`${day.dateKey}のチェック表を表示`}
                     className="calendar-day"
                     data-rate-level={day.rankLevel}
+                    data-routine-kind={day.routineKind}
                     data-selected={day.isSelected ? 'true' : 'false'}
                     data-today={day.isToday ? 'true' : 'false'}
                     key={day.dateKey}
-                    onClick={() => setHistorySelectedDate(day.date)}
+                    onClick={() => {
+                      setHistorySelectedDate(day.date);
+                      setIsHistoryEditMode(false);
+                      setSortingSectionId(null);
+                      setDraggedItemId(null);
+                      setEditingItemId(null);
+                      setEditingLabel('');
+                    }}
                     type="button"
                   >
                     <span className="calendar-day-number">{day.day}</span>
+                    {day.routineKind === 'custom' && (
+                      <span className="calendar-day-kind" aria-label="個別カスタム">
+                        ✨
+                      </span>
+                    )}
                     <span className="calendar-day-rate">
                       {day.rate === null ? '' : `${day.rate}%`}
                     </span>
@@ -1800,7 +1874,27 @@ function App() {
               })}
             </div>
             <div className="history-detail">
-              <p className="history-date-label">📅 {historyDateLabel}</p>
+              <div className="history-detail-heading">
+                <div>
+                  <p className="history-date-label">📅 {historyDateLabel}</p>
+                  <p className="history-routine-kind" data-routine-kind={historyRoutineKind}>
+                    {historyRoutineKindLabel}
+                  </p>
+                </div>
+                <button
+                  className="edit-mode-button history-edit-button"
+                  onClick={() => {
+                    setIsHistoryEditMode((current) => !current);
+                    setSortingSectionId(null);
+                    setDraggedItemId(null);
+                    setEditingItemId(null);
+                    setEditingLabel('');
+                  }}
+                  type="button"
+                >
+                  {isHistoryEditMode ? '編集を終了' : '編集モード'}
+                </button>
+              </div>
               <section
                 className="result-panel"
                 data-rank-level={historyDateRank.level}
@@ -1826,19 +1920,93 @@ function App() {
                 )}
               </section>
               <div className="history-routine-list">
-                {historyDisplaySections.map((section) => (
-                  <section className="history-routine-section" key={section.id}>
-                    <h3>
-                      <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
-                      {section.title}
-                    </h3>
+                {historyDisplaySections.map((section) => {
+                  const isBonusSection = section.id === bonusSectionId;
+
+                  return (
+                  <section
+                    className="history-routine-section"
+                    data-bonus={isBonusSection ? 'true' : 'false'}
+                    key={section.id}
+                  >
+                    <div className="history-section-header">
+                      <div>
+                        <h3>
+                          <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
+                          {section.title}
+                        </h3>
+                        {isBonusSection && (
+                          <p className="section-note">ボーナスログ</p>
+                        )}
+                      </div>
+                      {isHistoryEditMode && (
+                        <button
+                          className="sort-button"
+                          onClick={() => toggleSortingSection(section.id)}
+                          type="button"
+                        >
+                          {sortingSectionId === section.id ? '完了' : '並び替え'}
+                        </button>
+                      )}
+                    </div>
                     <div className="history-routine-items">
-                      {section.items.map((item) => (
+                      {section.items.map((item) => {
+                        const isEditing = editingItemId === item.id;
+                        const isFixedItem = fixedRoutineIds.has(item.id);
+
+                        return (
                         <div
                           className="history-routine-item"
                           data-checked={historyCheckedItems[item.id] ? 'true' : 'false'}
+                          data-dragging={draggedItemId === item.id ? 'true' : 'false'}
+                          data-routine-id={item.id}
+                          data-section-id={section.id}
+                          draggable={
+                            isHistoryEditMode &&
+                            sortingSectionId === section.id &&
+                            !isFixedItem
+                          }
                           key={item.id}
+                          onDragEnd={() => setDraggedItemId(null)}
+                          onDragOver={(event) => {
+                            if (
+                              isHistoryEditMode &&
+                              sortingSectionId === section.id &&
+                              !isFixedItem
+                            ) {
+                              event.preventDefault();
+                            }
+                          }}
+                          onDragStart={(event) => {
+                            if (isFixedItem) {
+                              return;
+                            }
+
+                            setDraggedItemId(item.id);
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', item.id);
+                          }}
+                          onDrop={(event) => {
+                            if (isFixedItem) {
+                              return;
+                            }
+
+                            event.preventDefault();
+                            const draggedId =
+                              draggedItemId || event.dataTransfer.getData('text/plain');
+
+                            if (sortingSectionId === section.id && draggedId) {
+                              reorderRoutineItem(section.id, draggedId, item.id);
+                            }
+
+                            setDraggedItemId(null);
+                          }}
                         >
+                          {isHistoryEditMode && sortingSectionId === section.id && !isFixedItem && (
+                            <span className="drag-handle" aria-hidden="true">
+                              ☰
+                            </span>
+                          )}
                           <input
                             aria-label={`${item.label}のチェック状態`}
                             checked={Boolean(historyCheckedItems[item.id])}
@@ -1846,16 +2014,74 @@ function App() {
                             type="checkbox"
                           />
                           <span className="history-routine-name">
-                            <span>{item.label}</span>
+                            {isEditing && !isFixedItem && isHistoryEditMode ? (
+                              <input
+                                autoFocus
+                                onBlur={() => finishEditingItem(item, section.id)}
+                                onChange={(event) => setEditingLabel(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.currentTarget.blur();
+                                  }
+
+                                  if (event.key === 'Escape') {
+                                    setEditingItemId(null);
+                                    setEditingLabel('');
+                                  }
+                                }}
+                                type="text"
+                                value={editingLabel}
+                              />
+                            ) : (
+                              <button
+                                className="history-routine-name-button"
+                                disabled={isFixedItem || !isHistoryEditMode}
+                                onClick={() => {
+                                  if (!isFixedItem && isHistoryEditMode) {
+                                    startEditingItem(item);
+                                  }
+                                }}
+                                type="button"
+                              >
+                                {item.label}
+                              </button>
+                            )}
                             {item.time && (
                               <span className="fixed-time-display">{item.time}</span>
                             )}
                           </span>
+                          {!isFixedItem && isHistoryEditMode && (
+                            <button
+                              aria-label={`${item.label}を削除`}
+                              className="delete-button"
+                              onClick={() =>
+                                setPendingDelete({
+                                  id: item.id,
+                                  label: item.label,
+                                  sectionId: section.id,
+                                })
+                              }
+                              type="button"
+                            >
+                              削除
+                            </button>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
+                    {isHistoryEditMode && (
+                      <button
+                        className="add-button section-add-button"
+                        onClick={() => addRoutine(section.id)}
+                        type="button"
+                      >
+                        ＋追加
+                      </button>
+                    )}
                   </section>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </section>
