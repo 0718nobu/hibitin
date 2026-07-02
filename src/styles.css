@@ -88,6 +88,34 @@ h1 {
   font-weight: 800;
 }
 
+.quest-date-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 4px;
+  border: 1px solid #cfe7d8;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.quest-date-switch button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #5f7469;
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.quest-date-switch button[data-active='true'] {
+  background: #1f7a5a;
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgb(0 128 82 / 16%);
+}
+
 .date-panel {
   margin-top: 10px;
   padding: 8px;
@@ -158,6 +186,8 @@ h1 {
 .default-template-button:focus-visible,
 .edit-mode-button:focus-visible,
 .end-edit-button:focus-visible,
+.quest-date-switch button:focus-visible,
+.daily-memo textarea:focus-visible,
 .backup-actions button:focus-visible,
 .month-actions button:focus-visible,
 .calendar-day:focus-visible,
@@ -535,8 +565,8 @@ h1 {
 }
 
 .calendar-day[data-routine-kind='holiday'] {
-  border-color: #c4c9f2;
-  background: rgb(236 239 255 / 76%);
+  border-color: #f0a7a7;
+  background: rgb(255 235 238 / 80%);
 }
 
 .calendar-day[data-routine-kind='custom'] {
@@ -550,7 +580,8 @@ h1 {
 }
 
 .calendar-day[data-rate-level='ready'][data-routine-kind='holiday'] {
-  background: rgb(236 239 255 / 70%);
+  border-color: #efb4b4;
+  background: rgb(255 238 240 / 82%);
 }
 
 .calendar-day[data-rate-level='ready'][data-routine-kind='custom'] {
@@ -563,10 +594,20 @@ h1 {
   color: #2b8a5e;
 }
 
+.calendar-day[data-rate-level='start'][data-routine-kind='holiday'] {
+  border-color: #efb3aa;
+  background: linear-gradient(180deg, #fff0f2, #f0fbf4);
+}
+
 .calendar-day[data-rate-level='good'] {
   border-color: #9ee3bd;
   background: #dff8e9;
   color: #007a55;
+}
+
+.calendar-day[data-rate-level='good'][data-routine-kind='holiday'] {
+  border-color: #efa7a7;
+  background: linear-gradient(180deg, #ffecef, #dff8e9);
 }
 
 .calendar-day[data-rate-level='great'] {
@@ -575,10 +616,20 @@ h1 {
   color: #c75d00;
 }
 
+.calendar-day[data-rate-level='great'][data-routine-kind='holiday'] {
+  border-color: #ee9f94;
+  background: linear-gradient(180deg, #ffe9ec, #fff0df);
+}
+
 .calendar-day[data-rate-level='excellent'] {
   border-color: #e7d96b;
   background: #fff9c8;
   color: #7d7000;
+}
+
+.calendar-day[data-rate-level='excellent'][data-routine-kind='holiday'] {
+  border-color: #efa7a7;
+  background: linear-gradient(180deg, #ffecef, #fff9c8);
 }
 
 .calendar-day[data-rate-level='perfect'] {
@@ -625,7 +676,7 @@ h1 {
   position: absolute;
   top: 3px;
   left: 4px;
-  color: #666db0;
+  color: #c05a5f;
   content: "休";
   font-size: 0.62rem;
   font-weight: 900;
@@ -633,8 +684,15 @@ h1 {
 }
 
 .calendar-day[data-selected='true'] {
-  outline: 3px solid #7b4d00;
+  outline: 3px solid #c47a2c;
   outline-offset: 1px;
+}
+
+.calendar-day[data-selected='true'][data-routine-kind='holiday'] {
+  outline-color: #d96b72;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 72%) inset,
+    0 7px 16px rgb(217 107 114 / 18%);
 }
 
 .calendar-day-number {
@@ -700,8 +758,8 @@ h1 {
 }
 
 .history-routine-kind[data-routine-kind='holiday'] {
-  background: #ecefff;
-  color: #51599a;
+  background: #ffecef;
+  color: #b14d57;
 }
 
 .history-routine-kind[data-routine-kind='custom'] {
@@ -1271,8 +1329,8 @@ h1 {
 }
 
 .weekday-chips button[data-template='holiday'][data-assigned='true'] {
-  background: #eef0dd;
-  color: #58612a;
+  background: #ffe3e7;
+  color: #a94650;
 }
 
 .start-section-options {
@@ -1379,6 +1437,41 @@ h1 {
   box-shadow: none;
   font-size: 0.78rem;
   white-space: nowrap;
+}
+
+.daily-memo {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e3dfc8;
+  border-radius: 8px;
+  background: #fffdf5;
+  box-shadow: 0 8px 22px rgb(122 93 18 / 8%);
+}
+
+.daily-memo label {
+  color: #715514;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.daily-memo textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  border: 1px solid #ded7bc;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+  color: #202623;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.daily-memo textarea::placeholder {
+  color: #9e9b88;
 }
 
 .routine-context {

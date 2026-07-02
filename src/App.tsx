@@ -73,19 +73,32 @@ type BackupDownload = {
   fileName: string;
 };
 
+type TimerStatus = 'running' | 'paused' | 'finished';
+
 type ActiveTimer = {
   itemId: string;
   label: string;
+  durationSeconds: number;
   totalSeconds: number;
   remainingSeconds: number;
+  startedAt: string | null;
+  endsAt: string | null;
+  status: TimerStatus;
   isRunning: boolean;
   isComplete: boolean;
 };
 
 type PausedTimer = {
   label: string;
+  durationSeconds: number;
   totalSeconds: number;
   remainingSeconds: number;
+  status: 'paused';
+};
+
+type StoredTimerState = {
+  activeTimer: ActiveTimer | null;
+  pausedTimers: Record<string, PausedTimer>;
 };
 
 type TimerNotificationPermission = NotificationPermission | 'unsupported';
@@ -111,6 +124,7 @@ const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
 const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
 const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
 const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
+const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 
@@ -570,6 +584,10 @@ const getDateKey = (date: Date) => {
 };
 
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
+const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
+
+const loadDailyMemo = (date: Date) =>
+  localStorage.getItem(getDailyMemoStorageKey(date)) ?? '';
 
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -833,7 +851,7 @@ const getCompletionRank = (rate: number | null) => {
   }
 
   if (rate >= 1) {
-    return { icon: '👟', label: 'FIRST STEP!', level: 'start' };
+    return { icon: '👟', label: 'START!', level: 'start' };
   }
 
   return { icon: '☕', label: 'READY?', level: 'ready' };
@@ -853,6 +871,137 @@ const formatTimerSeconds = (seconds: number) => {
   const restSeconds = safeSeconds % 60;
 
   return `${minutes}:${String(restSeconds).padStart(2, '0')}`;
+};
+
+const createRunningTimer = (
+  itemId: string,
+  label: string,
+  durationSeconds: number,
+  remainingSeconds: number,
+): ActiveTimer => {
+  const now = Date.now();
+
+  return {
+    itemId,
+    label,
+    durationSeconds,
+    totalSeconds: durationSeconds,
+    remainingSeconds,
+    startedAt: new Date(now).toISOString(),
+    endsAt: new Date(now + remainingSeconds * 1000).toISOString(),
+    status: 'running',
+    isRunning: true,
+    isComplete: false,
+  };
+};
+
+const normalizeActiveTimer = (
+  timer: ActiveTimer | null | undefined,
+  now = Date.now(),
+): ActiveTimer | null => {
+  if (!timer) {
+    return null;
+  }
+
+  const durationSeconds = timer.durationSeconds ?? timer.totalSeconds;
+  const totalSeconds = timer.totalSeconds ?? durationSeconds;
+
+  if (timer.status === 'running' && timer.endsAt) {
+    const remainingSeconds = Math.ceil((new Date(timer.endsAt).getTime() - now) / 1000);
+
+    if (remainingSeconds <= 0) {
+      return {
+        ...timer,
+        durationSeconds,
+        totalSeconds,
+        remainingSeconds: 0,
+        status: 'finished',
+        isRunning: false,
+        isComplete: true,
+      };
+    }
+
+    return {
+      ...timer,
+      durationSeconds,
+      totalSeconds,
+      remainingSeconds,
+      status: 'running',
+      isRunning: true,
+      isComplete: false,
+    };
+  }
+
+  if (timer.status === 'finished' || timer.isComplete) {
+    return {
+      ...timer,
+      durationSeconds,
+      totalSeconds,
+      remainingSeconds: 0,
+      status: 'finished',
+      isRunning: false,
+      isComplete: true,
+    };
+  }
+
+  return {
+    ...timer,
+    durationSeconds,
+    totalSeconds,
+    endsAt: null,
+    status: 'paused',
+    isRunning: false,
+    isComplete: false,
+  };
+};
+
+const normalizePausedTimers = (timers: Record<string, PausedTimer> | undefined) => {
+  if (!timers) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(timers)
+      .filter(([, timer]) => timer && timer.remainingSeconds > 0)
+      .map(([itemId, timer]) => {
+        const durationSeconds = timer.durationSeconds ?? timer.totalSeconds;
+
+        return [
+          itemId,
+          {
+            ...timer,
+            durationSeconds,
+            totalSeconds: timer.totalSeconds ?? durationSeconds,
+            status: 'paused' as const,
+          },
+        ];
+      }),
+  );
+};
+
+const loadStoredTimerState = (): StoredTimerState => {
+  const savedTimerState = localStorage.getItem(TIMER_STATE_STORAGE_KEY);
+
+  if (!savedTimerState) {
+    return {
+      activeTimer: null,
+      pausedTimers: {},
+    };
+  }
+
+  try {
+    const parsedTimerState = JSON.parse(savedTimerState) as Partial<StoredTimerState>;
+
+    return {
+      activeTimer: normalizeActiveTimer(parsedTimerState.activeTimer),
+      pausedTimers: normalizePausedTimers(parsedTimerState.pausedTimers),
+    };
+  } catch {
+    return {
+      activeTimer: null,
+      pausedTimers: {},
+    };
+  }
 };
 
 const getTimerSelectValue = (minutes?: number) => {
@@ -1075,9 +1224,19 @@ function App() {
   const today = useMemo(() => new Date(), []);
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
+  const initialTimerStateRef = useRef<StoredTimerState | null>(null);
+  const alertedFinishedTimerIdRef = useRef<string | null>(null);
+  const getInitialTimerState = () => {
+    if (!initialTimerStateRef.current) {
+      initialTimerStateRef.current = loadStoredTimerState();
+    }
+
+    return initialTimerStateRef.current;
+  };
   const todayKey = getDateKey(today);
+  const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
-  const [selectedDate] = useState(() => today);
+  const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState(() => today);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const selectedDateKey = getDateKey(selectedDate);
@@ -1086,6 +1245,7 @@ function App() {
   const historyDateLabel = questDateFormatter.format(historySelectedDate);
   const dailyMessage = getDailyMessage(selectedDateKey);
   const checksStorageKey = getChecksStorageKey(selectedDate);
+  const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const isToday = selectedDateKey === todayKey;
   const [templateSettings, setTemplateSettings] = useState<RoutineTemplateSettings>(() =>
     loadTemplateSettings(),
@@ -1112,8 +1272,12 @@ function App() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
-  const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
-  const [pausedTimers, setPausedTimers] = useState<Record<string, PausedTimer>>({});
+  const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(
+    () => getInitialTimerState().activeTimer,
+  );
+  const [pausedTimers, setPausedTimers] = useState<Record<string, PausedTimer>>(
+    () => getInitialTimerState().pausedTimers,
+  );
   const [timerAlertSilenced, setTimerAlertSilenced] = useState(false);
   const [notificationPermission, setNotificationPermission] =
     useState<TimerNotificationPermission>(() => {
@@ -1134,6 +1298,8 @@ function App() {
   );
   const [backupMessage, setBackupMessage] = useState('');
   const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
+  const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
+  const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -1320,6 +1486,11 @@ function App() {
   }, [selectedDate]);
 
   useEffect(() => {
+    setDailyMemo(loadDailyMemo(selectedDate));
+    setDailyMemoDateKey(selectedDateKey);
+  }, [selectedDate, selectedDateKey]);
+
+  useEffect(() => {
     setHistoryCheckedItems(loadCheckedItems(historySelectedDate));
   }, [historySelectedDate]);
 
@@ -1367,6 +1538,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(checksStorageKey, JSON.stringify(checkedItems));
   }, [checkedItems, checksStorageKey]);
+
+  useEffect(() => {
+    if (dailyMemoDateKey !== selectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(memoStorageKey, dailyMemo);
+  }, [dailyMemo, dailyMemoDateKey, memoStorageKey, selectedDateKey]);
 
   const playTimerAlertSound = () => {
     try {
@@ -1434,50 +1613,91 @@ function App() {
     setNotificationPermission(permission);
   };
 
-  useEffect(() => {
-    if (!activeTimer?.isRunning || activeTimer.isComplete) {
-      return undefined;
-    }
+  const syncActiveTimerWithClock = (shouldAlert = true) => {
+    setActiveTimer((currentTimer) => {
+      if (!currentTimer) {
+        return currentTimer;
+      }
 
-    const timerId = window.setInterval(() => {
-      setActiveTimer((currentTimer) => {
-        if (!currentTimer || !currentTimer.isRunning || currentTimer.isComplete) {
-          return currentTimer;
-        }
+      const nextTimer = normalizeActiveTimer(currentTimer);
+      const justFinished =
+        currentTimer.status === 'running' &&
+        nextTimer?.status === 'finished' &&
+        currentTimer.remainingSeconds > 0;
 
-        const nextSeconds = currentTimer.remainingSeconds - 1;
-
-        if (nextSeconds > 0) {
-          return {
-            ...currentTimer,
-            remainingSeconds: nextSeconds,
-          };
-        }
-
-        setTimerAlertSilenced(false);
-        playTimerAlertSound();
-        vibrateTimerAlert();
-        showTimerBrowserNotification(currentTimer.label);
-
+      if (justFinished && shouldAlert && nextTimer) {
         setPausedTimers((currentTimers) => {
           const nextTimers = { ...currentTimers };
 
-          delete nextTimers[currentTimer.itemId];
+          delete nextTimers[nextTimer.itemId];
 
           return nextTimers;
         });
+      }
 
-        return {
-          ...currentTimer,
-          remainingSeconds: 0,
-          isRunning: false,
-          isComplete: true,
-        };
-      });
+      return nextTimer;
+    });
+  };
+
+  useEffect(() => {
+    localStorage.setItem(
+      TIMER_STATE_STORAGE_KEY,
+      JSON.stringify({
+        activeTimer,
+        pausedTimers,
+      }),
+    );
+  }, [activeTimer, pausedTimers]);
+
+  useEffect(() => {
+    if (activeTimer?.status !== 'running' || !activeTimer.endsAt) {
+      return undefined;
+    }
+
+    syncActiveTimerWithClock();
+
+    const timerId = window.setInterval(() => {
+      syncActiveTimerWithClock();
     }, 1000);
 
     return () => window.clearInterval(timerId);
-  }, [activeTimer?.isComplete, activeTimer?.isRunning]);
+  }, [activeTimer?.endsAt, activeTimer?.itemId, activeTimer?.status]);
+
+  useEffect(() => {
+    const syncWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        syncActiveTimerWithClock();
+      }
+    };
+    const syncWhenFocused = () => {
+      syncActiveTimerWithClock();
+    };
+
+    syncActiveTimerWithClock();
+    document.addEventListener('visibilitychange', syncWhenVisible);
+    window.addEventListener('focus', syncWhenFocused);
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncWhenVisible);
+      window.removeEventListener('focus', syncWhenFocused);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeTimer?.isComplete) {
+      return;
+    }
+
+    if (alertedFinishedTimerIdRef.current === activeTimer.itemId) {
+      return;
+    }
+
+    alertedFinishedTimerIdRef.current = activeTimer.itemId;
+    setTimerAlertSilenced(false);
+    playTimerAlertSound();
+    vibrateTimerAlert();
+    showTimerBrowserNotification(activeTimer.label);
+  }, [activeTimer?.isComplete, activeTimer?.itemId, activeTimer?.label]);
 
   useEffect(() => {
     if (!activeTimer?.isComplete || timerAlertSilenced) {
@@ -1619,6 +1839,7 @@ function App() {
 
       return nextTimers;
     });
+    alertedFinishedTimerIdRef.current = null;
     setActiveTimer(null);
   };
 
@@ -1653,6 +1874,7 @@ function App() {
 
     if (activeTimer?.itemId === itemId) {
       setTimerAlertSilenced(true);
+      alertedFinishedTimerIdRef.current = null;
       setActiveTimer(null);
     }
     setPausedTimers((currentTimers) => {
@@ -1670,19 +1892,23 @@ function App() {
     }
 
     setTimerAlertSilenced(true);
+    alertedFinishedTimerIdRef.current = null;
     setPausedTimers((currentTimers) => {
       const nextTimers = { ...currentTimers };
+      const timerToPause = normalizeActiveTimer(activeTimer);
 
       if (
-        activeTimer &&
-        !activeTimer.isComplete &&
-        activeTimer.remainingSeconds > 0 &&
-        activeTimer.itemId !== item.id
+        timerToPause &&
+        !timerToPause.isComplete &&
+        timerToPause.remainingSeconds > 0 &&
+        timerToPause.itemId !== item.id
       ) {
-        nextTimers[activeTimer.itemId] = {
-          label: activeTimer.label,
-          totalSeconds: activeTimer.totalSeconds,
-          remainingSeconds: activeTimer.remainingSeconds,
+        nextTimers[timerToPause.itemId] = {
+          label: timerToPause.label,
+          durationSeconds: timerToPause.durationSeconds,
+          totalSeconds: timerToPause.totalSeconds,
+          remainingSeconds: timerToPause.remainingSeconds,
+          status: 'paused',
         };
       }
 
@@ -1694,14 +1920,12 @@ function App() {
     const pausedTimer = pausedTimers[item.id];
     const totalSeconds = Math.round(item.timerMinutes * 60);
 
-    setActiveTimer({
-      itemId: item.id,
-      label: item.label,
-      totalSeconds: pausedTimer?.totalSeconds ?? totalSeconds,
-      remainingSeconds: pausedTimer?.remainingSeconds ?? totalSeconds,
-      isRunning: true,
-      isComplete: false,
-    });
+    setActiveTimer(createRunningTimer(
+      item.id,
+      item.label,
+      pausedTimer?.durationSeconds ?? pausedTimer?.totalSeconds ?? totalSeconds,
+      pausedTimer?.remainingSeconds ?? totalSeconds,
+    ));
   };
 
   const pauseActiveTimer = () => {
@@ -1709,17 +1933,30 @@ function App() {
       if (!currentTimer) {
         return currentTimer;
       }
+      const syncedTimer = normalizeActiveTimer(currentTimer);
+
+      if (!syncedTimer || syncedTimer.isComplete) {
+        return syncedTimer;
+      }
 
       setPausedTimers((currentTimers) => ({
         ...currentTimers,
-        [currentTimer.itemId]: {
-          label: currentTimer.label,
-          totalSeconds: currentTimer.totalSeconds,
-          remainingSeconds: currentTimer.remainingSeconds,
+        [syncedTimer.itemId]: {
+          label: syncedTimer.label,
+          durationSeconds: syncedTimer.durationSeconds,
+          totalSeconds: syncedTimer.totalSeconds,
+          remainingSeconds: syncedTimer.remainingSeconds,
+          status: 'paused',
         },
       }));
 
-      return { ...currentTimer, isRunning: false };
+      return {
+        ...syncedTimer,
+        endsAt: null,
+        status: 'paused',
+        isRunning: false,
+        isComplete: false,
+      };
     });
   };
 
@@ -1738,12 +1975,18 @@ function App() {
         return nextTimers;
       });
 
-      return { ...currentTimer, isRunning: true };
+      return createRunningTimer(
+        currentTimer.itemId,
+        currentTimer.label,
+        currentTimer.durationSeconds,
+        currentTimer.remainingSeconds,
+      );
     });
   };
 
   const resetActiveTimer = () => {
     setTimerAlertSilenced(true);
+    alertedFinishedTimerIdRef.current = null;
     setActiveTimer((currentTimer) => {
       if (!currentTimer) {
         return currentTimer;
@@ -1753,14 +1996,18 @@ function App() {
         ...currentTimers,
         [currentTimer.itemId]: {
           label: currentTimer.label,
+          durationSeconds: currentTimer.durationSeconds,
           totalSeconds: currentTimer.totalSeconds,
           remainingSeconds: currentTimer.totalSeconds,
+          status: 'paused',
         },
       }));
 
       return {
         ...currentTimer,
+        endsAt: null,
         remainingSeconds: currentTimer.totalSeconds,
+        status: 'paused',
         isRunning: false,
         isComplete: false,
       };
@@ -1880,6 +2127,23 @@ function App() {
     setTimerSettingItemId(null);
   };
 
+  const switchQuestDate = (date: Date) => {
+    if (getDateKey(date) === selectedDateKey) {
+      return;
+    }
+
+    if (isEditMode) {
+      closeEditMode();
+    }
+
+    setSelectedDate(date);
+    setSortingSectionId(null);
+    setDraggedItemId(null);
+    setEditingItemId(null);
+    setEditingLabel('');
+    setTimerSettingItemId(null);
+  };
+
   const addRoutine = (sectionId: string) => {
     const newItemId = createRoutineId(sectionId);
     const newItemLabel = '新しいルーティン';
@@ -1960,6 +2224,7 @@ function App() {
 
     if (activeTimer?.itemId === pendingDelete.id) {
       setTimerAlertSilenced(true);
+      alertedFinishedTimerIdRef.current = null;
       setActiveTimer(null);
     }
     setPausedTimers((currentTimers) => {
@@ -2213,6 +2478,25 @@ function App() {
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
+        {page === 'today' && (
+          <div className="quest-date-switch" aria-label="クエストの日付切り替え">
+            <button
+              data-active={!isToday ? 'true' : 'false'}
+              onClick={() => switchQuestDate(yesterday)}
+              type="button"
+            >
+              昨日
+            </button>
+            <button
+              data-active={isToday ? 'true' : 'false'}
+              onClick={() => switchQuestDate(today)}
+              type="button"
+            >
+              今日
+            </button>
+          </div>
+        )}
+
         {page === 'settings' && (
           <section className="template-settings">
             <div className="settings-header">
@@ -2288,7 +2572,7 @@ function App() {
             <div className="quest-list-title">
               <div className="quest-title-text">
                 <span aria-hidden="true">🎮</span>
-                <h2>今日のクエスト</h2>
+                <h2>{isToday ? '今日のクエスト' : '昨日のクエスト'}</h2>
               </div>
             </div>
           )}
@@ -2321,7 +2605,7 @@ function App() {
               )}
             </section>
           )}
-          {page === 'today' && activeTimer && (
+          {page === 'today' && isToday && activeTimer && (
             <section
               className="timer-panel"
               data-complete={activeTimer.isComplete ? 'true' : 'false'}
@@ -2349,6 +2633,7 @@ function App() {
                     <button
                       onClick={() => {
                         setTimerAlertSilenced(true);
+                        alertedFinishedTimerIdRef.current = null;
                         setActiveTimer(null);
                       }}
                       type="button"
@@ -2433,13 +2718,15 @@ function App() {
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
-                  const canConfigureTimer = page === 'settings' || (page === 'today' && isEditMode);
+                  const canConfigureTimer =
+                    page === 'settings' || (page === 'today' && isToday && isEditMode);
                   const itemMasteryStats = masteryStatsByItemId.get(item.id);
                   const pausedTimer = pausedTimers[item.id];
                   const activeItemTimer =
                     activeTimer?.itemId === item.id ? activeTimer : null;
                   const showTimerStart =
                     page === 'today' &&
+                    isToday &&
                     !isEditMode &&
                     Boolean(item.timerMinutes);
 
@@ -2741,6 +3028,24 @@ function App() {
             </div>
           )}
         </div>
+        )}
+
+        {page === 'today' && !isEditMode && (
+          <section className="daily-memo" aria-label={isToday ? '今日のメモ' : '昨日のメモ'}>
+            <label htmlFor="daily-memo">
+              📝 {isToday ? '今日のメモ' : '昨日のメモ'}
+            </label>
+            <textarea
+              id="daily-memo"
+              onChange={(event) => {
+                setDailyMemoDateKey(selectedDateKey);
+                setDailyMemo(event.target.value);
+              }}
+              placeholder="ひとことメモを書く"
+              rows={3}
+              value={dailyMemo}
+            />
+          </section>
         )}
 
         {page === 'history' && (
