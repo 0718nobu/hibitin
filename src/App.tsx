@@ -24,7 +24,6 @@ type RoutineItem = {
   fixedKind?: 'wake' | 'sleep';
   time?: string;
   timerMinutes?: number;
-  difficulty?: number;
 };
 
 type RoutineSection = {
@@ -51,6 +50,14 @@ type PendingDelete = {
 type ResolvedEditTarget =
   | { kind: 'template'; template: TemplateKind }
   | { kind: 'date'; dateKey: string; baseTemplate: TemplateKind };
+
+type ArchivedItem = {
+  item: RoutineItem;
+  sectionId: string;
+  sectionTitle: string;
+  target: ResolvedEditTarget;
+  archivedAt: string;
+};
 
 type BackupFile = {
   backupVersion: 1;
@@ -83,11 +90,27 @@ type PausedTimer = {
 
 type TimerNotificationPermission = NotificationPermission | 'unsupported';
 
+type MasteryStats = {
+  itemId: string;
+  label: string;
+  sectionId: string;
+  sectionTitle: string;
+  order: number;
+  totalCompletions: number;
+  currentStreak: number;
+  bestStreak: number;
+  starCount: number;
+  isHallOfFame: boolean;
+  isCurrentItem: boolean;
+  lastSeenDateKey: string;
+};
+
 const BACKUP_VERSION = 1;
 const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
 const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
 const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
 const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
+const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 
@@ -397,6 +420,30 @@ const loadTemplateSettings = () => {
   }
 };
 
+const loadArchivedItems = () => {
+  const savedArchivedItems = localStorage.getItem(ARCHIVED_ITEMS_STORAGE_KEY);
+
+  if (!savedArchivedItems) {
+    return {};
+  }
+
+  try {
+    const parsedItems = JSON.parse(savedArchivedItems) as Record<string, ArchivedItem>;
+
+    return Object.fromEntries(
+      Object.entries(parsedItems).filter(([, archivedItem]) => (
+        Boolean(archivedItem?.item?.id) &&
+        Boolean(archivedItem?.item?.label) &&
+        Boolean(archivedItem?.sectionId) &&
+        Boolean(archivedItem?.sectionTitle) &&
+        Boolean(archivedItem?.archivedAt)
+      )),
+    ) as Record<string, ArchivedItem>;
+  } catch {
+    return {};
+  }
+};
+
 const isStartSection = (value: unknown): value is StartSection =>
   value === 'morning' || value === 'noon' || value === 'evening' || value === 'night';
 
@@ -523,6 +570,20 @@ const getDateKey = (date: Date) => {
 };
 
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
+
+const getDateFromKey = (dateKey: string) => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+
+  return new Date(year, month - 1, day);
+};
+
+const addDays = (date: Date, days: number) => {
+  const nextDate = new Date(date);
+
+  nextDate.setDate(nextDate.getDate() + days);
+
+  return nextDate;
+};
 
 const getDailyMessage = (dateKey: string) => {
   const messageIndex = [...dateKey].reduce(
@@ -663,6 +724,14 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
 const bonusSectionId = 'advanced';
+const MASTERY_RULES = [
+  { stars: 1, streakDays: 5 },
+  { stars: 2, streakDays: 10 },
+  { stars: 3, streakDays: 20 },
+  { stars: 4, streakDays: 40 },
+  { stars: 5, streakDays: 80 },
+];
+const HALL_OF_FAME_STARS = 5;
 
 const sectionOrderByStartSection: Record<StartSection, string[]> = {
   morning: ['morning', 'noon', 'evening', 'night', 'advanced'],
@@ -751,24 +820,20 @@ const getCompletionRank = (rate: number | null) => {
     return { icon: '🏆', label: 'PERFECT!!', level: 'perfect' };
   }
 
-  if (rate >= 90) {
-    return { icon: '⭐', label: 'EXCELLENT!!', level: 'excellent' };
-  }
-
   if (rate >= 80) {
-    return { icon: '🎉', label: 'GREAT!!', level: 'great' };
+    return { icon: '🌟', label: 'EXCELLENT!', level: 'excellent' };
   }
 
   if (rate >= 60) {
-    return { icon: '👍', label: 'GOOD!', level: 'good' };
+    return { icon: '🎉', label: 'GREAT!', level: 'great' };
   }
 
   if (rate >= 30) {
-    return { icon: '🌱', label: 'KEEP GOING!', level: 'keep' };
+    return { icon: '👍', label: 'GOOD!', level: 'good' };
   }
 
   if (rate >= 1) {
-    return { icon: '🚀', label: 'START!', level: 'start' };
+    return { icon: '👟', label: 'FIRST STEP!', level: 'start' };
   }
 
   return { icon: '☕', label: 'READY?', level: 'ready' };
@@ -798,12 +863,212 @@ const getTimerSelectValue = (minutes?: number) => {
   return timerPresetMinutes.includes(minutes) ? String(minutes) : 'custom';
 };
 
-const formatDifficulty = (difficulty?: number) => {
-  if (!difficulty) {
-    return '';
+const getMasteryStarCount = (bestStreak: number) =>
+  MASTERY_RULES.filter((rule) => bestStreak >= rule.streakDays).length;
+
+const formatMasteryStars = (starCount: number) =>
+  starCount > 0
+    ? `${'⭐'.repeat(starCount)}${starCount >= HALL_OF_FAME_STARS ? ' 👑' : ''}`
+    : '';
+
+const getMasteryRuleText = () =>
+  MASTERY_RULES.map((rule) => `${'⭐'.repeat(rule.stars)}：${rule.streakDays}日連続`);
+
+const getStoredCheckDateKeys = () => {
+  const prefix = 'hibitin:checks:';
+
+  return Object.keys(localStorage)
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => key.slice(prefix.length))
+    .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+    .sort();
+};
+
+const calculateItemCheckHistoryStats = (
+  itemId: string,
+  todayKey: string,
+  checkOverrides: Record<string, Record<string, boolean>>,
+) => {
+  const storedDateKeys = getStoredCheckDateKeys().filter((dateKey) => dateKey <= todayKey);
+  const firstDateKey = storedDateKeys[0] ?? todayKey;
+  let totalCompletions = 0;
+  let bestStreak = 0;
+  let currentStreak = 0;
+  let runningStreak = 0;
+
+  for (
+    let date = getDateFromKey(firstDateKey);
+    getDateKey(date) <= todayKey;
+    date = addDays(date, 1)
+  ) {
+    const dateKey = getDateKey(date);
+    const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
+
+    if (checks[itemId]) {
+      totalCompletions += 1;
+      runningStreak += 1;
+      bestStreak = Math.max(bestStreak, runningStreak);
+      currentStreak = runningStreak;
+      continue;
+    }
+
+    runningStreak = 0;
+    currentStreak = 0;
   }
 
-  return `${'★'.repeat(difficulty)}${'☆'.repeat(5 - difficulty)}`;
+  const starCount = getMasteryStarCount(bestStreak);
+
+  return {
+    totalCompletions,
+    currentStreak,
+    bestStreak,
+    starCount,
+    isHallOfFame: starCount >= HALL_OF_FAME_STARS,
+  };
+};
+
+const calculateMasteryStats = (
+  settings: RoutineTemplateSettings,
+  dateOverrides: Record<string, RoutineSection[]>,
+  dateSnapshots: Record<string, RoutineSection[]>,
+  rhythmSettings: RhythmSettings,
+  todayKey: string,
+  currentDisplaySections: RoutineSection[],
+  checkOverrides: Record<string, Record<string, boolean>>,
+) => {
+  const storedDateKeys = getStoredCheckDateKeys().filter((dateKey) => dateKey <= todayKey);
+  const firstDateKey = storedDateKeys[0] ?? todayKey;
+  const currentItemIds = new Set(
+    currentDisplaySections
+      .filter((section) => section.id !== bonusSectionId)
+      .flatMap((section) => section.items.map((item) => item.id)),
+  );
+  const currentItemOrder = new Map<string, number>();
+
+  currentDisplaySections
+    .filter((section) => section.id !== bonusSectionId)
+    .forEach((section, sectionIndex) => {
+      section.items.forEach((item, itemIndex) => {
+        currentItemOrder.set(item.id, sectionIndex * 1000 + itemIndex);
+      });
+    });
+
+  const stats = new Map<string, MasteryStats>();
+  const runningStreaks = new Map<string, number>();
+  const seenItemIds = new Set<string>();
+
+  for (
+    let date = getDateFromKey(firstDateKey);
+    getDateKey(date) <= todayKey;
+    date = addDays(date, 1)
+  ) {
+    const dateKey = getDateKey(date);
+    const baseTemplate = getBaseTemplateForDate(settings, date);
+    const target = resolveDateTarget(settings, dateOverrides, dateSnapshots, date, todayKey);
+    const sections = buildDisplaySections(
+      removeFixedRoutineItems(
+        getSectionsForTarget(settings, dateOverrides, dateSnapshots, target, todayKey),
+      ),
+      rhythmSettings[baseTemplate],
+    ).filter((section) => section.id !== bonusSectionId);
+    const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
+    const presentItemIds = new Set<string>();
+
+    sections.forEach((section, sectionIndex) => {
+      section.items.forEach((item, itemIndex) => {
+        presentItemIds.add(item.id);
+
+        const existingStats = stats.get(item.id);
+        const order = currentItemOrder.get(item.id) ?? sectionIndex * 1000 + itemIndex;
+
+        stats.set(item.id, {
+          itemId: item.id,
+          label: item.label,
+          sectionId: section.id,
+          sectionTitle: section.title,
+          order,
+          totalCompletions: existingStats?.totalCompletions ?? 0,
+          currentStreak: existingStats?.currentStreak ?? 0,
+          bestStreak: existingStats?.bestStreak ?? 0,
+          starCount: existingStats?.starCount ?? 0,
+          isHallOfFame: existingStats?.isHallOfFame ?? false,
+          isCurrentItem: currentItemIds.has(item.id),
+          lastSeenDateKey: dateKey,
+        });
+        seenItemIds.add(item.id);
+
+        if (!checks[item.id]) {
+          runningStreaks.set(item.id, 0);
+          return;
+        }
+
+        const nextStreak = (runningStreaks.get(item.id) ?? 0) + 1;
+        const nextStats = stats.get(item.id);
+
+        if (!nextStats) {
+          return;
+        }
+
+        const bestStreak = Math.max(nextStats.bestStreak, nextStreak);
+        const starCount = getMasteryStarCount(bestStreak);
+
+        runningStreaks.set(item.id, nextStreak);
+        stats.set(item.id, {
+          ...nextStats,
+          totalCompletions: nextStats.totalCompletions + 1,
+          currentStreak: nextStreak,
+          bestStreak,
+          starCount,
+          isHallOfFame: starCount >= 5,
+        });
+      });
+    });
+
+    seenItemIds.forEach((itemId) => {
+      if (!presentItemIds.has(itemId)) {
+        runningStreaks.set(itemId, 0);
+      }
+    });
+  }
+
+  return Array.from(stats.values())
+    .map((itemStats) => {
+      const checkHistoryStats = currentItemIds.has(itemStats.itemId)
+        ? calculateItemCheckHistoryStats(itemStats.itemId, todayKey, checkOverrides)
+        : null;
+      const bestStreak = Math.max(
+        itemStats.bestStreak,
+        checkHistoryStats?.bestStreak ?? 0,
+      );
+      const starCount = getMasteryStarCount(bestStreak);
+
+      return {
+        ...itemStats,
+        totalCompletions: Math.max(
+          itemStats.totalCompletions,
+          checkHistoryStats?.totalCompletions ?? 0,
+        ),
+        currentStreak: Math.max(
+          runningStreaks.get(itemStats.itemId) ?? 0,
+          checkHistoryStats?.currentStreak ?? 0,
+        ),
+        bestStreak,
+        starCount,
+        isHallOfFame: starCount >= HALL_OF_FAME_STARS,
+      };
+    })
+    .filter((itemStats) => itemStats.isCurrentItem || itemStats.totalCompletions > 0)
+    .sort((first, second) => {
+      if (first.isCurrentItem !== second.isCurrentItem) {
+        return first.isCurrentItem ? -1 : 1;
+      }
+
+      if (first.order !== second.order) {
+        return first.order - second.order;
+      }
+
+      return first.label.localeCompare(second.label, 'ja');
+    });
 };
 
 function App() {
@@ -830,6 +1095,9 @@ function App() {
   );
   const [dateOverrides, setDateOverrides] = useState<Record<string, RoutineSection[]>>(() =>
     loadDateSectionMap(DATE_OVERRIDES_STORAGE_KEY, 'dateOverrides'),
+  );
+  const [archivedItems, setArchivedItems] = useState<Record<string, ArchivedItem>>(() =>
+    loadArchivedItems(),
   );
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
     loadRhythmSettings(),
@@ -896,6 +1164,18 @@ function App() {
   const rhythmForDisplay =
     page === 'today' ? rhythmSettings[selectedDateTemplate] : rhythmSettings[editTargetKey];
   const displaySections = buildDisplaySections(routineSections, rhythmForDisplay);
+  const todayMasterySections = buildDisplaySections(
+    removeFixedRoutineItems(
+      getSectionsForTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        selectedDateTarget,
+        todayKey,
+      ),
+    ),
+    rhythmSettings[selectedDateTemplate],
+  );
   const isCheckMode = page === 'today';
   const canEditRoutines = page === 'settings' || (page === 'today' && isEditMode);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
@@ -933,6 +1213,56 @@ function App() {
     historyCheckedItems,
   );
   const historyDateRank = getCompletionRank(historyDateStats.rate);
+  const masteryStats = useMemo(() => calculateMasteryStats(
+    templateSettings,
+    dateOverrides,
+    dateSnapshots,
+    rhythmSettings,
+    todayKey,
+    todayMasterySections,
+    {
+      [selectedDateKey]: checkedItems,
+      [historySelectedDateKey]: historyCheckedItems,
+    },
+  ), [
+    checkedItems,
+    dateOverrides,
+    dateSnapshots,
+    historyCheckedItems,
+    historySelectedDateKey,
+    rhythmSettings,
+    selectedDateKey,
+    templateSettings,
+    todayKey,
+    todayMasterySections,
+  ]);
+  const masteryStatsByItemId = useMemo(() => new Map(
+    masteryStats.map((itemStats) => [itemStats.itemId, itemStats]),
+  ), [masteryStats]);
+  const archivedItemEntries = useMemo(() => (
+    Object.values(archivedItems)
+      .map((archivedItem) => ({
+        archivedItem,
+        stats: calculateItemCheckHistoryStats(
+          archivedItem.item.id,
+          todayKey,
+          {
+            [selectedDateKey]: checkedItems,
+            [historySelectedDateKey]: historyCheckedItems,
+          },
+        ),
+      }))
+      .sort((first, second) =>
+        second.archivedItem.archivedAt.localeCompare(first.archivedItem.archivedAt),
+      )
+  ), [
+    archivedItems,
+    checkedItems,
+    historyCheckedItems,
+    historySelectedDateKey,
+    selectedDateKey,
+    todayKey,
+  ]);
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
   const completionCalendarDays = useMemo(() => (
     getMonthDateCells(calendarMonth).map((date) => {
@@ -1004,6 +1334,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(DATE_OVERRIDES_STORAGE_KEY, JSON.stringify(dateOverrides));
   }, [dateOverrides]);
+
+  useEffect(() => {
+    localStorage.setItem(ARCHIVED_ITEMS_STORAGE_KEY, JSON.stringify(archivedItems));
+  }, [archivedItems]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1330,36 +1664,6 @@ function App() {
     });
   };
 
-  const updateItemDifficulty = (
-    sectionId: string,
-    itemId: string,
-    difficulty?: number,
-  ) => {
-    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
-      currentSections.map((section) => ({
-        ...section,
-        items: section.items.map((item) => {
-          if (item.id !== itemId) {
-            return item;
-          }
-
-          if (!difficulty) {
-            const itemWithoutDifficulty = { ...item };
-
-            delete itemWithoutDifficulty.difficulty;
-
-            return itemWithoutDifficulty;
-          }
-
-          return {
-            ...item,
-            difficulty,
-          };
-        }),
-      })),
-    );
-  };
-
   const startItemTimer = (item: RoutineItem) => {
     if (!item.timerMinutes) {
       return;
@@ -1617,37 +1921,43 @@ function App() {
       return;
     }
 
-    updateSectionsForTarget(getUpdateTargetForSection(pendingDelete.sectionId), (currentSections) =>
-      currentSections.map((section) => ({
-        ...section,
-        items: section.items.filter((item) => item.id !== pendingDelete.id),
-      })),
+    let archivedItem: ArchivedItem | null = null;
+    const deleteTarget = getUpdateTargetForSection(pendingDelete.sectionId);
+
+    updateSectionsForTarget(deleteTarget, (currentSections) =>
+      currentSections.map((section) => {
+        if (section.id !== pendingDelete.sectionId) {
+          return section;
+        }
+
+        const itemToArchive = section.items.find((item) => item.id === pendingDelete.id);
+
+        if (itemToArchive) {
+          archivedItem = {
+            item: { ...itemToArchive },
+            sectionId: section.id,
+            sectionTitle: section.title,
+            target: deleteTarget,
+            archivedAt: new Date().toISOString(),
+          };
+        }
+
+        return {
+          ...section,
+          items: section.items.filter((item) => item.id !== pendingDelete.id),
+        };
+      }),
     );
-    setCheckedItems((currentChecks) => {
-      const remainingChecks = { ...currentChecks };
 
-      delete remainingChecks[pendingDelete.id];
+    if (archivedItem) {
+      const itemToSave = archivedItem;
 
-      return remainingChecks;
-    });
-    setHistoryCheckedItems((currentChecks) => {
-      const remainingChecks = { ...currentChecks };
+      setArchivedItems((currentItems) => ({
+        ...currentItems,
+        [pendingDelete.id]: itemToSave,
+      }));
+    }
 
-      delete remainingChecks[pendingDelete.id];
-
-      if (page === 'history') {
-        localStorage.setItem(
-          getChecksStorageKey(historySelectedDate),
-          JSON.stringify(remainingChecks),
-        );
-      }
-
-      if (historySelectedDateKey === selectedDateKey) {
-        setCheckedItems(remainingChecks);
-      }
-
-      return remainingChecks;
-    });
     if (activeTimer?.itemId === pendingDelete.id) {
       setTimerAlertSilenced(true);
       setActiveTimer(null);
@@ -1660,6 +1970,50 @@ function App() {
       return nextTimers;
     });
     setPendingDelete(null);
+  };
+
+  const restoreArchivedItem = (itemId: string) => {
+    const archivedItem = archivedItems[itemId];
+
+    if (!archivedItem) {
+      return;
+    }
+
+    updateSectionsForTarget(archivedItem.target, (currentSections) =>
+      currentSections.map((section) => {
+        if (section.id !== archivedItem.sectionId) {
+          return section;
+        }
+
+        if (section.items.some((item) => item.id === archivedItem.item.id)) {
+          return section;
+        }
+
+        const nextOrder =
+          section.items.length > 0
+            ? Math.max(...section.items.map((item) => item.order)) + 10
+            : 10;
+
+        return {
+          ...section,
+          items: [
+            ...section.items,
+            {
+              ...archivedItem.item,
+              order: nextOrder,
+            },
+          ],
+        };
+      }),
+    );
+
+    setArchivedItems((currentItems) => {
+      const nextItems = { ...currentItems };
+
+      delete nextItems[itemId];
+
+      return nextItems;
+    });
   };
 
   const changeWeekdayType = (weekday: WeekdayKey, nextType: TemplateKind) => {
@@ -2080,7 +2434,7 @@ function App() {
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
                   const canConfigureTimer = page === 'settings' || (page === 'today' && isEditMode);
-                  const canConfigureDifficulty = canConfigureTimer;
+                  const itemMasteryStats = masteryStatsByItemId.get(item.id);
                   const pausedTimer = pausedTimers[item.id];
                   const activeItemTimer =
                     activeTimer?.itemId === item.id ? activeTimer : null;
@@ -2225,9 +2579,16 @@ function App() {
                           </button>
                         )}
                       </div>
-                      {page === 'today' && !isEditMode && item.difficulty && (
-                        <span className="difficulty-badge">
-                          {formatDifficulty(item.difficulty)}
+                      {page === 'today' &&
+                        !isEditMode &&
+                        !isBonusSection &&
+                        itemMasteryStats &&
+                        itemMasteryStats.starCount > 0 && (
+                        <span
+                          className="mastery-badge"
+                          title={`現在 ${itemMasteryStats.currentStreak}日連続 / 累計 ${itemMasteryStats.totalCompletions}回`}
+                        >
+                          {formatMasteryStars(itemMasteryStats.starCount)}
                         </span>
                       )}
                       {showTimerStart && (
@@ -2335,31 +2696,6 @@ function App() {
                             </div>
                           )}
                         </div>
-                      )}
-                      {canConfigureDifficulty && (
-                        <label className="difficulty-setting-control">
-                          <span>★</span>
-                          <select
-                            aria-label={`${item.label}の難易度`}
-                            onChange={(event) => {
-                              const nextDifficulty = Number(event.target.value);
-
-                              updateItemDifficulty(
-                                section.id,
-                                item.id,
-                                nextDifficulty > 0 ? nextDifficulty : undefined,
-                              );
-                            }}
-                            value={item.difficulty ?? 0}
-                          >
-                            <option value={0}>未設定</option>
-                            {[1, 2, 3, 4, 5].map((difficulty) => (
-                              <option key={difficulty} value={difficulty}>
-                                {formatDifficulty(difficulty)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
                       )}
                       {!isFixedItem && canEditSection && (
                         <button
@@ -2662,40 +2998,10 @@ function App() {
                               <span className="fixed-time-display">{item.time}</span>
                             )}
                           </span>
-                          {item.difficulty && !isHistoryEditMode && (
-                            <span className="difficulty-badge">
-                              {formatDifficulty(item.difficulty)}
-                            </span>
-                          )}
                           {item.timerMinutes && !isHistoryEditMode && (
                             <span className="timer-badge">
                               ⏱{formatTimerMinutes(item.timerMinutes)}
                             </span>
-                          )}
-                          {isHistoryEditMode && (
-                            <label className="difficulty-setting-control">
-                              <span>★</span>
-                              <select
-                                aria-label={`${item.label}の難易度`}
-                                onChange={(event) => {
-                                  const nextDifficulty = Number(event.target.value);
-
-                                  updateItemDifficulty(
-                                    section.id,
-                                    item.id,
-                                    nextDifficulty > 0 ? nextDifficulty : undefined,
-                                  );
-                                }}
-                                value={item.difficulty ?? 0}
-                              >
-                                <option value={0}>未設定</option>
-                                {[1, 2, 3, 4, 5].map((difficulty) => (
-                                  <option key={difficulty} value={difficulty}>
-                                    {formatDifficulty(difficulty)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                           )}
                           {isHistoryEditMode && (
                             <div className="timer-setting-control">
@@ -2813,10 +3119,126 @@ function App() {
         )}
 
         {page === 'achievements' && (
-          <section className="placeholder-panel">
-            <span aria-hidden="true">🏆</span>
-            <h2>実績は準備中</h2>
-            <p>連続達成日数やバッジを、ここに追加していく予定です。</p>
+          <section className="achievements-panel">
+            <div className="achievements-header">
+              <span aria-hidden="true">🏆</span>
+              <div>
+                <h2>実績</h2>
+                <p>星はチェックを積み重ねることで育ちます。</p>
+              </div>
+            </div>
+            <section className="mastery-rule" aria-label="熟練度ルール">
+              <h3>熟練度ルール</h3>
+              <ul>
+                {getMasteryRuleText().map((ruleText) => (
+                  <li key={ruleText}>{ruleText}</li>
+                ))}
+              </ul>
+              <p>{formatMasteryStars(HALL_OF_FAME_STARS)}で殿堂入り</p>
+            </section>
+            {masteryStats.length === 0 ? (
+              <p className="empty-achievements">
+                まずは今日のルーティンをチェックすると、ここに実績が育っていきます。
+              </p>
+            ) : (
+              <div className="mastery-list">
+                {masteryStats.map((itemStats) => (
+                  <article
+                    className="mastery-card"
+                    data-current={itemStats.isCurrentItem ? 'true' : 'false'}
+                    data-hall-of-fame={itemStats.isHallOfFame ? 'true' : 'false'}
+                    key={itemStats.itemId}
+                  >
+                    <div className="mastery-card-title">
+                      <div>
+                        <p className="mastery-section-name">
+                          {sectionIconLabels[itemStats.sectionId]} {itemStats.sectionTitle}
+                        </p>
+                        <h3>{itemStats.label}</h3>
+                      </div>
+                      {itemStats.isHallOfFame && (
+                        <span className="hall-of-fame-badge">👑 殿堂入り</span>
+                      )}
+                    </div>
+                    <p
+                      className="mastery-stars"
+                      data-empty={itemStats.starCount === 0 ? 'true' : 'false'}
+                    >
+                      {formatMasteryStars(itemStats.starCount) || '星はこれから'}
+                    </p>
+                    <dl className="mastery-metrics">
+                      <div>
+                        <dt>現在連続</dt>
+                        <dd>{itemStats.currentStreak}日</dd>
+                      </div>
+                      <div>
+                        <dt>最高連続</dt>
+                        <dd>{itemStats.bestStreak}日</dd>
+                      </div>
+                      <div>
+                        <dt>累計達成</dt>
+                        <dd>{itemStats.totalCompletions}回</dd>
+                      </div>
+                    </dl>
+                  </article>
+                ))}
+              </div>
+            )}
+            <section className="archive-panel" aria-label="過去のアイテム">
+              <div className="archive-header">
+                <div>
+                  <h3>過去のアイテム</h3>
+                  <p>削除したアイテムはここに残り、あとから復元できます。</p>
+                </div>
+                <span>{archivedItemEntries.length}件</span>
+              </div>
+              {archivedItemEntries.length === 0 ? (
+                <p className="archive-empty">アーカイブ済みアイテムはありません。</p>
+              ) : (
+                <div className="archive-list">
+                  {archivedItemEntries.map(({ archivedItem, stats }) => (
+                    <article className="archive-card" key={archivedItem.item.id}>
+                      <div>
+                        <p className="mastery-section-name">
+                          {sectionIconLabels[archivedItem.sectionId]} {archivedItem.sectionTitle}
+                        </p>
+                        <h4>{archivedItem.item.label}</h4>
+                        <p className="archive-date">
+                          削除日: {questDateFormatter.format(new Date(archivedItem.archivedAt))}
+                        </p>
+                      </div>
+                      <p
+                        className="mastery-stars"
+                        data-empty={stats.starCount === 0 ? 'true' : 'false'}
+                      >
+                        {formatMasteryStars(stats.starCount) || '星はこれから'}
+                      </p>
+                      <dl className="mastery-metrics">
+                        <div>
+                          <dt>累計</dt>
+                          <dd>{stats.totalCompletions}回</dd>
+                        </div>
+                        <div>
+                          <dt>最高</dt>
+                          <dd>{stats.bestStreak}日連続</dd>
+                        </div>
+                        <div>
+                          <dt>現在</dt>
+                          <dd>{stats.currentStreak}日連続</dd>
+                        </div>
+                      </dl>
+                      <button
+                        className="restore-button"
+                        onClick={() => restoreArchivedItem(archivedItem.item.id)}
+                        type="button"
+                      >
+                        復元
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
           </section>
         )}
 
@@ -2919,11 +3341,11 @@ function App() {
             className="delete-dialog"
             role="dialog"
           >
-            <h2 id="delete-dialog-title">削除しますか？</h2>
-            <p>「{pendingDelete.label}」を削除します。</p>
+            <h2 id="delete-dialog-title">アーカイブしますか？</h2>
+            <p>「{pendingDelete.label}」を画面から外し、過去のアイテムに保存します。</p>
             <div className="dialog-actions">
               <button onClick={deleteRoutine} type="button">
-                削除
+                アーカイブする
               </button>
               <button onClick={() => setPendingDelete(null)} type="button">
                 キャンセル
