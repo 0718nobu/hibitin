@@ -189,6 +189,7 @@ h1 {
 .quest-date-switch button:focus-visible,
 .daily-memo textarea:focus-visible,
 .backup-actions button:focus-visible,
+.reset-initial-button:focus-visible,
 .month-actions button:focus-visible,
 .calendar-day:focus-visible,
 .add-button:focus-visible,
@@ -203,7 +204,10 @@ h1 {
 .timer-setting-menu select:focus-visible,
 .timer-setting-menu input:focus-visible,
 .timer-start-control button:focus-visible,
+.item-note-toggle:focus-visible,
+.item-note-editor textarea:focus-visible,
 .restore-button:focus-visible,
+.history-close-button:focus-visible,
 .dialog-actions button:focus-visible {
   outline: 3px solid #9bd7b6;
   outline-offset: 2px;
@@ -464,6 +468,34 @@ h1 {
   margin: 0;
   color: #6c6253;
   font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.reset-actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  border-top: 1px dashed #ead7d7;
+  padding-top: 10px;
+}
+
+.reset-initial-button {
+  width: fit-content;
+  min-height: 34px;
+  border: 1px solid #efb8b8;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #fff5f5;
+  color: #9f3b3b;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.reset-actions p {
+  margin: 0;
+  color: #8a6a6a;
+  font-size: 0.76rem;
   line-height: 1.5;
 }
 
@@ -745,6 +777,26 @@ h1 {
   gap: 10px;
 }
 
+.history-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.history-close-button {
+  min-height: 30px;
+  border: 1px solid rgb(139 101 0 / 18%);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgb(255 255 255 / 68%);
+  color: #745913;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .history-routine-kind {
   display: inline-flex;
   margin: 5px 0 0;
@@ -783,6 +835,16 @@ h1 {
 .history-detail .result-panel {
   margin: 0;
   border-color: rgb(176 141 42 / 22%);
+}
+
+.history-empty-guide {
+  margin: 10px 0 0;
+  border-top: 1px dashed rgb(139 101 0 / 18%);
+  padding: 14px 4px 0;
+  color: #7c6733;
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-align: center;
 }
 
 .history-routine-list {
@@ -827,6 +889,7 @@ h1 {
   display: flex;
   min-height: 32px;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   border-radius: 7px;
   padding: 4px 2px;
@@ -891,6 +954,50 @@ h1 {
   text-decoration: line-through;
   text-decoration-thickness: 2px;
   text-decoration-color: #c7a95e;
+}
+
+.item-note-toggle {
+  display: inline-flex;
+  min-width: 30px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #7b8982;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.item-note-toggle[data-has-note='true'] {
+  background: #fff4c9;
+  color: #9a6800;
+}
+
+.item-note-editor {
+  flex: 1 0 100%;
+  padding: 2px 0 2px 24px;
+}
+
+.item-note-editor textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+  border: 1px solid #b7d8c5;
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: #ffffff;
+  color: #202623;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.history-routine-item .item-note-editor textarea {
+  border-color: #d7c27e;
 }
 
 .achievements-panel {
@@ -1620,6 +1727,7 @@ h1 {
   display: flex;
   min-height: 36px;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: space-between;
   padding: 5px 4px;

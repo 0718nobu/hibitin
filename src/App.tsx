@@ -73,6 +73,13 @@ type BackupDownload = {
   fileName: string;
 };
 
+type ItemNotes = Record<string, Record<string, string>>;
+
+type NoteEditorTarget = {
+  dateKey: string;
+  itemId: string;
+};
+
 type TimerStatus = 'running' | 'paused' | 'finished';
 
 type ActiveTimer = {
@@ -125,6 +132,7 @@ const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
 const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
 const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
 const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
+const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 
@@ -181,7 +189,7 @@ type RhythmConfig = {
 type RhythmSettings = Record<TemplateKind, RhythmConfig>;
 
 const defaultRhythmConfig: RhythmConfig = {
-  wakeTime: '06:10',
+  wakeTime: '06:30',
   sleepTime: '22:30',
   startSection: 'morning',
 };
@@ -239,25 +247,12 @@ const defaultRoutineSections: RoutineSection[] = [
     order: 10,
     items: [
       {
-        id: 'morning-wake-up',
-        label: '起床',
+        id: 'morning-walk-or-running',
+        label: '散歩 or ランニング',
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
-      },
-      {
-        id: 'morning-pack',
-        label: 'パック',
-        order: 20,
-        source: 'default',
-        createdAt: '2026-06-01T00:00:00.000Z',
-      },
-      {
-        id: 'morning-english',
-        label: '英語',
-        order: 30,
-        source: 'default',
-        createdAt: '2026-06-01T00:00:00.000Z',
+        timerMinutes: 10,
       },
     ],
   },
@@ -267,11 +262,12 @@ const defaultRoutineSections: RoutineSection[] = [
     order: 20,
     items: [
       {
-        id: 'noon-reading',
-        label: '読書',
+        id: 'noon-chores',
+        label: '雑務',
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
+        timerMinutes: 10,
       },
     ],
   },
@@ -279,7 +275,16 @@ const defaultRoutineSections: RoutineSection[] = [
     id: 'evening',
     title: '夕',
     order: 30,
-    items: [],
+    items: [
+      {
+        id: 'evening-workout-or-stretch',
+        label: '筋トレ or ストレッチ',
+        order: 10,
+        source: 'default',
+        createdAt: '2026-06-01T00:00:00.000Z',
+        timerMinutes: 5,
+      },
+    ],
   },
   {
     id: 'night',
@@ -287,11 +292,12 @@ const defaultRoutineSections: RoutineSection[] = [
     order: 40,
     items: [
       {
-        id: 'night-sleep',
-        label: '就寝',
+        id: 'night-reading',
+        label: '読書',
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
+        timerMinutes: 10,
       },
     ],
   },
@@ -453,6 +459,37 @@ const loadArchivedItems = () => {
         Boolean(archivedItem?.archivedAt)
       )),
     ) as Record<string, ArchivedItem>;
+  } catch {
+    return {};
+  }
+};
+
+const loadItemNotes = (): ItemNotes => {
+  const savedNotes = localStorage.getItem(ITEM_NOTES_STORAGE_KEY);
+
+  if (!savedNotes) {
+    return {};
+  }
+
+  try {
+    const parsedNotes = JSON.parse(savedNotes) as Record<string, unknown>;
+
+    return Object.fromEntries(
+      Object.entries(parsedNotes)
+        .filter(([, notesByItem]) => (
+          notesByItem &&
+          typeof notesByItem === 'object' &&
+          !Array.isArray(notesByItem)
+        ))
+        .map(([dateKey, notesByItem]) => [
+          dateKey,
+          Object.fromEntries(
+            Object.entries(notesByItem as Record<string, unknown>).filter(
+              ([, note]) => typeof note === 'string',
+            ),
+          ),
+        ]),
+    ) as ItemNotes;
   } catch {
     return {};
   }
@@ -1237,12 +1274,12 @@ function App() {
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
   const [selectedDate, setSelectedDate] = useState(() => today);
-  const [historySelectedDate, setHistorySelectedDate] = useState(() => today);
+  const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const selectedDateKey = getDateKey(selectedDate);
   const questDateLabel = questDateFormatter.format(selectedDate);
-  const historySelectedDateKey = getDateKey(historySelectedDate);
-  const historyDateLabel = questDateFormatter.format(historySelectedDate);
+  const historySelectedDateKey = historySelectedDate ? getDateKey(historySelectedDate) : '';
+  const historyDateLabel = historySelectedDate ? questDateFormatter.format(historySelectedDate) : '';
   const dailyMessage = getDailyMessage(selectedDateKey);
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
@@ -1259,6 +1296,7 @@ function App() {
   const [archivedItems, setArchivedItems] = useState<Record<string, ArchivedItem>>(() =>
     loadArchivedItems(),
   );
+  const [itemNotes, setItemNotes] = useState<ItemNotes>(() => loadItemNotes());
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
     loadRhythmSettings(),
   );
@@ -1272,6 +1310,7 @@ function App() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
+  const [noteEditorTarget, setNoteEditorTarget] = useState<NoteEditorTarget | null>(null);
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(
     () => getInitialTimerState().activeTimer,
   );
@@ -1293,9 +1332,7 @@ function App() {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() =>
     loadCheckedItems(today),
   );
-  const [historyCheckedItems, setHistoryCheckedItems] = useState<Record<string, boolean>>(() =>
-    loadCheckedItems(today),
-  );
+  const [historyCheckedItems, setHistoryCheckedItems] = useState<Record<string, boolean>>({});
   const [backupMessage, setBackupMessage] = useState('');
   const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -1346,34 +1383,46 @@ function App() {
   const canEditRoutines = page === 'settings' || (page === 'today' && isEditMode);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
-  const historyDateTemplate = getBaseTemplateForDate(templateSettings, historySelectedDate);
-  const historyRoutineKind: RoutineKind = dateOverrides[historySelectedDateKey]
-    ? 'custom'
-    : historyDateTemplate;
-  const historyRoutineKindLabel = getRoutineKindLabel(historyRoutineKind);
-  const historyDateTarget = resolveDateTarget(
-    templateSettings,
-    dateOverrides,
-    dateSnapshots,
-    historySelectedDate,
-    todayKey,
-  );
-  const historyDateEditTarget: ResolvedEditTarget = {
-    kind: 'date',
-    dateKey: historySelectedDateKey,
-    baseTemplate: historyDateTemplate,
-  };
-  const historySections = removeFixedRoutineItems(getSectionsForTarget(
-    templateSettings,
-    dateOverrides,
-    dateSnapshots,
-    historyDateTarget,
-    todayKey,
-  ));
-  const historyDisplaySections = buildDisplaySections(
-    historySections,
-    rhythmSettings[historyDateTemplate],
-  );
+  const historyDateTemplate = historySelectedDate
+    ? getBaseTemplateForDate(templateSettings, historySelectedDate)
+    : 'normal';
+  const historyRoutineKind: RoutineKind | null = historySelectedDate
+    ? dateOverrides[historySelectedDateKey]
+      ? 'custom'
+      : historyDateTemplate
+    : null;
+  const historyRoutineKindLabel = historyRoutineKind ? getRoutineKindLabel(historyRoutineKind) : '';
+  const historyDateTarget = historySelectedDate
+    ? resolveDateTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        historySelectedDate,
+        todayKey,
+      )
+    : null;
+  const historyDateEditTarget: ResolvedEditTarget | null = historySelectedDate
+    ? {
+        kind: 'date',
+        dateKey: historySelectedDateKey,
+        baseTemplate: historyDateTemplate,
+      }
+    : null;
+  const historySections = historyDateTarget
+    ? removeFixedRoutineItems(getSectionsForTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        historyDateTarget,
+        todayKey,
+      ))
+    : [];
+  const historyDisplaySections = historySelectedDate
+    ? buildDisplaySections(
+        historySections,
+        rhythmSettings[historyDateTemplate],
+      )
+    : [];
   const historyDateStats = calculateCompletionStats(
     historyDisplaySections,
     historyCheckedItems,
@@ -1388,13 +1437,14 @@ function App() {
     todayMasterySections,
     {
       [selectedDateKey]: checkedItems,
-      [historySelectedDateKey]: historyCheckedItems,
+      ...(historySelectedDate ? { [historySelectedDateKey]: historyCheckedItems } : {}),
     },
   ), [
     checkedItems,
     dateOverrides,
     dateSnapshots,
     historyCheckedItems,
+    historySelectedDate,
     historySelectedDateKey,
     rhythmSettings,
     selectedDateKey,
@@ -1414,7 +1464,7 @@ function App() {
           todayKey,
           {
             [selectedDateKey]: checkedItems,
-            [historySelectedDateKey]: historyCheckedItems,
+            ...(historySelectedDate ? { [historySelectedDateKey]: historyCheckedItems } : {}),
           },
         ),
       }))
@@ -1425,6 +1475,7 @@ function App() {
     archivedItems,
     checkedItems,
     historyCheckedItems,
+    historySelectedDate,
     historySelectedDateKey,
     selectedDateKey,
     todayKey,
@@ -1466,7 +1517,7 @@ function App() {
         rankLevel: rank.level,
         totalCount: stats.totalCount,
         isToday: dateKey === todayKey,
-        isSelected: dateKey === historySelectedDateKey,
+        isSelected: historySelectedDate ? dateKey === historySelectedDateKey : false,
         routineKind,
       };
     })
@@ -1491,6 +1542,11 @@ function App() {
   }, [selectedDate, selectedDateKey]);
 
   useEffect(() => {
+    if (!historySelectedDate) {
+      setHistoryCheckedItems({});
+      return;
+    }
+
     setHistoryCheckedItems(loadCheckedItems(historySelectedDate));
   }, [historySelectedDate]);
 
@@ -1509,6 +1565,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(ARCHIVED_ITEMS_STORAGE_KEY, JSON.stringify(archivedItems));
   }, [archivedItems]);
+
+  useEffect(() => {
+    localStorage.setItem(ITEM_NOTES_STORAGE_KEY, JSON.stringify(itemNotes));
+  }, [itemNotes]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1769,6 +1829,10 @@ function App() {
 
   const getUpdateTargetForSection = (sectionId: string) => {
     if (page === 'history') {
+      if (!historyDateEditTarget) {
+        throw new Error('スタンプ帳の日付が選択されていません。');
+      }
+
       return historyDateEditTarget;
     }
 
@@ -1779,6 +1843,38 @@ function App() {
     return displayedTarget;
   };
 
+  const getItemNote = (dateKey: string, itemId: string) => itemNotes[dateKey]?.[itemId] ?? '';
+
+  const updateItemNote = (dateKey: string, itemId: string, note: string) => {
+    setItemNotes((currentNotes) => {
+      const nextNotes = { ...currentNotes };
+      const notesForDate = { ...(nextNotes[dateKey] ?? {}) };
+      const trimmedNote = note.trim();
+
+      if (trimmedNote) {
+        notesForDate[itemId] = note;
+      } else {
+        delete notesForDate[itemId];
+      }
+
+      if (Object.keys(notesForDate).length > 0) {
+        nextNotes[dateKey] = notesForDate;
+      } else {
+        delete nextNotes[dateKey];
+      }
+
+      return nextNotes;
+    });
+  };
+
+  const toggleItemNoteEditor = (dateKey: string, itemId: string) => {
+    setNoteEditorTarget((currentTarget) =>
+      currentTarget?.dateKey === dateKey && currentTarget.itemId === itemId
+        ? null
+        : { dateKey, itemId },
+    );
+  };
+
   const toggleItem = (id: string) => {
     setCheckedItems((current) => {
       const nextChecks = {
@@ -1786,7 +1882,7 @@ function App() {
         [id]: !current[id],
       };
 
-      if (historySelectedDateKey === selectedDateKey) {
+      if (historySelectedDate && historySelectedDateKey === selectedDateKey) {
         setHistoryCheckedItems(nextChecks);
       }
 
@@ -1795,6 +1891,10 @@ function App() {
   };
 
   const toggleHistoryItem = (id: string) => {
+    if (!historySelectedDate) {
+      return;
+    }
+
     setHistoryCheckedItems((current) => {
       const nextChecks = {
         ...current,
@@ -1826,7 +1926,7 @@ function App() {
         [activeTimer.itemId]: true,
       };
 
-      if (historySelectedDateKey === selectedDateKey) {
+      if (historySelectedDate && historySelectedDateKey === selectedDateKey) {
         setHistoryCheckedItems(nextChecks);
       }
 
@@ -2445,6 +2545,32 @@ function App() {
     }
   };
 
+  const resetToInitialState = () => {
+    const firstConfirmed = window.confirm(
+      '本当に初回状態にリセットしますか？保存データは削除されます。',
+    );
+
+    if (!firstConfirmed) {
+      return;
+    }
+
+    const finalConfirmed = window.confirm(
+      '最終確認です。ルーティン、チェック履歴、メモ、タイマー、実績、アーカイブを含む全データを削除します。よろしいですか？',
+    );
+
+    if (!finalConfirmed) {
+      return;
+    }
+
+    Array.from({ length: window.localStorage.length }, (_, index) =>
+      window.localStorage.key(index),
+    )
+      .filter((key): key is string => key !== null && isHibitinStorageKey(key))
+      .forEach((key) => window.localStorage.removeItem(key));
+
+    window.location.reload();
+  };
+
   const resetEditUiState = () => {
     setIsEditMode(false);
     setIsHistoryEditMode(false);
@@ -2729,6 +2855,10 @@ function App() {
                     isToday &&
                     !isEditMode &&
                     Boolean(item.timerMinutes);
+                  const itemNote = page === 'today' ? getItemNote(selectedDateKey, item.id) : '';
+                  const isItemNoteOpen =
+                    noteEditorTarget?.dateKey === selectedDateKey &&
+                    noteEditorTarget.itemId === item.id;
 
                   return (
                     <div
@@ -2984,6 +3114,17 @@ function App() {
                           )}
                         </div>
                       )}
+                      {page === 'today' && (
+                        <button
+                          aria-label={`${item.label}のメモ`}
+                          className="item-note-toggle"
+                          data-has-note={itemNote.trim() ? 'true' : 'false'}
+                          onClick={() => toggleItemNoteEditor(selectedDateKey, item.id)}
+                          type="button"
+                        >
+                          {itemNote.trim() ? '📝✨' : '📝'}
+                        </button>
+                      )}
                       {!isFixedItem && canEditSection && (
                         <button
                           aria-label={`${item.label}を削除`}
@@ -2999,6 +3140,20 @@ function App() {
                         >
                           削除
                         </button>
+                      )}
+                      {page === 'today' && isItemNoteOpen && (
+                        <div className="item-note-editor">
+                          <textarea
+                            aria-label={`${item.label}のメモ`}
+                            autoFocus
+                            onChange={(event) =>
+                              updateItemNote(selectedDateKey, item.id, event.target.value)
+                            }
+                            placeholder="このクエストでやったことを書く"
+                            rows={2}
+                            value={itemNote}
+                          />
+                        </div>
                       )}
                     </div>
                   );
@@ -3101,7 +3256,9 @@ function App() {
                     data-today={day.isToday ? 'true' : 'false'}
                     key={day.dateKey}
                     onClick={() => {
-                      setHistorySelectedDate(day.date);
+                      setHistorySelectedDate((currentDate) =>
+                        currentDate && getDateKey(currentDate) === day.dateKey ? null : day.date,
+                      );
                       setIsHistoryEditMode(false);
                       setSortingSectionId(null);
                       setDraggedItemId(null);
@@ -3126,62 +3283,79 @@ function App() {
                 );
               })}
             </div>
-            <div className="history-detail">
-              <div className="history-detail-heading">
-                <div>
-                  <p className="history-date-label">📅 {historyDateLabel}</p>
-                  <p className="history-routine-kind" data-routine-kind={historyRoutineKind}>
-                    {historyRoutineKindLabel}
-                  </p>
+            {historySelectedDate ? (
+              <div className="history-detail">
+                <div className="history-detail-heading">
+                  <div>
+                    <p className="history-date-label">📅 {historyDateLabel}</p>
+                    <p className="history-routine-kind" data-routine-kind={historyRoutineKind}>
+                      {historyRoutineKindLabel}
+                    </p>
+                  </div>
+                  <div className="history-detail-actions">
+                    <button
+                      className="history-close-button"
+                      onClick={() => {
+                        setHistorySelectedDate(null);
+                        setIsHistoryEditMode(false);
+                        setSortingSectionId(null);
+                        setDraggedItemId(null);
+                        setEditingItemId(null);
+                        setEditingLabel('');
+                      }}
+                      type="button"
+                    >
+                      閉じる
+                    </button>
+                    <button
+                      className="edit-mode-button history-edit-button"
+                      onClick={() => {
+                        setIsHistoryEditMode((current) => !current);
+                        setSortingSectionId(null);
+                        setDraggedItemId(null);
+                        setEditingItemId(null);
+                        setEditingLabel('');
+                      }}
+                      type="button"
+                    >
+                      {isHistoryEditMode ? '編集を終了' : '編集モード'}
+                    </button>
+                  </div>
                 </div>
-                <button
-                  className="edit-mode-button history-edit-button"
-                  onClick={() => {
-                    setIsHistoryEditMode((current) => !current);
-                    setSortingSectionId(null);
-                    setDraggedItemId(null);
-                    setEditingItemId(null);
-                    setEditingLabel('');
-                  }}
-                  type="button"
+                <section
+                  className="result-panel"
+                  data-rank-level={historyDateRank.level}
+                  aria-label="選択日の達成率"
                 >
-                  {isHistoryEditMode ? '編集を終了' : '編集モード'}
-                </button>
-              </div>
-              <section
-                className="result-panel"
-                data-rank-level={historyDateRank.level}
-                aria-label="選択日の達成率"
-              >
-                {historyDateStats.rate === null ? (
-                  <>
-                    <p className="result-rank">ルーティン未設定</p>
-                    <p className="result-rate">--</p>
-                    <p className="result-count">0 / 0 完了</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="result-rank">
-                      <span aria-hidden="true">{historyDateRank.icon}</span>
-                      {historyDateRank.label}
-                    </p>
-                    <p className="result-rate">{historyDateStats.rate}%</p>
-                    <p className="result-count">
-                      {historyDateStats.completedCount} / {historyDateStats.totalCount} 完了
-                    </p>
-                  </>
-                )}
-              </section>
-              <div className="history-routine-list">
-                {historyDisplaySections.map((section) => {
-                  const isBonusSection = section.id === bonusSectionId;
+                  {historyDateStats.rate === null ? (
+                    <>
+                      <p className="result-rank">ルーティン未設定</p>
+                      <p className="result-rate">--</p>
+                      <p className="result-count">0 / 0 完了</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="result-rank">
+                        <span aria-hidden="true">{historyDateRank.icon}</span>
+                        {historyDateRank.label}
+                      </p>
+                      <p className="result-rate">{historyDateStats.rate}%</p>
+                      <p className="result-count">
+                        {historyDateStats.completedCount} / {historyDateStats.totalCount} 完了
+                      </p>
+                    </>
+                  )}
+                </section>
+                <div className="history-routine-list">
+                  {historyDisplaySections.map((section) => {
+                    const isBonusSection = section.id === bonusSectionId;
 
-                  return (
-                  <section
-                    className="history-routine-section"
-                    data-bonus={isBonusSection ? 'true' : 'false'}
-                    key={section.id}
-                  >
+                    return (
+                    <section
+                      className="history-routine-section"
+                      data-bonus={isBonusSection ? 'true' : 'false'}
+                      key={section.id}
+                    >
                     <div className="history-section-header">
                       <div>
                         <h3>
@@ -3206,6 +3380,10 @@ function App() {
                       {section.items.map((item) => {
                         const isEditing = editingItemId === item.id;
                         const isFixedItem = fixedRoutineIds.has(item.id);
+                        const historyItemNote = getItemNote(historySelectedDateKey, item.id);
+                        const isHistoryItemNoteOpen =
+                          noteEditorTarget?.dateKey === historySelectedDateKey &&
+                          noteEditorTarget.itemId === item.id;
 
                         return (
                         <div
@@ -3386,6 +3564,15 @@ function App() {
                               )}
                             </div>
                           )}
+                          <button
+                            aria-label={`${item.label}のメモ`}
+                            className="item-note-toggle"
+                            data-has-note={historyItemNote.trim() ? 'true' : 'false'}
+                            onClick={() => toggleItemNoteEditor(historySelectedDateKey, item.id)}
+                            type="button"
+                          >
+                            {historyItemNote.trim() ? '📝✨' : '📝'}
+                          </button>
                           {!isFixedItem && isHistoryEditMode && (
                             <button
                               aria-label={`${item.label}を削除`}
@@ -3402,6 +3589,24 @@ function App() {
                               削除
                             </button>
                           )}
+                          {isHistoryItemNoteOpen && (
+                            <div className="item-note-editor">
+                              <textarea
+                                aria-label={`${item.label}のメモ`}
+                                autoFocus
+                                onChange={(event) =>
+                                  updateItemNote(
+                                    historySelectedDateKey,
+                                    item.id,
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="このクエストでやったことを書く"
+                                rows={2}
+                                value={historyItemNote}
+                              />
+                            </div>
+                          )}
                         </div>
                         );
                       })}
@@ -3415,11 +3620,16 @@ function App() {
                         ＋追加
                       </button>
                     )}
-                  </section>
-                  );
-                })}
+                    </section>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <p className="history-empty-guide">
+                日付をタップすると、その日のクエストを確認できます。
+              </p>
+            )}
           </section>
         )}
 
@@ -3612,6 +3822,18 @@ function App() {
               <p className="backup-warning">
                 読み込み時は、現在この端末に保存されているhibitinデータを上書きします。
               </p>
+              <div className="reset-actions">
+                <button
+                  className="reset-initial-button"
+                  onClick={resetToInitialState}
+                  type="button"
+                >
+                  初回状態にリセット
+                </button>
+                <p>
+                  開発中に初期ルーティンを確認するための操作です。hibitin以外の保存データは削除しません。
+                </p>
+              </div>
             </div>
           </details>
         )}
