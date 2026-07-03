@@ -1607,6 +1607,37 @@ function App() {
     localStorage.setItem(memoStorageKey, dailyMemo);
   }, [dailyMemo, dailyMemoDateKey, memoStorageKey, selectedDateKey]);
 
+  useEffect(() => {
+    const closePopupPanels = () => {
+      setTimerSettingItemId(null);
+      setNoteEditorTarget(null);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest('[data-popup-ui="true"]')) {
+        return;
+      }
+
+      closePopupPanels();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePopupPanels();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const playTimerAlertSound = () => {
     try {
       const AudioContextClass =
@@ -1646,7 +1677,7 @@ function App() {
         vibrate?: (pattern: VibratePattern) => boolean;
       }).vibrate;
 
-      vibrate?.([180, 80, 180]);
+      vibrate?.([500, 300, 500]);
     } catch {
       // iPhone PWAなど、振動に未対応の環境では何もしません。
     }
@@ -1767,7 +1798,7 @@ function App() {
     const alertId = window.setInterval(() => {
       playTimerAlertSound();
       vibrateTimerAlert();
-    }, 4000);
+    }, 2000);
 
     return () => window.clearInterval(alertId);
   }, [activeTimer?.isComplete, timerAlertSilenced]);
@@ -1868,11 +1899,17 @@ function App() {
   };
 
   const toggleItemNoteEditor = (dateKey: string, itemId: string) => {
+    setTimerSettingItemId(null);
     setNoteEditorTarget((currentTarget) =>
       currentTarget?.dateKey === dateKey && currentTarget.itemId === itemId
         ? null
         : { dateKey, itemId },
     );
+  };
+
+  const toggleTimerSetting = (itemId: string) => {
+    setNoteEditorTarget(null);
+    setTimerSettingItemId((currentId) => (currentId === itemId ? null : itemId));
   };
 
   const toggleItem = (id: string) => {
@@ -1941,6 +1978,34 @@ function App() {
     });
     alertedFinishedTimerIdRef.current = null;
     setActiveTimer(null);
+  };
+
+  const stopFinishedTimerAlert = () => {
+    setTimerAlertSilenced(true);
+    alertedFinishedTimerIdRef.current = null;
+    setActiveTimer(null);
+  };
+
+  const extendFinishedTimerByFiveMinutes = () => {
+    if (!activeTimer) {
+      return;
+    }
+
+    setTimerAlertSilenced(true);
+    alertedFinishedTimerIdRef.current = null;
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      delete nextTimers[activeTimer.itemId];
+
+      return nextTimers;
+    });
+    setActiveTimer(createRunningTimer(
+      activeTimer.itemId,
+      activeTimer.label,
+      5 * 60,
+      5 * 60,
+    ));
   };
 
   const updateItemTimerMinutes = (
@@ -2189,6 +2254,7 @@ function App() {
     setEditingItemId(null);
     setEditingLabel('');
     setTimerSettingItemId(null);
+    setNoteEditorTarget(null);
   };
 
   const openEditMode = () => {
@@ -2589,7 +2655,10 @@ function App() {
   };
 
   return (
-    <main className="app">
+    <main
+      className="app"
+      data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
+    >
       <div className="app-content">
         <header className="app-header">
           <div className="top-bar">
@@ -2739,31 +2808,26 @@ function App() {
             >
               {activeTimer.isComplete ? (
                 <>
-                  <p className="timer-finished">🎉 時間です！</p>
-                  <p className="timer-title">{activeTimer.label} お疲れさま！</p>
+                  <p className="timer-finished">🎉 クエストタイム終了！</p>
+                  <p className="timer-title">
+                    {activeTimer.label} {Math.round(activeTimer.durationSeconds / 60)}分
+                  </p>
                   <p className="timer-alert-note">
-                    このルーティンを完了にしますか？通知は閉じるまで残ります。
+                    ナイス！1クエスト進んだ！
                   </p>
                   <div className="timer-actions">
-                    <button onClick={() => setTimerAlertSilenced(true)} type="button">
-                      通知を停止
+                    <button onClick={completeActiveTimerItem} type="button">
+                      完了にする
                     </button>
                     {notificationPermission === 'default' && (
                       <button onClick={requestNotificationPermission} type="button">
                         通知を許可
                       </button>
                     )}
-                    <button onClick={completeActiveTimerItem} type="button">
-                      このルーティンを完了にする
+                    <button onClick={extendFinishedTimerByFiveMinutes} type="button">
+                      ＋5分
                     </button>
-                    <button
-                      onClick={() => {
-                        setTimerAlertSilenced(true);
-                        alertedFinishedTimerIdRef.current = null;
-                        setActiveTimer(null);
-                      }}
-                      type="button"
-                    >
+                    <button onClick={stopFinishedTimerAlert} type="button">
                       閉じる
                     </button>
                   </div>
@@ -3042,17 +3106,14 @@ function App() {
                           <button
                             aria-label={`${item.label}のタイマーを設定`}
                             className="timer-settings-toggle"
-                            onClick={() =>
-                              setTimerSettingItemId((currentId) =>
-                                currentId === item.id ? null : item.id,
-                              )
-                            }
+                            data-popup-ui="true"
+                            onClick={() => toggleTimerSetting(item.id)}
                             type="button"
                           >
                             ⏱
                           </button>
                           {timerSettingItemId === item.id && (
-                            <div className="timer-setting-menu">
+                            <div className="timer-setting-menu" data-popup-ui="true">
                               <select
                                 aria-label={`${item.label}のタイマー時間`}
                                 onChange={(event) => {
@@ -3119,6 +3180,7 @@ function App() {
                           aria-label={`${item.label}のメモ`}
                           className="item-note-toggle"
                           data-has-note={itemNote.trim() ? 'true' : 'false'}
+                          data-popup-ui="true"
                           onClick={() => toggleItemNoteEditor(selectedDateKey, item.id)}
                           type="button"
                         >
@@ -3142,14 +3204,14 @@ function App() {
                         </button>
                       )}
                       {page === 'today' && isItemNoteOpen && (
-                        <div className="item-note-editor">
+                        <div className="item-note-editor" data-popup-ui="true">
                           <textarea
                             aria-label={`${item.label}のメモ`}
                             autoFocus
                             onChange={(event) =>
                               updateItemNote(selectedDateKey, item.id, event.target.value)
                             }
-                            placeholder="このクエストでやったことを書く"
+                            placeholder="ひとこと記録を残す"
                             rows={2}
                             value={itemNote}
                           />
@@ -3491,17 +3553,14 @@ function App() {
                               <button
                                 aria-label={`${item.label}のタイマーを設定`}
                                 className="timer-settings-toggle"
-                                onClick={() =>
-                                  setTimerSettingItemId((currentId) =>
-                                    currentId === item.id ? null : item.id,
-                                  )
-                                }
+                                data-popup-ui="true"
+                                onClick={() => toggleTimerSetting(item.id)}
                                 type="button"
                               >
                                 ⏱
                               </button>
                               {timerSettingItemId === item.id && (
-                                <div className="timer-setting-menu">
+                                <div className="timer-setting-menu" data-popup-ui="true">
                                   <select
                                     aria-label={`${item.label}のタイマー時間`}
                                     onChange={(event) => {
@@ -3568,6 +3627,7 @@ function App() {
                             aria-label={`${item.label}のメモ`}
                             className="item-note-toggle"
                             data-has-note={historyItemNote.trim() ? 'true' : 'false'}
+                            data-popup-ui="true"
                             onClick={() => toggleItemNoteEditor(historySelectedDateKey, item.id)}
                             type="button"
                           >
@@ -3590,7 +3650,7 @@ function App() {
                             </button>
                           )}
                           {isHistoryItemNoteOpen && (
-                            <div className="item-note-editor">
+                            <div className="item-note-editor" data-popup-ui="true">
                               <textarea
                                 aria-label={`${item.label}のメモ`}
                                 autoFocus
@@ -3601,7 +3661,7 @@ function App() {
                                     event.target.value,
                                   )
                                 }
-                                placeholder="このクエストでやったことを書く"
+                                placeholder="ひとこと記録を残す"
                                 rows={2}
                                 value={historyItemNote}
                               />
@@ -3859,6 +3919,49 @@ function App() {
           </button>
         ))}
       </nav>
+
+      {activeTimer?.isComplete && (
+        <div className="timer-finished-backdrop" role="presentation">
+          <div className="timer-finished-sparkles" aria-hidden="true">
+            <span>✨</span>
+            <span>🎉</span>
+            <span>✨</span>
+          </div>
+          <section
+            aria-labelledby="timer-finished-title"
+            aria-modal="true"
+            className="timer-finished-modal"
+            role="dialog"
+          >
+            <p className="timer-finished-kicker">⏱ タイマー終了</p>
+            <h2 id="timer-finished-title">🎉 クエストタイム終了！</h2>
+            <p className="timer-finished-routine">
+              {activeTimer.label} {Math.round(activeTimer.durationSeconds / 60)}分
+            </p>
+            <p className="timer-finished-message">ナイス！1クエスト進んだ！</p>
+            <div className="timer-finished-actions">
+              <button onClick={completeActiveTimerItem} type="button">
+                完了にする
+              </button>
+              <button onClick={extendFinishedTimerByFiveMinutes} type="button">
+                ＋5分
+              </button>
+              <button onClick={stopFinishedTimerAlert} type="button">
+                閉じる
+              </button>
+            </div>
+            {notificationPermission === 'default' && (
+              <button
+                className="timer-permission-button"
+                onClick={requestNotificationPermission}
+                type="button"
+              >
+                ブラウザ通知を許可
+              </button>
+            )}
+          </section>
+        </div>
+      )}
 
       {pendingDelete && (
         <div className="dialog-backdrop" role="presentation">
