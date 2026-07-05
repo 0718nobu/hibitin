@@ -24,6 +24,7 @@ type RoutineItem = {
   fixedKind?: 'wake' | 'sleep';
   time?: string;
   timerMinutes?: number;
+  timerSeconds?: number;
 };
 
 type RoutineSection = {
@@ -209,7 +210,10 @@ const sectionIconLabels: Record<string, string> = {
   advanced: '⚙️',
 };
 
-const timerPresetMinutes = [5, 10, 15, 20, 30];
+const timerPresetSeconds = [30, 60, 180, 300, 600, 900, 1200, 1800];
+const timerHourOptions = [0, 1, 2];
+const timerMinuteOptions = Array.from({ length: 60 }, (_, index) => index);
+const timerSecondOptions = Array.from({ length: 60 }, (_, index) => index);
 
 const dailyMessages = [
   '🌅 今日もゲームスタート。',
@@ -252,7 +256,7 @@ const defaultRoutineSections: RoutineSection[] = [
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
-        timerMinutes: 10,
+        timerSeconds: 600,
       },
     ],
   },
@@ -267,7 +271,7 @@ const defaultRoutineSections: RoutineSection[] = [
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
-        timerMinutes: 10,
+        timerSeconds: 600,
       },
     ],
   },
@@ -282,7 +286,7 @@ const defaultRoutineSections: RoutineSection[] = [
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
-        timerMinutes: 5,
+        timerSeconds: 300,
       },
     ],
   },
@@ -297,7 +301,7 @@ const defaultRoutineSections: RoutineSection[] = [
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
-        timerMinutes: 10,
+        timerSeconds: 600,
       },
     ],
   },
@@ -894,12 +898,50 @@ const getCompletionRank = (rate: number | null) => {
   return { icon: '☕', label: 'READY?', level: 'ready' };
 };
 
-const formatTimerMinutes = (minutes: number) => {
-  if (Number.isInteger(minutes)) {
-    return `${minutes}分`;
+const getItemTimerSeconds = (item: RoutineItem) => {
+  if (item.timerSeconds && item.timerSeconds > 0) {
+    return Math.round(item.timerSeconds);
   }
 
-  return `${minutes.toFixed(1).replace(/\.0$/, '')}分`;
+  if (item.timerMinutes && item.timerMinutes > 0) {
+    return Math.round(item.timerMinutes * 60);
+  }
+
+  return undefined;
+};
+
+const getTimerParts = (seconds: number) => {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const restSeconds = safeSeconds % 60;
+
+  return { hours, minutes, seconds: restSeconds };
+};
+
+const getSecondsFromTimerParts = (parts: {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}) => (parts.hours * 3600) + (parts.minutes * 60) + parts.seconds;
+
+const formatTimerDuration = (seconds: number) => {
+  const parts = getTimerParts(seconds);
+  const labels = [];
+
+  if (parts.hours > 0) {
+    labels.push(`${parts.hours}時間`);
+  }
+
+  if (parts.minutes > 0) {
+    labels.push(`${parts.minutes}分`);
+  }
+
+  if (parts.seconds > 0 || labels.length === 0) {
+    labels.push(`${parts.seconds}秒`);
+  }
+
+  return labels.join('');
 };
 
 const formatTimerSeconds = (seconds: number) => {
@@ -1039,14 +1081,6 @@ const loadStoredTimerState = (): StoredTimerState => {
       pausedTimers: {},
     };
   }
-};
-
-const getTimerSelectValue = (minutes?: number) => {
-  if (!minutes) {
-    return 'none';
-  }
-
-  return timerPresetMinutes.includes(minutes) ? String(minutes) : 'custom';
 };
 
 const getMasteryStarCount = (bestStreak: number) =>
@@ -1310,6 +1344,7 @@ function App() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
+  const [timerDraftParts, setTimerDraftParts] = useState(() => getTimerParts(300));
   const [noteEditorTarget, setNoteEditorTarget] = useState<NoteEditorTarget | null>(null);
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(
     () => getInitialTimerState().activeTimer,
@@ -1907,9 +1942,10 @@ function App() {
     );
   };
 
-  const toggleTimerSetting = (itemId: string) => {
+  const toggleTimerSetting = (item: RoutineItem) => {
     setNoteEditorTarget(null);
-    setTimerSettingItemId((currentId) => (currentId === itemId ? null : itemId));
+    setTimerDraftParts(getTimerParts(getItemTimerSeconds(item) ?? 300));
+    setTimerSettingItemId((currentId) => (currentId === item.id ? null : item.id));
   };
 
   const toggleItem = (id: string) => {
@@ -2008,10 +2044,10 @@ function App() {
     ));
   };
 
-  const updateItemTimerMinutes = (
+  const updateItemTimerSeconds = (
     sectionId: string,
     itemId: string,
-    timerMinutes?: number,
+    timerSeconds?: number,
   ) => {
     updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
       currentSections.map((section) => ({
@@ -2021,17 +2057,22 @@ function App() {
             return item;
           }
 
-          if (!timerMinutes) {
+          if (!timerSeconds) {
             const itemWithoutTimer = { ...item };
 
             delete itemWithoutTimer.timerMinutes;
+            delete itemWithoutTimer.timerSeconds;
 
             return itemWithoutTimer;
           }
 
+          const itemWithTimer = { ...item };
+
+          delete itemWithTimer.timerMinutes;
+
           return {
-            ...item,
-            timerMinutes,
+            ...itemWithTimer,
+            timerSeconds,
           };
         }),
       })),
@@ -2051,8 +2092,111 @@ function App() {
     });
   };
 
+  const renderTimerSettingMenu = (sectionId: string, item: RoutineItem) => (
+    <div className="timer-setting-menu" data-popup-ui="true">
+      <p className="timer-setting-title">タイマー設定</p>
+      <div className="timer-shortcut-group">
+        <span>よく使う時間</span>
+        <div className="timer-shortcut-buttons">
+          {timerPresetSeconds.map((seconds) => (
+            <button
+              data-active={
+                getSecondsFromTimerParts(timerDraftParts) === seconds ? 'true' : 'false'
+              }
+              key={seconds}
+              onClick={() => setTimerDraftParts(getTimerParts(seconds))}
+              type="button"
+            >
+              {formatTimerDuration(seconds)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="timer-part-picker">
+        <label>
+          <span>時</span>
+          <select
+            aria-label={`${item.label}のタイマー時間`}
+            onChange={(event) =>
+              setTimerDraftParts((currentParts) => ({
+                ...currentParts,
+                hours: Number(event.target.value),
+              }))
+            }
+            value={timerDraftParts.hours}
+          >
+            {timerHourOptions.map((hours) => (
+              <option key={hours} value={hours}>
+                {hours}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>分</span>
+          <select
+            aria-label={`${item.label}のタイマー分`}
+            onChange={(event) =>
+              setTimerDraftParts((currentParts) => ({
+                ...currentParts,
+                minutes: Number(event.target.value),
+              }))
+            }
+            value={timerDraftParts.minutes}
+          >
+            {timerMinuteOptions.map((minutes) => (
+              <option key={minutes} value={minutes}>
+                {minutes}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>秒</span>
+          <select
+            aria-label={`${item.label}のタイマー秒`}
+            onChange={(event) =>
+              setTimerDraftParts((currentParts) => ({
+                ...currentParts,
+                seconds: Number(event.target.value),
+              }))
+            }
+            value={timerDraftParts.seconds}
+          >
+            {timerSecondOptions.map((seconds) => (
+              <option key={seconds} value={seconds}>
+                {seconds}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="timer-picker-actions">
+        <button onClick={() => setTimerSettingItemId(null)} type="button">
+          キャンセル
+        </button>
+        <button
+          disabled={getSecondsFromTimerParts(timerDraftParts) === 0}
+          onClick={() => {
+            updateItemTimerSeconds(
+              sectionId,
+              item.id,
+              getSecondsFromTimerParts(timerDraftParts),
+            );
+            setTimerSettingItemId(null);
+          }}
+          type="button"
+        >
+          保存
+        </button>
+      </div>
+    </div>
+  );
+
   const startItemTimer = (item: RoutineItem) => {
-    if (!item.timerMinutes) {
+    const totalSeconds = getItemTimerSeconds(item);
+
+    if (!totalSeconds) {
       return;
     }
 
@@ -2083,8 +2227,6 @@ function App() {
     });
 
     const pausedTimer = pausedTimers[item.id];
-    const totalSeconds = Math.round(item.timerMinutes * 60);
-
     setActiveTimer(createRunningTimer(
       item.id,
       item.label,
@@ -2810,7 +2952,7 @@ function App() {
                 <>
                   <p className="timer-finished">🎉 クエストタイム終了！</p>
                   <p className="timer-title">
-                    {activeTimer.label} {Math.round(activeTimer.durationSeconds / 60)}分
+                    {activeTimer.label} {formatTimerDuration(activeTimer.durationSeconds)}
                   </p>
                   <p className="timer-alert-note">
                     ナイス！1クエスト進んだ！
@@ -2914,11 +3056,12 @@ function App() {
                   const pausedTimer = pausedTimers[item.id];
                   const activeItemTimer =
                     activeTimer?.itemId === item.id ? activeTimer : null;
+                  const itemTimerSeconds = getItemTimerSeconds(item);
                   const showTimerStart =
                     page === 'today' &&
                     isToday &&
                     !isEditMode &&
-                    Boolean(item.timerMinutes);
+                    Boolean(itemTimerSeconds);
                   const itemNote = page === 'today' ? getItemNote(selectedDateKey, item.id) : '';
                   const isItemNoteOpen =
                     noteEditorTarget?.dateKey === selectedDateKey &&
@@ -3079,7 +3222,7 @@ function App() {
                               ? `⏱残り ${formatTimerSeconds(activeItemTimer.remainingSeconds)}`
                               : pausedTimer
                               ? `⏱残り ${formatTimerSeconds(pausedTimer.remainingSeconds)}`
-                              : `⏱${formatTimerMinutes(item.timerMinutes ?? 0)}`}
+                              : `⏱${formatTimerDuration(itemTimerSeconds ?? 0)}`}
                           </span>
                           <button
                             onClick={() => {
@@ -3107,71 +3250,13 @@ function App() {
                             aria-label={`${item.label}のタイマーを設定`}
                             className="timer-settings-toggle"
                             data-popup-ui="true"
-                            onClick={() => toggleTimerSetting(item.id)}
+                            onClick={() => toggleTimerSetting(item)}
                             type="button"
                           >
                             ⏱
                           </button>
                           {timerSettingItemId === item.id && (
-                            <div className="timer-setting-menu" data-popup-ui="true">
-                              <select
-                                aria-label={`${item.label}のタイマー時間`}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-
-                                  if (nextValue === 'none') {
-                                    updateItemTimerMinutes(section.id, item.id);
-                                    return;
-                                  }
-
-                                  if (nextValue === 'custom') {
-                                    updateItemTimerMinutes(
-                                      section.id,
-                                      item.id,
-                                      item.timerMinutes && !timerPresetMinutes.includes(item.timerMinutes)
-                                        ? item.timerMinutes
-                                        : 1,
-                                    );
-                                    return;
-                                  }
-
-                                  updateItemTimerMinutes(
-                                    section.id,
-                                    item.id,
-                                    Number(nextValue),
-                                  );
-                                }}
-                                value={getTimerSelectValue(item.timerMinutes)}
-                              >
-                                <option value="none">タイマーなし</option>
-                                {timerPresetMinutes.map((minutes) => (
-                                  <option key={minutes} value={minutes}>
-                                    {minutes}分
-                                  </option>
-                                ))}
-                                <option value="custom">自由入力</option>
-                              </select>
-                              {getTimerSelectValue(item.timerMinutes) === 'custom' && (
-                                <input
-                                  aria-label={`${item.label}のタイマー自由入力`}
-                                  min="0.01"
-                                  onChange={(event) => {
-                                    const nextMinutes = Number(event.target.value);
-
-                                    updateItemTimerMinutes(
-                                      section.id,
-                                      item.id,
-                                      Number.isFinite(nextMinutes) && nextMinutes > 0
-                                        ? nextMinutes
-                                        : undefined,
-                                    );
-                                  }}
-                                  step="0.01"
-                                  type="number"
-                                  value={item.timerMinutes ?? ''}
-                                />
-                              )}
-                            </div>
+                            renderTimerSettingMenu(section.id, item)
                           )}
                         </div>
                       )}
@@ -3336,10 +3421,10 @@ function App() {
                       </span>
                     )}
                     <span className="calendar-day-rate">
-                      {day.rate === null ? '' : `${day.rate}%`}
+                      {day.rate === null || day.rate === 0 ? '' : `${day.rate}%`}
                     </span>
                     <span className="calendar-day-rank" aria-hidden="true">
-                      {day.rankIcon}
+                      {day.rate && day.rate > 0 ? day.rankIcon : ''}
                     </span>
                   </button>
                 );
@@ -3442,6 +3527,7 @@ function App() {
                       {section.items.map((item) => {
                         const isEditing = editingItemId === item.id;
                         const isFixedItem = fixedRoutineIds.has(item.id);
+                        const historyItemTimerSeconds = getItemTimerSeconds(item);
                         const historyItemNote = getItemNote(historySelectedDateKey, item.id);
                         const isHistoryItemNoteOpen =
                           noteEditorTarget?.dateKey === historySelectedDateKey &&
@@ -3543,9 +3629,9 @@ function App() {
                               <span className="fixed-time-display">{item.time}</span>
                             )}
                           </span>
-                          {item.timerMinutes && !isHistoryEditMode && (
+                          {historyItemTimerSeconds && !isHistoryEditMode && (
                             <span className="timer-badge">
-                              ⏱{formatTimerMinutes(item.timerMinutes)}
+                              ⏱{formatTimerDuration(historyItemTimerSeconds)}
                             </span>
                           )}
                           {isHistoryEditMode && (
@@ -3554,72 +3640,13 @@ function App() {
                                 aria-label={`${item.label}のタイマーを設定`}
                                 className="timer-settings-toggle"
                                 data-popup-ui="true"
-                                onClick={() => toggleTimerSetting(item.id)}
+                                onClick={() => toggleTimerSetting(item)}
                                 type="button"
                               >
                                 ⏱
                               </button>
                               {timerSettingItemId === item.id && (
-                                <div className="timer-setting-menu" data-popup-ui="true">
-                                  <select
-                                    aria-label={`${item.label}のタイマー時間`}
-                                    onChange={(event) => {
-                                      const nextValue = event.target.value;
-
-                                      if (nextValue === 'none') {
-                                        updateItemTimerMinutes(section.id, item.id);
-                                        return;
-                                      }
-
-                                      if (nextValue === 'custom') {
-                                        updateItemTimerMinutes(
-                                          section.id,
-                                          item.id,
-                                          item.timerMinutes &&
-                                            !timerPresetMinutes.includes(item.timerMinutes)
-                                            ? item.timerMinutes
-                                            : 1,
-                                        );
-                                        return;
-                                      }
-
-                                      updateItemTimerMinutes(
-                                        section.id,
-                                        item.id,
-                                        Number(nextValue),
-                                      );
-                                    }}
-                                    value={getTimerSelectValue(item.timerMinutes)}
-                                  >
-                                    <option value="none">タイマーなし</option>
-                                    {timerPresetMinutes.map((minutes) => (
-                                      <option key={minutes} value={minutes}>
-                                        {minutes}分
-                                      </option>
-                                    ))}
-                                    <option value="custom">自由入力</option>
-                                  </select>
-                                  {getTimerSelectValue(item.timerMinutes) === 'custom' && (
-                                    <input
-                                      aria-label={`${item.label}のタイマー自由入力`}
-                                      min="0.01"
-                                      onChange={(event) => {
-                                        const nextMinutes = Number(event.target.value);
-
-                                        updateItemTimerMinutes(
-                                          section.id,
-                                          item.id,
-                                          Number.isFinite(nextMinutes) && nextMinutes > 0
-                                            ? nextMinutes
-                                            : undefined,
-                                        );
-                                      }}
-                                      step="0.01"
-                                      type="number"
-                                      value={item.timerMinutes ?? ''}
-                                    />
-                                  )}
-                                </div>
+                                renderTimerSettingMenu(section.id, item)
                               )}
                             </div>
                           )}
@@ -3936,7 +3963,7 @@ function App() {
             <p className="timer-finished-kicker">⏱ タイマー終了</p>
             <h2 id="timer-finished-title">🎉 クエストタイム終了！</h2>
             <p className="timer-finished-routine">
-              {activeTimer.label} {Math.round(activeTimer.durationSeconds / 60)}分
+              {activeTimer.label} {formatTimerDuration(activeTimer.durationSeconds)}
             </p>
             <p className="timer-finished-message">ナイス！1クエスト進んだ！</p>
             <div className="timer-finished-actions">

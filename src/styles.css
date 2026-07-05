@@ -203,8 +203,9 @@ h1 {
 .timer-finished-actions button:focus-visible,
 .timer-permission-button:focus-visible,
 .timer-settings-toggle:focus-visible,
-.timer-setting-menu select:focus-visible,
-.timer-setting-menu input:focus-visible,
+.timer-shortcut-buttons button:focus-visible,
+.timer-part-picker select:focus-visible,
+.timer-picker-actions button:focus-visible,
 .timer-start-control button:focus-visible,
 .item-note-toggle:focus-visible,
 .item-note-editor textarea:focus-visible,
@@ -849,17 +850,25 @@ h1 {
 }
 
 .calendar-day[data-rate-level='ready'] {
-  background: rgb(255 255 255 / 50%);
-  color: #8a7c68;
+  border-style: dashed;
+  border-color: #dccd9f;
+  background:
+    radial-gradient(circle at center, transparent 38%, rgb(175 146 75 / 10%) 39%, transparent 43%),
+    rgb(255 255 255 / 44%);
+  color: #9a8f78;
 }
 
 .calendar-day[data-rate-level='ready'][data-routine-kind='holiday'] {
-  border-color: #efb4b4;
-  background: rgb(255 238 240 / 82%);
+  border-color: #efc0c0;
+  background:
+    radial-gradient(circle at center, transparent 38%, rgb(199 90 95 / 10%) 39%, transparent 43%),
+    rgb(255 240 242 / 70%);
 }
 
 .calendar-day[data-rate-level='ready'][data-routine-kind='custom'] {
-  background: rgb(255 246 214 / 84%);
+  background:
+    radial-gradient(circle at center, transparent 38%, rgb(224 181 90 / 12%) 39%, transparent 43%),
+    rgb(255 247 219 / 72%);
 }
 
 .calendar-day[data-rate-level='start'] {
@@ -2129,25 +2138,99 @@ h1 {
   right: 0;
   z-index: 5;
   display: grid;
-  width: 150px;
-  gap: 5px;
+  width: min(260px, calc(100vw - 32px));
+  gap: 10px;
   border: 1px solid #cfe4d7;
-  border-radius: 8px;
-  padding: 7px;
+  border-radius: 12px;
+  padding: 12px;
   background: #ffffff;
   box-shadow: 0 12px 28px rgb(18 24 20 / 16%);
 }
 
-.timer-setting-menu select,
-.timer-setting-menu input {
+.timer-setting-title,
+.timer-shortcut-group span,
+.timer-picker-label {
+  margin: 0;
+  color: #25483a;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.timer-shortcut-group {
+  display: grid;
+  gap: 6px;
+}
+
+.timer-shortcut-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.timer-shortcut-buttons button {
+  min-height: 32px;
+  border: 1px solid #d7e7de;
+  border-radius: 999px;
+  background: #f5fbf7;
+  color: #2f5d4a;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.timer-shortcut-buttons button[data-active='true'] {
+  border-color: #1f7a5a;
+  background: #ddf7e8;
+  color: #126242;
+}
+
+.timer-part-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.timer-part-picker label {
+  display: grid;
+  gap: 5px;
+  color: #25483a;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.timer-part-picker select {
   width: 100%;
-  min-height: 30px;
+  min-height: 40px;
   border: 1px solid #c8d6cf;
-  border-radius: 7px;
-  padding: 0 7px;
+  border-radius: 10px;
+  padding: 0 8px;
   background: #ffffff;
   color: #202623;
-  font-size: 0.82rem;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.timer-picker-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.timer-picker-actions button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: #e8ece8;
+  color: #53615a;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.timer-picker-actions button:last-child {
+  background: #1f7a5a;
+  color: #ffffff;
 }
 
 .fixed-routine-name {
