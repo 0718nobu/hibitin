@@ -879,15 +879,15 @@ const getCompletionRank = (rate: number | null) => {
     return { icon: '🏆', label: 'PERFECT!!', level: 'perfect' };
   }
 
-  if (rate >= 80) {
+  if (rate >= 75) {
     return { icon: '🌟', label: 'EXCELLENT!', level: 'excellent' };
   }
 
-  if (rate >= 60) {
+  if (rate >= 50) {
     return { icon: '🎉', label: 'GREAT!', level: 'great' };
   }
 
-  if (rate >= 30) {
+  if (rate >= 25) {
     return { icon: '👍', label: 'GOOD!', level: 'good' };
   }
 
@@ -1549,8 +1549,10 @@ function App() {
         day: date.getDate(),
         rate: stats.rate,
         rankIcon: rank.icon,
+        rankLabel: rank.label.replace(/!+$/, ''),
         rankLevel: rank.level,
         totalCount: stats.totalCount,
+        isFuture: dateKey > todayKey,
         isToday: dateKey === todayKey,
         isSelected: historySelectedDate ? dateKey === historySelectedDateKey : false,
         routineKind,
@@ -2934,10 +2936,10 @@ function App() {
                     <span aria-hidden="true">{selectedDateRank.icon}</span>
                     {selectedDateRank.label}
                   </p>
-                  <p className="result-rate">{selectedDateStats.rate}%</p>
                   <p className="result-count">
                     {selectedDateStats.completedCount} / {selectedDateStats.totalCount} 完了
                   </p>
+                  <p className="result-rate">{selectedDateStats.rate}%</p>
                 </>
               )}
             </section>
@@ -3421,10 +3423,12 @@ function App() {
                       </span>
                     )}
                     <span className="calendar-day-rate">
-                      {day.rate === null || day.rate === 0 ? '' : `${day.rate}%`}
+                      {day.rate === null || (day.rate === 0 && day.isFuture) ? '' : day.rankLabel}
                     </span>
+                    <span className="calendar-stamp-slot" aria-hidden="true" />
                     <span className="calendar-day-rank" aria-hidden="true">
                       {day.rate && day.rate > 0 ? day.rankIcon : ''}
+                      {day.rate === 0 && !day.isFuture ? day.rankIcon : ''}
                     </span>
                   </button>
                 );
