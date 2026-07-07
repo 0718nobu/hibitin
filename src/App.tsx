@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
+type GameMode = 'player' | 'developer';
 type PageName = 'today' | 'history' | 'achievements' | 'settings';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
@@ -136,6 +137,7 @@ const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
+const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -499,6 +501,26 @@ const loadItemNotes = (): ItemNotes => {
   }
 };
 
+const loadGameMode = (): GameMode => {
+  try {
+    const savedMode = localStorage.getItem(GAME_MODE_STORAGE_KEY);
+
+    if (!savedMode) {
+      return 'player';
+    }
+
+    if (savedMode === 'developer') {
+      return 'developer';
+    }
+
+    const parsedMode = JSON.parse(savedMode) as unknown;
+
+    return parsedMode === 'developer' ? 'developer' : 'player';
+  } catch {
+    return 'player';
+  }
+};
+
 const isStartSection = (value: unknown): value is StartSection =>
   value === 'morning' || value === 'noon' || value === 'evening' || value === 'night';
 
@@ -783,6 +805,7 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
 const bonusSectionId = 'advanced';
+const PLAYER_MODE_DAILY_QUEST_LIMIT = 1;
 const MASTERY_RULES = [
   { stars: 1, streakDays: 5 },
   { stars: 2, streakDays: 10 },
@@ -1331,6 +1354,7 @@ function App() {
     loadArchivedItems(),
   );
   const [itemNotes, setItemNotes] = useState<ItemNotes>(() => loadItemNotes());
+  const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
     loadRhythmSettings(),
   );
@@ -1606,6 +1630,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(ITEM_NOTES_STORAGE_KEY, JSON.stringify(itemNotes));
   }, [itemNotes]);
+
+  useEffect(() => {
+    localStorage.setItem(GAME_MODE_STORAGE_KEY, JSON.stringify(gameMode));
+  }, [gameMode]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -2455,6 +2483,25 @@ function App() {
   };
 
   const addRoutine = (sectionId: string) => {
+    if (
+      gameMode === 'player' &&
+      dailySectionIds.includes(sectionId as StartSection)
+    ) {
+      const targetSections = getSectionsForTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        getUpdateTargetForSection(sectionId),
+        todayKey,
+      );
+      const targetSection = targetSections.find((section) => section.id === sectionId);
+      const questCount = targetSection?.items.filter((item) => !item.fixedKind).length ?? 0;
+
+      if (questCount >= PLAYER_MODE_DAILY_QUEST_LIMIT) {
+        return;
+      }
+    }
+
     const newItemId = createRoutineId(sectionId);
     const newItemLabel = '新しいルーティン';
 
@@ -2798,6 +2845,44 @@ function App() {
     setPage(nextPage);
   };
 
+  const isPlayerModeQuestLimitReached = (section: RoutineSection) =>
+    gameMode === 'player' &&
+    dailySectionIds.includes(section.id as StartSection) &&
+    section.items.filter((item) => !item.fixedKind).length >= PLAYER_MODE_DAILY_QUEST_LIMIT;
+
+  const wakeRoutineItem = displaySections
+    .flatMap((section) => section.items)
+    .find((item) => item.fixedKind === 'wake');
+  const sleepRoutineItem = displaySections
+    .flatMap((section) => section.items)
+    .find((item) => item.fixedKind === 'sleep');
+  const activitySections = displaySections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => !item.fixedKind),
+  }));
+  const bonusSection = activitySections.find((section) => section.id === bonusSectionId);
+  const dailyActivitySections = activitySections.filter((section) => section.id !== bonusSectionId);
+  const routineRenderSections: RoutineSection[] = [
+    ...(wakeRoutineItem
+      ? [{
+          id: 'wake-milestone',
+          title: '起床',
+          order: -100,
+          items: [wakeRoutineItem],
+        }]
+      : []),
+    ...dailyActivitySections,
+    ...(sleepRoutineItem
+      ? [{
+          id: 'sleep-milestone',
+          title: '就寝',
+          order: 10000,
+          items: [sleepRoutineItem],
+        }]
+      : []),
+    ...(bonusSection ? [bonusSection] : []),
+  ];
+
   return (
     <main
       className="app"
@@ -2834,6 +2919,54 @@ function App() {
               今日
             </button>
           </div>
+        )}
+
+        {page === 'settings' && (
+          <section className="game-mode-settings" aria-label="ゲームモード">
+            <div className="settings-header">
+              <div>
+                <h2>ゲームモード</h2>
+                <p>hibitinの遊び方を選びます。今は切り替え状態だけ保存します。</p>
+              </div>
+            </div>
+            <div className="game-mode-options">
+              {([
+                {
+                  key: 'player',
+                  title: 'プレイヤーモード',
+                  badge: '推奨',
+                  description:
+                    '少ないクエストを毎日続けるためのモードです。今後、段階解放の土台になります。',
+                },
+                {
+                  key: 'developer',
+                  title: '開発者モード',
+                  badge: '全機能',
+                  description:
+                    '現在のhibitinと同じく、制限なしでルーティンを作れるモードです。',
+                },
+              ] as {
+                key: GameMode;
+                title: string;
+                badge: string;
+                description: string;
+              }[]).map((mode) => (
+                <button
+                  className="game-mode-option"
+                  data-active={gameMode === mode.key ? 'true' : 'false'}
+                  key={mode.key}
+                  onClick={() => setGameMode(mode.key)}
+                  type="button"
+                >
+                  <span className="game-mode-title">
+                    {mode.title}
+                    <span>{mode.badge}</span>
+                  </span>
+                  <span className="game-mode-description">{mode.description}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {page === 'settings' && (
@@ -3014,28 +3147,45 @@ function App() {
               )}
             </div>
           )}
-          {displaySections.map((section) => {
+          {routineRenderSections.map((section) => {
             const isBonusSection = section.id === bonusSectionId;
+            const isMilestoneSection =
+              section.id === 'wake-milestone' || section.id === 'sleep-milestone';
             const canEditSection =
-              canEditRoutines || (page === 'today' && isBonusSection);
+              !isMilestoneSection && (canEditRoutines || (page === 'today' && isBonusSection));
+            const isPlayerLimitReached = isPlayerModeQuestLimitReached(section);
 
             return (
             <section
               className="routine-section"
               data-bonus={isBonusSection ? 'true' : 'false'}
+              data-milestone={isMilestoneSection ? 'true' : 'false'}
+              data-milestone-kind={
+                section.id === 'wake-milestone'
+                  ? 'wake'
+                  : section.id === 'sleep-milestone'
+                  ? 'sleep'
+                  : undefined
+              }
               key={section.id}
             >
               <div className="section-header">
                 <div>
                   <h2>
-                    <span aria-hidden="true">{sectionIconLabels[section.id]}</span>
+                    <span aria-hidden="true">
+                      {section.id === 'wake-milestone'
+                        ? '⏰'
+                        : section.id === 'sleep-milestone'
+                        ? '🛌'
+                        : sectionIconLabels[section.id]}
+                    </span>
                     {section.title}
                   </h2>
                   {isBonusSection && (
                     <p className="section-note">追加でやったこと</p>
                   )}
                 </div>
-                {canEditRoutines && (
+                {canEditRoutines && !isMilestoneSection && (
                   <div className="section-actions">
                     <button
                       className="sort-button"
@@ -3053,7 +3203,8 @@ function App() {
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
                   const canConfigureTimer =
-                    page === 'settings' || (page === 'today' && isToday && isEditMode);
+                    !isFixedItem &&
+                    (page === 'settings' || (page === 'today' && isToday && isEditMode));
                   const itemMasteryStats = masteryStatsByItemId.get(item.id);
                   const pausedTimer = pausedTimers[item.id];
                   const activeItemTimer =
@@ -3308,7 +3459,7 @@ function App() {
                   );
                 })}
               </div>
-              {canEditSection && (
+              {canEditSection && !isPlayerLimitReached && (
                 <button
                   className="add-button section-add-button"
                   onClick={() => addRoutine(section.id)}
@@ -3316,6 +3467,9 @@ function App() {
                 >
                   ＋追加
                 </button>
+              )}
+              {canEditSection && isPlayerLimitReached && (
+                <p className="quest-limit-note">まずはこの1個を育てよう</p>
               )}
             </section>
             );
@@ -3423,12 +3577,11 @@ function App() {
                       </span>
                     )}
                     <span className="calendar-day-rate">
-                      {day.rate === null || (day.rate === 0 && day.isFuture) ? '' : day.rankLabel}
+                      {day.rate && day.rate > 0 ? day.rankLabel : ''}
                     </span>
                     <span className="calendar-stamp-slot" aria-hidden="true" />
                     <span className="calendar-day-rank" aria-hidden="true">
                       {day.rate && day.rate > 0 ? day.rankIcon : ''}
-                      {day.rate === 0 && !day.isFuture ? day.rankIcon : ''}
                     </span>
                   </button>
                 );
@@ -3500,6 +3653,7 @@ function App() {
                 <div className="history-routine-list">
                   {historyDisplaySections.map((section) => {
                     const isBonusSection = section.id === bonusSectionId;
+                    const isPlayerLimitReached = isPlayerModeQuestLimitReached(section);
 
                     return (
                     <section
@@ -3702,7 +3856,7 @@ function App() {
                         );
                       })}
                     </div>
-                    {isHistoryEditMode && (
+                    {isHistoryEditMode && !isPlayerLimitReached && (
                       <button
                         className="add-button section-add-button"
                         onClick={() => addRoutine(section.id)}
@@ -3710,6 +3864,9 @@ function App() {
                       >
                         ＋追加
                       </button>
+                    )}
+                    {isHistoryEditMode && isPlayerLimitReached && (
+                      <p className="quest-limit-note">まずはこの1個を育てよう</p>
                     )}
                     </section>
                     );

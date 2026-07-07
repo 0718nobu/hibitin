@@ -226,9 +226,9 @@ h1 {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-top: 8px;
-  padding: 9px 10px;
+  padding: 11px 12px;
   border: 1px solid #dce5dd;
   border-radius: 8px;
   background: #ffffff;
@@ -271,14 +271,17 @@ h1 {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   color: #138252;
-  font-size: 0.95rem;
-  font-weight: 900;
+  font-size: clamp(1.08rem, 4vw, 1.32rem);
+  font-weight: 1000;
+  letter-spacing: 0;
 }
 
 .result-rank span {
-  font-size: 1rem;
+  font-size: 1.35em;
+  line-height: 1;
+  filter: drop-shadow(0 2px 0 rgb(255 255 255 / 62%));
 }
 
 .result-rate {
@@ -629,6 +632,7 @@ h1 {
   }
 }
 
+.game-mode-settings,
 .template-settings {
   display: grid;
   gap: 14px;
@@ -638,6 +642,60 @@ h1 {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 10px 32px rgb(48 82 66 / 8%);
+}
+
+.game-mode-settings {
+  border-color: #cfe8da;
+  background: linear-gradient(180deg, #f7fff9, #ffffff);
+}
+
+.game-mode-options {
+  display: grid;
+  gap: 8px;
+}
+
+.game-mode-option {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d8e6dd;
+  border-radius: 10px;
+  padding: 12px;
+  background: #ffffff;
+  color: #2a3d34;
+  cursor: pointer;
+  text-align: left;
+}
+
+.game-mode-option[data-active='true'] {
+  border-color: #1f7a5a;
+  background: #eefaf3;
+  box-shadow: inset 0 0 0 1px rgb(31 122 90 / 14%);
+}
+
+.game-mode-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.game-mode-title span {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #dff6e9;
+  color: #1f6c50;
+  font-size: 0.7rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.game-mode-description {
+  color: #64746d;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .data-management {
@@ -1908,6 +1966,15 @@ h1 {
   background: #fffaf0;
 }
 
+.routine-section[data-milestone='true'] .section-header h2 span {
+  font-size: 1rem;
+}
+
+.routine-section[data-milestone='true'] .routine-item {
+  min-height: 36px;
+  padding: 5px 4px;
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -1976,6 +2043,18 @@ h1 {
   border-color: #e2bd63;
   background: #fff5d8;
   color: #895d00;
+}
+
+.quest-limit-note {
+  margin: 7px 0 0;
+  border: 1px dashed #cfe4d7;
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: #f7fbf8;
+  color: #537466;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
 }
 
 .sort-button {
