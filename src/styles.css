@@ -633,6 +633,8 @@ h1 {
 }
 
 .game-mode-settings,
+.player-level-settings,
+.admin-balance-settings,
 .template-settings {
   display: grid;
   gap: 14px;
@@ -647,6 +649,224 @@ h1 {
 .game-mode-settings {
   border-color: #cfe8da;
   background: linear-gradient(180deg, #f7fff9, #ffffff);
+}
+
+.player-level-settings {
+  border-color: #eadc9a;
+  background: linear-gradient(180deg, #fffaf0, #ffffff);
+}
+
+.admin-balance-settings {
+  border-color: #d6d9eb;
+  background: linear-gradient(180deg, #f8f8ff, #ffffff);
+}
+
+.admin-balance-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-balance-block {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e0e2ef;
+  border-radius: 10px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.admin-balance-block h3 {
+  margin: 0;
+  color: #3f4664;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.admin-balance-block h4 {
+  margin: 4px 0 0;
+  color: #596073;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.admin-balance-summary {
+  border-color: #d8def4;
+  background: #fbfcff;
+}
+
+.admin-mastery-rules {
+  border-color: #eadfba;
+  background: #fffdf6;
+}
+
+.admin-mastery-rules ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 1.15rem;
+  color: #5d536b;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.admin-balance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-balance-summary-grid p,
+.admin-section-star-card {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border: 1px solid #e4e8f4;
+  border-radius: 8px;
+  padding: 9px;
+  background: #ffffff;
+}
+
+.admin-section-star-card h4 {
+  margin: 0;
+  color: #394569;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.admin-section-star-card label {
+  display: grid;
+  grid-template-columns: auto minmax(68px, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-section-star-card input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #d6dbe7;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #242a38;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.admin-balance-summary-grid span {
+  color: #697186;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.admin-balance-summary-grid strong {
+  color: #394569;
+  font-size: 0.95rem;
+  font-weight: 1000;
+}
+
+.admin-balance-row,
+.admin-unlock-row {
+  display: grid;
+  align-items: center;
+  gap: 7px;
+}
+
+.admin-balance-row {
+  grid-template-columns: auto minmax(64px, 88px) auto minmax(64px, 88px);
+}
+
+.admin-balance-row span,
+.admin-unlock-row span {
+  color: #596073;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.admin-unlock-row {
+  grid-template-columns: minmax(86px, 0.4fr) 1fr;
+}
+
+.admin-unlock-row label {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-balance-row input,
+.admin-unlock-row input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #d6dbe7;
+  border-radius: 8px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #242a38;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.admin-balance-note {
+  margin: 0;
+  color: #747b8c;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-balance-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.admin-balance-actions button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  background: #3f5f97;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.admin-balance-actions button:last-child {
+  background: #eef1f7;
+  color: #4f5a72;
+}
+
+.player-level-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #eadc9a;
+  border-radius: 12px;
+  padding: 14px;
+  background: #ffffff;
+  color: #463b1b;
+}
+
+.section-star-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.player-level-label {
+  margin: 0;
+  color: #8a6800;
+  font-size: 1.4rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.player-level-stats {
+  display: grid;
+  gap: 6px;
+}
+
+.player-level-stats p {
+  margin: 0;
+  color: #6d5a22;
+  font-size: 0.86rem;
+  font-weight: 800;
 }
 
 .game-mode-options {

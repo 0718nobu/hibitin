@@ -43,6 +43,32 @@ type RoutineTemplateSettings = {
   weekdayTypeMap: Record<WeekdayKey, TemplateKind>;
 };
 
+type SectionStars = Record<StartSection, number>;
+
+type LevelRule = {
+  level: number;
+  requiredStars: number;
+};
+
+type UnlockRule = {
+  requiredStars: number;
+  type: 'questSlot' | 'feature';
+  section?: StartSection | 'advanced';
+  amount?: number;
+  label: string;
+};
+
+type SectionStarRules = {
+  levelRules: LevelRule[];
+  unlockRules: UnlockRule[];
+};
+
+type GameBalanceSettings = {
+  schemaVersion: 2;
+  sectionStarRules: Record<StartSection, SectionStarRules>;
+  playerModeLimits: Record<StartSection, number>;
+};
+
 type PendingDelete = {
   id: string;
   label: string;
@@ -122,9 +148,20 @@ type MasteryStats = {
   currentStreak: number;
   bestStreak: number;
   starCount: number;
+  trophyCount: number;
   isHallOfFame: boolean;
   isCurrentItem: boolean;
   lastSeenDateKey: string;
+};
+
+type MasteryProgressState = {
+  totalCompletions: number;
+  currentStreak: number;
+  bestStreak: number;
+  starCount: number;
+  trophyCount: number;
+  achievedStreakForNextStar: number;
+  missedStreak: number;
 };
 
 const BACKUP_VERSION = 1;
@@ -138,6 +175,8 @@ const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
+const SECTION_STARS_STORAGE_KEY = 'hibitin:sectionStars:v1';
+const GAME_BALANCE_STORAGE_KEY = 'hibitin:gameBalance:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -210,6 +249,13 @@ const sectionIconLabels: Record<string, string> = {
   evening: '🌇',
   night: '🌙',
   advanced: '⚙️',
+};
+
+const sectionTextLabels: Record<StartSection, string> = {
+  morning: '朝',
+  noon: '昼',
+  evening: '夕',
+  night: '夜',
 };
 
 const timerPresetSeconds = [30, 60, 180, 300, 600, 900, 1200, 1800];
@@ -521,6 +567,170 @@ const loadGameMode = (): GameMode => {
   }
 };
 
+const normalizeSectionStars = (value: unknown): SectionStars => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return defaultSectionStars;
+  }
+
+  const parsedStars = value as Partial<Record<StartSection, unknown>>;
+
+  return {
+    morning: Math.max(0, Math.floor(Number(parsedStars.morning) || 0)),
+    noon: Math.max(0, Math.floor(Number(parsedStars.noon) || 0)),
+    evening: Math.max(0, Math.floor(Number(parsedStars.evening) || 0)),
+    night: Math.max(0, Math.floor(Number(parsedStars.night) || 0)),
+  };
+};
+
+const loadSectionStars = () => {
+  try {
+    const savedStars = localStorage.getItem(SECTION_STARS_STORAGE_KEY);
+
+    if (!savedStars) {
+      return defaultSectionStars;
+    }
+
+    return normalizeSectionStars(JSON.parse(savedStars) as unknown);
+  } catch {
+    return defaultSectionStars;
+  }
+};
+
+const normalizeLevelRules = (rules: unknown): LevelRule[] => {
+  if (!Array.isArray(rules)) {
+    return defaultSectionLevelRules;
+  }
+
+  const normalizedRules = rules
+    .map((rule) => ({
+      level: Number(rule?.level),
+      requiredStars: Number(rule?.requiredStars),
+    }))
+    .filter((rule) => (
+      Number.isFinite(rule.level) &&
+      Number.isFinite(rule.requiredStars) &&
+      rule.level >= 1 &&
+      rule.requiredStars >= 0
+    ))
+    .sort((first, second) => first.requiredStars - second.requiredStars);
+
+  return normalizedRules.length > 0 ? normalizedRules : defaultSectionLevelRules;
+};
+
+const normalizeUnlockRules = (rules: unknown, sectionId: StartSection): UnlockRule[] => {
+  if (!Array.isArray(rules)) {
+    return defaultGameBalanceSettings.sectionStarRules[sectionId].unlockRules;
+  }
+
+  return rules
+    .map((rule) => ({
+      requiredStars: Number(rule?.requiredStars),
+      type: rule?.type === 'feature' ? 'feature' as const : 'questSlot' as const,
+      section: rule?.section,
+      amount: Number(rule?.amount),
+      label: typeof rule?.label === 'string' ? rule.label : '',
+    }))
+    .filter((rule) => (
+      Number.isFinite(rule.requiredStars) &&
+      rule.requiredStars >= 0 &&
+      rule.label.trim().length > 0
+    ))
+    .map((rule) => ({
+      ...rule,
+      amount: Number.isFinite(rule.amount) && rule.amount > 0 ? rule.amount : undefined,
+      section: (
+        rule.section === 'morning' ||
+        rule.section === 'noon' ||
+        rule.section === 'evening' ||
+        rule.section === 'night' ||
+        rule.section === 'advanced'
+      ) ? rule.section : undefined,
+    }))
+    .sort((first, second) => first.requiredStars - second.requiredStars);
+};
+
+const normalizeGameBalanceSettings = (settings: unknown): GameBalanceSettings => {
+  if (!settings || typeof settings !== 'object') {
+    return defaultGameBalanceSettings;
+  }
+
+  const parsedSettings = settings as Partial<GameBalanceSettings>;
+
+  if (parsedSettings.schemaVersion !== GAME_BALANCE_SCHEMA_VERSION) {
+    return defaultGameBalanceSettings;
+  }
+
+  const rawSectionStarRules = (
+    parsedSettings.sectionStarRules &&
+    typeof parsedSettings.sectionStarRules === 'object' &&
+    !Array.isArray(parsedSettings.sectionStarRules)
+  )
+    ? parsedSettings.sectionStarRules as Partial<Record<StartSection, Partial<SectionStarRules>>>
+    : undefined;
+  const playerModeLimits = {
+    ...defaultGameBalanceSettings.playerModeLimits,
+    ...(parsedSettings.playerModeLimits ?? {}),
+  };
+
+  return {
+    schemaVersion: GAME_BALANCE_SCHEMA_VERSION,
+    sectionStarRules: Object.fromEntries(dailySectionIds.map((sectionId) => {
+      const sectionRules = rawSectionStarRules?.[sectionId];
+
+      return [
+        sectionId,
+        {
+          levelRules: normalizeLevelRules(sectionRules?.levelRules),
+          unlockRules: normalizeUnlockRules(
+            sectionRules?.unlockRules,
+            sectionId,
+          ),
+        },
+      ];
+    })) as Record<StartSection, SectionStarRules>,
+    playerModeLimits: {
+      morning: Math.max(0, Math.floor(Number(playerModeLimits.morning) || 0)),
+      noon: Math.max(0, Math.floor(Number(playerModeLimits.noon) || 0)),
+      evening: Math.max(0, Math.floor(Number(playerModeLimits.evening) || 0)),
+      night: Math.max(0, Math.floor(Number(playerModeLimits.night) || 0)),
+    },
+  };
+};
+
+const loadGameBalanceSettings = () => {
+  try {
+    const savedSettings = localStorage.getItem(GAME_BALANCE_STORAGE_KEY);
+
+    return savedSettings
+      ? normalizeGameBalanceSettings(JSON.parse(savedSettings) as unknown)
+      : defaultGameBalanceSettings;
+  } catch {
+    return defaultGameBalanceSettings;
+  }
+};
+
+const getPlayerLevelProgress = (
+  stars: number,
+  sectionId: StartSection,
+  gameBalance: GameBalanceSettings,
+) => {
+  const safeStars = Math.max(0, Math.floor(stars));
+  const sectionRules = gameBalance.sectionStarRules[sectionId];
+  const currentRule = [...sectionRules.levelRules]
+    .reverse()
+    .find((rule) => safeStars >= rule.requiredStars) ?? sectionRules.levelRules[0];
+  const nextUnlock = sectionRules.unlockRules.find((rule) => rule.requiredStars > safeStars);
+  const starsUntilNextUnlock = nextUnlock
+    ? Math.max(nextUnlock.requiredStars - safeStars, 0)
+    : 0;
+
+  return {
+    currentLevel: currentRule.level,
+    nextUnlockLabel: nextUnlock?.label ?? '次の解放は準備中',
+    starsUntilNextUnlock,
+  };
+};
+
 const isStartSection = (value: unknown): value is StartSection =>
   value === 'morning' || value === 'noon' || value === 'evening' || value === 'night';
 
@@ -805,15 +1015,61 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
 const bonusSectionId = 'advanced';
-const PLAYER_MODE_DAILY_QUEST_LIMIT = 1;
-const MASTERY_RULES = [
-  { stars: 1, streakDays: 5 },
-  { stars: 2, streakDays: 10 },
-  { stars: 3, streakDays: 20 },
-  { stars: 4, streakDays: 40 },
-  { stars: 5, streakDays: 80 },
+const GAME_BALANCE_SCHEMA_VERSION = 2;
+const defaultSectionStars: SectionStars = {
+  morning: 0,
+  noon: 0,
+  evening: 0,
+  night: 0,
+};
+const defaultSectionLevelRules: LevelRule[] = [
+  { level: 1, requiredStars: 0 },
+  { level: 2, requiredStars: 3 },
+  { level: 3, requiredStars: 7 },
+  { level: 4, requiredStars: 12 },
+  { level: 5, requiredStars: 20 },
 ];
-const HALL_OF_FAME_STARS = 5;
+const createDefaultSectionStarRules = (
+  sectionId: StartSection,
+  label: string,
+): SectionStarRules => ({
+  levelRules: defaultSectionLevelRules,
+  unlockRules: [
+    {
+      requiredStars: 3,
+      type: 'questSlot',
+      section: sectionId,
+      amount: 1,
+      label: `${label}クエスト枠 +1`,
+    },
+  ],
+});
+const defaultGameBalanceSettings: GameBalanceSettings = {
+  schemaVersion: GAME_BALANCE_SCHEMA_VERSION,
+  sectionStarRules: {
+    morning: createDefaultSectionStarRules('morning', '朝'),
+    noon: createDefaultSectionStarRules('noon', '昼'),
+    evening: createDefaultSectionStarRules('evening', '夕'),
+    night: createDefaultSectionStarRules('night', '夜'),
+  },
+  playerModeLimits: {
+    morning: 1,
+    noon: 1,
+    evening: 1,
+    night: 1,
+  },
+};
+const MASTERY_RULES = {
+  earlyStarMax: 3,
+  earlyStarStreakDays: 5,
+  fourthStarStreakDays: 15,
+  fifthStarStreakDays: 30,
+  missedDaysForStarLoss: 2,
+};
+const TROPHY_RULES = {
+  starsRequired: 5,
+  maxTrophies: 5,
+};
 
 const sectionOrderByStartSection: Record<StartSection, string[]> = {
   morning: ['morning', 'noon', 'evening', 'night', 'advanced'],
@@ -1106,16 +1362,99 @@ const loadStoredTimerState = (): StoredTimerState => {
   }
 };
 
-const getMasteryStarCount = (bestStreak: number) =>
-  MASTERY_RULES.filter((rule) => bestStreak >= rule.streakDays).length;
+const isMasteryTargetSectionId = (sectionId: string): sectionId is StartSection =>
+  dailySectionIds.includes(sectionId as StartSection);
 
-const formatMasteryStars = (starCount: number) =>
-  starCount > 0
-    ? `${'⭐'.repeat(starCount)}${starCount >= HALL_OF_FAME_STARS ? ' 👑' : ''}`
-    : '';
+const createEmptyMasteryProgress = (): MasteryProgressState => ({
+  totalCompletions: 0,
+  currentStreak: 0,
+  bestStreak: 0,
+  starCount: 0,
+  trophyCount: 0,
+  achievedStreakForNextStar: 0,
+  missedStreak: 0,
+});
 
-const getMasteryRuleText = () =>
-  MASTERY_RULES.map((rule) => `${'⭐'.repeat(rule.stars)}：${rule.streakDays}日連続`);
+const getNextMasteryStarThreshold = (starCount: number) => {
+  if (starCount < MASTERY_RULES.earlyStarMax) {
+    return MASTERY_RULES.earlyStarStreakDays;
+  }
+
+  if (starCount === 3) {
+    return MASTERY_RULES.fourthStarStreakDays;
+  }
+
+  if (starCount === 4) {
+    return MASTERY_RULES.fifthStarStreakDays;
+  }
+
+  return null;
+};
+
+const applyMasteryDayResult = (
+  progress: MasteryProgressState,
+  isCompleted: boolean,
+): MasteryProgressState => {
+  const nextProgress = { ...progress };
+
+  if (isCompleted) {
+    nextProgress.totalCompletions += 1;
+    nextProgress.currentStreak += 1;
+    nextProgress.bestStreak = Math.max(nextProgress.bestStreak, nextProgress.currentStreak);
+    nextProgress.missedStreak = 0;
+    nextProgress.achievedStreakForNextStar += 1;
+
+    const nextStarThreshold = getNextMasteryStarThreshold(nextProgress.starCount);
+
+    if (
+      nextStarThreshold !== null &&
+      nextProgress.achievedStreakForNextStar >= nextStarThreshold
+    ) {
+      nextProgress.starCount += 1;
+      nextProgress.achievedStreakForNextStar = 0;
+
+      if (nextProgress.starCount >= TROPHY_RULES.starsRequired) {
+        nextProgress.trophyCount = Math.min(
+          TROPHY_RULES.maxTrophies,
+          nextProgress.trophyCount + 1,
+        );
+        nextProgress.starCount = 0;
+        nextProgress.achievedStreakForNextStar = 0;
+      }
+    }
+
+    return nextProgress;
+  }
+
+  nextProgress.currentStreak = 0;
+  nextProgress.achievedStreakForNextStar = 0;
+  nextProgress.missedStreak += 1;
+
+  if (nextProgress.missedStreak >= MASTERY_RULES.missedDaysForStarLoss) {
+    nextProgress.starCount = Math.max(0, nextProgress.starCount - 1);
+    nextProgress.missedStreak = 0;
+  }
+
+  return nextProgress;
+};
+
+const formatMasteryStars = (starCount: number, trophyCount = 0) => {
+  const stars = starCount > 0 ? '⭐'.repeat(starCount) : '';
+  const trophies = trophyCount > 0 ? '🏆'.repeat(Math.min(trophyCount, TROPHY_RULES.maxTrophies)) : '';
+
+  return [stars, trophies].filter(Boolean).join(' ');
+};
+
+const getMasteryAdminRuleText = () => [
+  '対象：朝・昼・夕・夜の通常ルーティン',
+  `星1〜3：${MASTERY_RULES.earlyStarStreakDays}日連続達成ごとに+1`,
+  `星4：星3到達後、${MASTERY_RULES.fourthStarStreakDays}日連続達成で獲得`,
+  `星5：星4到達後、${MASTERY_RULES.fifthStarStreakDays}日連続達成で獲得`,
+  `${MASTERY_RULES.missedDaysForStarLoss}日連続未達成で星-1`,
+  '星5到達で🏆+1、その後星0へ戻る',
+  `トロフィー上限：${TROPHY_RULES.maxTrophies}個`,
+  '起床・就寝・アドバンストは対象外',
+];
 
 const getStoredCheckDateKeys = () => {
   const prefix = 'hibitin:checks:';
@@ -1127,46 +1466,33 @@ const getStoredCheckDateKeys = () => {
     .sort();
 };
 
-const calculateItemCheckHistoryStats = (
+const calculateArchivedItemMasteryStats = (
   itemId: string,
   todayKey: string,
   checkOverrides: Record<string, Record<string, boolean>>,
 ) => {
   const storedDateKeys = getStoredCheckDateKeys().filter((dateKey) => dateKey <= todayKey);
-  const firstDateKey = storedDateKeys[0] ?? todayKey;
-  let totalCompletions = 0;
-  let bestStreak = 0;
-  let currentStreak = 0;
-  let runningStreak = 0;
+  let progress = createEmptyMasteryProgress();
+  let lastSeenDateKey = todayKey;
 
   for (
-    let date = getDateFromKey(firstDateKey);
+    let date = getDateFromKey(storedDateKeys[0] ?? todayKey);
     getDateKey(date) <= todayKey;
     date = addDays(date, 1)
   ) {
     const dateKey = getDateKey(date);
     const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
 
-    if (checks[itemId]) {
-      totalCompletions += 1;
-      runningStreak += 1;
-      bestStreak = Math.max(bestStreak, runningStreak);
-      currentStreak = runningStreak;
-      continue;
+    if (itemId in checks) {
+      progress = applyMasteryDayResult(progress, Boolean(checks[itemId]));
+      lastSeenDateKey = dateKey;
     }
-
-    runningStreak = 0;
-    currentStreak = 0;
   }
 
-  const starCount = getMasteryStarCount(bestStreak);
-
   return {
-    totalCompletions,
-    currentStreak,
-    bestStreak,
-    starCount,
-    isHallOfFame: starCount >= HALL_OF_FAME_STARS,
+    ...progress,
+    isHallOfFame: progress.trophyCount > 0,
+    lastSeenDateKey,
   };
 };
 
@@ -1183,22 +1509,21 @@ const calculateMasteryStats = (
   const firstDateKey = storedDateKeys[0] ?? todayKey;
   const currentItemIds = new Set(
     currentDisplaySections
-      .filter((section) => section.id !== bonusSectionId)
-      .flatMap((section) => section.items.map((item) => item.id)),
+      .filter((section) => isMasteryTargetSectionId(section.id))
+      .flatMap((section) => section.items.filter((item) => !item.fixedKind).map((item) => item.id)),
   );
   const currentItemOrder = new Map<string, number>();
 
   currentDisplaySections
-    .filter((section) => section.id !== bonusSectionId)
+    .filter((section) => isMasteryTargetSectionId(section.id))
     .forEach((section, sectionIndex) => {
-      section.items.forEach((item, itemIndex) => {
+      section.items.filter((item) => !item.fixedKind).forEach((item, itemIndex) => {
         currentItemOrder.set(item.id, sectionIndex * 1000 + itemIndex);
       });
     });
 
   const stats = new Map<string, MasteryStats>();
-  const runningStreaks = new Map<string, number>();
-  const seenItemIds = new Set<string>();
+  const progressByItemId = new Map<string, MasteryProgressState>();
 
   for (
     let date = getDateFromKey(firstDateKey);
@@ -1213,93 +1538,36 @@ const calculateMasteryStats = (
         getSectionsForTarget(settings, dateOverrides, dateSnapshots, target, todayKey),
       ),
       rhythmSettings[baseTemplate],
-    ).filter((section) => section.id !== bonusSectionId);
+    ).filter((section) => isMasteryTargetSectionId(section.id));
     const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
-    const presentItemIds = new Set<string>();
 
     sections.forEach((section, sectionIndex) => {
-      section.items.forEach((item, itemIndex) => {
-        presentItemIds.add(item.id);
-
-        const existingStats = stats.get(item.id);
+      section.items.filter((item) => !item.fixedKind).forEach((item, itemIndex) => {
         const order = currentItemOrder.get(item.id) ?? sectionIndex * 1000 + itemIndex;
+        const currentProgress = progressByItemId.get(item.id) ?? createEmptyMasteryProgress();
+        const nextProgress = applyMasteryDayResult(currentProgress, Boolean(checks[item.id]));
 
+        progressByItemId.set(item.id, nextProgress);
         stats.set(item.id, {
           itemId: item.id,
           label: item.label,
           sectionId: section.id,
           sectionTitle: section.title,
           order,
-          totalCompletions: existingStats?.totalCompletions ?? 0,
-          currentStreak: existingStats?.currentStreak ?? 0,
-          bestStreak: existingStats?.bestStreak ?? 0,
-          starCount: existingStats?.starCount ?? 0,
-          isHallOfFame: existingStats?.isHallOfFame ?? false,
+          totalCompletions: nextProgress.totalCompletions,
+          currentStreak: nextProgress.currentStreak,
+          bestStreak: nextProgress.bestStreak,
+          starCount: nextProgress.starCount,
+          trophyCount: nextProgress.trophyCount,
+          isHallOfFame: nextProgress.trophyCount > 0,
           isCurrentItem: currentItemIds.has(item.id),
           lastSeenDateKey: dateKey,
         });
-        seenItemIds.add(item.id);
-
-        if (!checks[item.id]) {
-          runningStreaks.set(item.id, 0);
-          return;
-        }
-
-        const nextStreak = (runningStreaks.get(item.id) ?? 0) + 1;
-        const nextStats = stats.get(item.id);
-
-        if (!nextStats) {
-          return;
-        }
-
-        const bestStreak = Math.max(nextStats.bestStreak, nextStreak);
-        const starCount = getMasteryStarCount(bestStreak);
-
-        runningStreaks.set(item.id, nextStreak);
-        stats.set(item.id, {
-          ...nextStats,
-          totalCompletions: nextStats.totalCompletions + 1,
-          currentStreak: nextStreak,
-          bestStreak,
-          starCount,
-          isHallOfFame: starCount >= 5,
-        });
       });
-    });
-
-    seenItemIds.forEach((itemId) => {
-      if (!presentItemIds.has(itemId)) {
-        runningStreaks.set(itemId, 0);
-      }
     });
   }
 
   return Array.from(stats.values())
-    .map((itemStats) => {
-      const checkHistoryStats = currentItemIds.has(itemStats.itemId)
-        ? calculateItemCheckHistoryStats(itemStats.itemId, todayKey, checkOverrides)
-        : null;
-      const bestStreak = Math.max(
-        itemStats.bestStreak,
-        checkHistoryStats?.bestStreak ?? 0,
-      );
-      const starCount = getMasteryStarCount(bestStreak);
-
-      return {
-        ...itemStats,
-        totalCompletions: Math.max(
-          itemStats.totalCompletions,
-          checkHistoryStats?.totalCompletions ?? 0,
-        ),
-        currentStreak: Math.max(
-          runningStreaks.get(itemStats.itemId) ?? 0,
-          checkHistoryStats?.currentStreak ?? 0,
-        ),
-        bestStreak,
-        starCount,
-        isHallOfFame: starCount >= HALL_OF_FAME_STARS,
-      };
-    })
     .filter((itemStats) => itemStats.isCurrentItem || itemStats.totalCompletions > 0)
     .sort((first, second) => {
       if (first.isCurrentItem !== second.isCurrentItem) {
@@ -1355,6 +1623,16 @@ function App() {
   );
   const [itemNotes, setItemNotes] = useState<ItemNotes>(() => loadItemNotes());
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
+  const [sectionStars, setSectionStars] = useState<SectionStars>(() => loadSectionStars());
+  const [sectionStarsDraft, setSectionStarsDraft] = useState<SectionStars>(() =>
+    loadSectionStars(),
+  );
+  const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
+    loadGameBalanceSettings(),
+  );
+  const [gameBalanceDraft, setGameBalanceDraft] = useState<GameBalanceSettings>(() =>
+    loadGameBalanceSettings(),
+  );
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
     loadRhythmSettings(),
   );
@@ -1518,7 +1796,7 @@ function App() {
     Object.values(archivedItems)
       .map((archivedItem) => ({
         archivedItem,
-        stats: calculateItemCheckHistoryStats(
+        stats: calculateArchivedItemMasteryStats(
           archivedItem.item.id,
           todayKey,
           {
@@ -1634,6 +1912,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(GAME_MODE_STORAGE_KEY, JSON.stringify(gameMode));
   }, [gameMode]);
+
+  useEffect(() => {
+    localStorage.setItem(SECTION_STARS_STORAGE_KEY, JSON.stringify(sectionStars));
+  }, [sectionStars]);
+
+  useEffect(() => {
+    localStorage.setItem(GAME_BALANCE_STORAGE_KEY, JSON.stringify(gameBalance));
+  }, [gameBalance]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -2496,8 +2782,9 @@ function App() {
       );
       const targetSection = targetSections.find((section) => section.id === sectionId);
       const questCount = targetSection?.items.filter((item) => !item.fixedKind).length ?? 0;
+      const questLimit = gameBalance.playerModeLimits[sectionId as StartSection];
 
-      if (questCount >= PLAYER_MODE_DAILY_QUEST_LIMIT) {
+      if (questCount >= questLimit) {
         return;
       }
     }
@@ -2845,10 +3132,98 @@ function App() {
     setPage(nextPage);
   };
 
+  const updateGameBalanceLevelRule = (
+    sectionId: StartSection,
+    index: number,
+    field: 'level' | 'requiredStars',
+    value: number,
+  ) => {
+    setGameBalanceDraft((currentBalance) => ({
+      ...currentBalance,
+      sectionStarRules: {
+        ...currentBalance.sectionStarRules,
+        [sectionId]: {
+          ...currentBalance.sectionStarRules[sectionId],
+          levelRules: currentBalance.sectionStarRules[sectionId].levelRules.map((rule, ruleIndex) =>
+            ruleIndex === index
+              ? { ...rule, [field]: Math.max(field === 'level' ? 1 : 0, Math.floor(value || 0)) }
+              : rule,
+          ),
+        },
+      },
+    }));
+  };
+
+  const updateGameBalanceUnlockRule = (
+    sectionId: StartSection,
+    index: number,
+    field: 'requiredStars' | 'label',
+    value: number | string,
+  ) => {
+    setGameBalanceDraft((currentBalance) => ({
+      ...currentBalance,
+      sectionStarRules: {
+        ...currentBalance.sectionStarRules,
+        [sectionId]: {
+          ...currentBalance.sectionStarRules[sectionId],
+          unlockRules: currentBalance.sectionStarRules[sectionId].unlockRules.map((rule, ruleIndex) =>
+            ruleIndex === index
+              ? {
+                  ...rule,
+                  [field]: field === 'requiredStars'
+                    ? Math.max(0, Math.floor(Number(value) || 0))
+                    : String(value),
+                }
+              : rule,
+          ),
+        },
+      },
+    }));
+  };
+
+  const updateSectionStarDraft = (sectionId: StartSection, value: number) => {
+    setSectionStarsDraft((currentStars) => ({
+      ...currentStars,
+      [sectionId]: Math.max(0, Math.floor(value || 0)),
+    }));
+  };
+
+  const updateGameBalanceLimit = (sectionId: StartSection, value: number) => {
+    setGameBalanceDraft((currentBalance) => ({
+      ...currentBalance,
+      playerModeLimits: {
+        ...currentBalance.playerModeLimits,
+        [sectionId]: Math.max(0, Math.floor(value || 0)),
+      },
+    }));
+  };
+
+  const saveGameBalanceSettings = () => {
+    const normalizedBalance = normalizeGameBalanceSettings(gameBalanceDraft);
+    const normalizedStars = normalizeSectionStars(sectionStarsDraft);
+
+    setGameBalance(normalizedBalance);
+    setGameBalanceDraft(normalizedBalance);
+    setSectionStars(normalizedStars);
+    setSectionStarsDraft(normalizedStars);
+  };
+
+  const resetGameBalanceSettings = () => {
+    setGameBalance(defaultGameBalanceSettings);
+    setGameBalanceDraft(defaultGameBalanceSettings);
+    setSectionStars(defaultSectionStars);
+    setSectionStarsDraft(defaultSectionStars);
+  };
+
   const isPlayerModeQuestLimitReached = (section: RoutineSection) =>
     gameMode === 'player' &&
     dailySectionIds.includes(section.id as StartSection) &&
-    section.items.filter((item) => !item.fixedKind).length >= PLAYER_MODE_DAILY_QUEST_LIMIT;
+    section.items.filter((item) => !item.fixedKind).length >=
+      gameBalance.playerModeLimits[section.id as StartSection];
+  const sectionStarProgress = Object.fromEntries(dailySectionIds.map((sectionId) => [
+    sectionId,
+    getPlayerLevelProgress(sectionStars[sectionId], sectionId, gameBalance),
+  ])) as Record<StartSection, ReturnType<typeof getPlayerLevelProgress>>;
 
   const wakeRoutineItem = displaySections
     .flatMap((section) => section.items)
@@ -2965,6 +3340,188 @@ function App() {
                   <span className="game-mode-description">{mode.description}</span>
                 </button>
               ))}
+            </div>
+          </section>
+        )}
+
+        {page === 'settings' && (
+          <section className="player-level-settings" aria-label="プレイヤーレベル">
+            <div className="settings-header">
+              <div>
+                <h2>時間帯スター</h2>
+                <p>朝・昼・夕・夜が、それぞれ独立して育つ成長ゲージです。</p>
+              </div>
+            </div>
+            <div className="section-star-cards">
+              {dailySectionIds.map((sectionId) => (
+                <div className="player-level-card" key={sectionId}>
+                  <p className="player-level-label">
+                    {sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]} Lv.
+                    {sectionStarProgress[sectionId].currentLevel}
+                  </p>
+                  <div className="player-level-stats">
+                    <p>現在：{sectionStars[sectionId]}★</p>
+                    <p>次の解放：{sectionStarProgress[sectionId].nextUnlockLabel}</p>
+                    <p>次の解放まであと{sectionStarProgress[sectionId].starsUntilNextUnlock}★</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === 'settings' && gameMode === 'developer' && (
+          <section className="admin-balance-settings" aria-label="ゲームバランス設定">
+            <div className="settings-header">
+              <div>
+                <h2>ゲームバランス設定</h2>
+                <p>星、解放条件、プレイヤーモード制限をまとめて管理します。</p>
+              </div>
+            </div>
+            <div className="admin-balance-grid">
+              <div className="admin-balance-block admin-balance-summary">
+                <h3>現在の成長状態</h3>
+                <div className="admin-balance-summary-grid">
+                  {dailySectionIds.map((sectionId) => {
+                    const draftProgress = getPlayerLevelProgress(
+                      sectionStarsDraft[sectionId],
+                      sectionId,
+                      gameBalanceDraft,
+                    );
+
+                    return (
+                      <div className="admin-section-star-card" key={sectionId}>
+                        <h4>{sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]}スター</h4>
+                        <label>
+                          <span>現在値</span>
+                          <input
+                            min="0"
+                            onChange={(event) =>
+                              updateSectionStarDraft(sectionId, Number(event.target.value))
+                            }
+                            type="number"
+                            value={sectionStarsDraft[sectionId]}
+                          />
+                        </label>
+                        <p>Lv.{draftProgress.currentLevel}</p>
+                        <p>次の解放：{draftProgress.nextUnlockLabel}</p>
+                        <p>あと{draftProgress.starsUntilNextUnlock}★</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="admin-balance-note">
+                  連動済み：時間帯スター表示、時間帯ごとの次の解放表示、プレイヤーモードの追加制限、
+                  アイテムごとの星・トロフィー計算。
+                  未実装：時間帯スターの自動獲得、実際の機能解放。
+                </p>
+              </div>
+              <div className="admin-balance-block admin-mastery-rules">
+                <h3>星・トロフィー条件</h3>
+                <ul>
+                  {getMasteryAdminRuleText().map((ruleText) => (
+                    <li key={ruleText}>{ruleText}</li>
+                  ))}
+                </ul>
+                <p className="admin-balance-note">
+                  現在は固定実装です。将来的にはこの条件を管理者設定から変更できるようにします。
+                </p>
+              </div>
+              {dailySectionIds.map((sectionId) => (
+                <div className="admin-balance-block" key={`balance-${sectionId}`}>
+                  <h3>{sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]}スター条件</h3>
+                  <h4>レベル条件</h4>
+                  {gameBalanceDraft.sectionStarRules[sectionId].levelRules.map((rule, index) => (
+                    <label className="admin-balance-row" key={`level-${sectionId}-${rule.level}-${index}`}>
+                      <span>Lv.</span>
+                      <input
+                        min="1"
+                        onChange={(event) =>
+                          updateGameBalanceLevelRule(
+                            sectionId,
+                            index,
+                            'level',
+                            Number(event.target.value),
+                          )
+                        }
+                        type="number"
+                        value={rule.level}
+                      />
+                      <span>必要★</span>
+                      <input
+                        min="0"
+                        onChange={(event) =>
+                          updateGameBalanceLevelRule(
+                            sectionId,
+                            index,
+                            'requiredStars',
+                            Number(event.target.value),
+                          )
+                        }
+                        type="number"
+                        value={rule.requiredStars}
+                      />
+                    </label>
+                  ))}
+                  <h4>解放条件</h4>
+                  {gameBalanceDraft.sectionStarRules[sectionId].unlockRules.map((rule, index) => (
+                    <div className="admin-unlock-row" key={`unlock-${sectionId}-${rule.requiredStars}-${index}`}>
+                      <label>
+                        <span>必要★</span>
+                        <input
+                          min="0"
+                          onChange={(event) =>
+                            updateGameBalanceUnlockRule(
+                              sectionId,
+                              index,
+                              'requiredStars',
+                              Number(event.target.value),
+                            )
+                          }
+                          type="number"
+                          value={rule.requiredStars}
+                        />
+                      </label>
+                      <label>
+                        <span>表示名</span>
+                        <input
+                          onChange={(event) =>
+                            updateGameBalanceUnlockRule(sectionId, index, 'label', event.target.value)
+                          }
+                          type="text"
+                          value={rule.label}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <div className="admin-balance-block">
+                <h3>プレイヤーモードの初期制限</h3>
+                {dailySectionIds.map((sectionId) => (
+                  <label className="admin-balance-row" key={sectionId}>
+                    <span>{sectionTextLabels[sectionId]}</span>
+                    <input
+                      min="0"
+                      onChange={(event) =>
+                        updateGameBalanceLimit(sectionId, Number(event.target.value))
+                      }
+                      type="number"
+                      value={gameBalanceDraft.playerModeLimits[sectionId]}
+                    />
+                    <span>個まで</span>
+                  </label>
+                ))}
+                <p className="admin-balance-note">起床・就寝は固定、アドバンストはボーナスログです。</p>
+              </div>
+            </div>
+            <div className="admin-balance-actions">
+              <button onClick={saveGameBalanceSettings} type="button">
+                保存
+              </button>
+              <button onClick={resetGameBalanceSettings} type="button">
+                初期値に戻す
+              </button>
             </div>
           </section>
         )}
@@ -3360,12 +3917,12 @@ function App() {
                         !isEditMode &&
                         !isBonusSection &&
                         itemMasteryStats &&
-                        itemMasteryStats.starCount > 0 && (
+                        (itemMasteryStats.starCount > 0 || itemMasteryStats.trophyCount > 0) && (
                         <span
                           className="mastery-badge"
                           title={`現在 ${itemMasteryStats.currentStreak}日連続 / 累計 ${itemMasteryStats.totalCompletions}回`}
                         >
-                          {formatMasteryStars(itemMasteryStats.starCount)}
+                          {formatMasteryStars(itemMasteryStats.starCount, itemMasteryStats.trophyCount)}
                         </span>
                       )}
                       {showTimerStart && (
@@ -3887,18 +4444,9 @@ function App() {
               <span aria-hidden="true">🏆</span>
               <div>
                 <h2>実績</h2>
-                <p>星はチェックを積み重ねることで育ちます。</p>
+                <p>星とトロフィーは、日々のチェックで自然に育ちます。</p>
               </div>
             </div>
-            <section className="mastery-rule" aria-label="熟練度ルール">
-              <h3>熟練度ルール</h3>
-              <ul>
-                {getMasteryRuleText().map((ruleText) => (
-                  <li key={ruleText}>{ruleText}</li>
-                ))}
-              </ul>
-              <p>{formatMasteryStars(HALL_OF_FAME_STARS)}で殿堂入り</p>
-            </section>
             {masteryStats.length === 0 ? (
               <p className="empty-achievements">
                 まずは今日のルーティンをチェックすると、ここに実績が育っていきます。
@@ -3920,14 +4468,20 @@ function App() {
                         <h3>{itemStats.label}</h3>
                       </div>
                       {itemStats.isHallOfFame && (
-                        <span className="hall-of-fame-badge">👑 殿堂入り</span>
+                        <span className="hall-of-fame-badge">
+                          {formatMasteryStars(0, itemStats.trophyCount)}
+                        </span>
                       )}
                     </div>
                     <p
                       className="mastery-stars"
-                      data-empty={itemStats.starCount === 0 ? 'true' : 'false'}
+                      data-empty={
+                        itemStats.starCount === 0 && itemStats.trophyCount === 0
+                          ? 'true'
+                          : 'false'
+                      }
                     >
-                      {formatMasteryStars(itemStats.starCount) || '星はこれから'}
+                      {formatMasteryStars(itemStats.starCount, itemStats.trophyCount) || '星はこれから'}
                     </p>
                     <dl className="mastery-metrics">
                       <div>
@@ -3972,9 +4526,13 @@ function App() {
                       </div>
                       <p
                         className="mastery-stars"
-                        data-empty={stats.starCount === 0 ? 'true' : 'false'}
+                        data-empty={
+                          stats.starCount === 0 && stats.trophyCount === 0
+                            ? 'true'
+                            : 'false'
+                        }
                       >
-                        {formatMasteryStars(stats.starCount) || '星はこれから'}
+                        {formatMasteryStars(stats.starCount, stats.trophyCount) || '星はこれから'}
                       </p>
                       <dl className="mastery-metrics">
                         <div>
