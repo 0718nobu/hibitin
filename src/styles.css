@@ -175,8 +175,27 @@ h1 {
   color: #9aae9f;
 }
 
+.rank-status-earned {
+  grid-column: 1;
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #fff5ce;
+  color: #8a5a00;
+  font-size: 0.74rem;
+  font-weight: 1000;
+  line-height: 1.2;
+}
+
+.rank-status-earned[data-empty='true'] {
+  background: rgb(255 255 255 / 58%);
+  color: #8a9b91;
+}
+
 .rank-status-caret {
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 4;
   grid-column: 2;
   color: #4d806a;
   font-size: 0.76rem;
@@ -1511,77 +1530,101 @@ h1 {
 }
 
 .calendar-day[data-rate-level='start'] {
-  border-color: #a9e3c3;
-  background: #effaf3;
-  color: #2b8a5e;
+  border-color: #b9d7d4;
+  background: linear-gradient(180deg, #f7fbfb 0%, #eef8f6 100%);
+  color: #32736c;
 }
 
 .calendar-day[data-rate-level='start'][data-routine-kind='holiday'] {
   border-color: #efb3aa;
-  background: linear-gradient(180deg, #fff0f2, #f0fbf4);
+  background: linear-gradient(180deg, #fff3f5 0%, #eef8f6 100%);
 }
 
 .calendar-day[data-rate-level='good'] {
-  border-color: #9ee3bd;
-  background: #dff8e9;
-  color: #007a55;
+  border: 1.5px solid #1698bc;
+  background:
+    linear-gradient(155deg, #e7fbff 0%, #8fdff0 58%, #41afd0 100%);
+  color: #06495c;
+  box-shadow:
+    0 5px 12px rgb(22 152 188 / 16%),
+    inset 0 0 0 1px rgb(255 255 255 / 36%);
 }
 
 .calendar-day[data-rate-level='good'][data-routine-kind='holiday'] {
-  border-color: #efa7a7;
-  background: linear-gradient(180deg, #ffecef, #dff8e9);
+  border-color: #1698bc;
+  background:
+    linear-gradient(155deg, #e7fbff 0%, #8fdff0 58%, #41afd0 100%);
+  box-shadow:
+    0 5px 12px rgb(22 152 188 / 16%),
+    inset 0 0 0 2px rgb(194 65 72 / 16%),
+    inset 0 0 0 1px rgb(255 255 255 / 36%);
 }
 
 .calendar-day[data-rate-level='great'] {
-  border: 2px solid #b8640f;
+  border: 2px solid #c43f7c;
   background:
-    linear-gradient(155deg, #ffe7a8 0%, #f3a93a 56%, #c9781c 100%);
-  color: #5a2f00;
+    radial-gradient(circle at 52% 26%, rgb(255 255 255 / 40%), transparent 28%),
+    linear-gradient(155deg, #ffe6f1 0%, #ef79a8 56%, #c43f7c 100%);
+  color: #60173b;
   box-shadow:
-    0 7px 16px rgb(178 95 13 / 22%),
-    inset 0 0 0 1px rgb(255 255 255 / 34%);
+    0 7px 16px rgb(196 63 124 / 22%),
+    inset 0 1px 0 rgb(255 255 255 / 48%),
+    inset 0 0 0 1px rgb(255 255 255 / 30%);
 }
 
 .calendar-day[data-rate-level='great'][data-routine-kind='holiday'] {
-  border-color: #b8640f;
+  border-color: #c43f7c;
   background:
-    linear-gradient(155deg, #ffe7a8 0%, #f3a93a 56%, #c9781c 100%);
+    radial-gradient(circle at 52% 26%, rgb(255 255 255 / 40%), transparent 28%),
+    linear-gradient(155deg, #ffe6f1 0%, #ef79a8 56%, #c43f7c 100%);
   box-shadow:
-    0 7px 16px rgb(178 95 13 / 22%),
+    0 7px 16px rgb(196 63 124 / 22%),
     inset 0 0 0 2px rgb(194 65 72 / 24%),
-    inset 0 0 0 1px rgb(255 255 255 / 34%);
+    inset 0 1px 0 rgb(255 255 255 / 48%),
+    inset 0 0 0 1px rgb(255 255 255 / 30%);
 }
 
 .calendar-day[data-rate-level='excellent'] {
-  border: 2px solid #b98500;
+  border: 2px solid #bd8600;
   background:
-    radial-gradient(circle at 50% 22%, rgb(255 255 255 / 46%), transparent 28%),
-    linear-gradient(155deg, #fff3a5 0%, #f0c22f 52%, #c88c00 100%);
+    radial-gradient(circle at 50% 20%, rgb(255 255 255 / 58%), transparent 27%),
+    linear-gradient(155deg, #fff8b8 0%, #f2c92d 50%, #b87500 100%);
   color: #4f3900;
   box-shadow:
-    0 8px 18px rgb(177 126 0 / 28%),
-    inset 0 0 0 1px rgb(255 255 255 / 42%);
+    0 9px 20px rgb(177 126 0 / 30%),
+    0 0 0 1px rgb(255 231 116 / 34%),
+    inset 0 1px 0 rgb(255 255 255 / 62%),
+    inset 0 -10px 18px rgb(117 77 0 / 12%);
 }
 
 .calendar-day[data-rate-level='excellent'][data-routine-kind='holiday'] {
   border-color: #b98500;
   background:
-    radial-gradient(circle at 50% 22%, rgb(255 255 255 / 46%), transparent 28%),
-    linear-gradient(155deg, #fff3a5 0%, #f0c22f 52%, #c88c00 100%);
+    radial-gradient(circle at 50% 20%, rgb(255 255 255 / 58%), transparent 27%),
+    linear-gradient(155deg, #fff8b8 0%, #f2c92d 50%, #b87500 100%);
   box-shadow:
-    0 8px 18px rgb(177 126 0 / 28%),
+    0 9px 20px rgb(177 126 0 / 30%),
+    0 0 0 1px rgb(255 231 116 / 34%),
     inset 0 0 0 2px rgb(194 65 72 / 24%),
-    inset 0 0 0 1px rgb(255 255 255 / 42%);
+    inset 0 1px 0 rgb(255 255 255 / 62%),
+    inset 0 -10px 18px rgb(117 77 0 / 12%);
 }
 
 .calendar-day[data-rate-level='perfect'] {
-  border-color: #00a86b;
+  border: 2px solid #f2d36a;
   background:
-    linear-gradient(180deg, #18c981 0%, #00a86b 100%);
+    radial-gradient(circle at 50% 26%, rgb(255 248 174 / 44%), transparent 24%),
+    radial-gradient(circle at 82% 12%, rgb(255 255 255 / 40%), transparent 18%),
+    linear-gradient(150deg, #34d696 0%, #008e68 48%, #00533f 100%);
   color: #ffffff;
   box-shadow:
-    0 6px 14px rgb(0 138 86 / 18%),
-    inset 0 0 0 1px rgb(255 255 255 / 28%);
+    0 12px 26px rgb(0 112 83 / 34%),
+    0 0 0 2px rgb(14 143 102 / 30%),
+    0 0 22px rgb(0 180 125 / 26%),
+    inset 0 0 0 2px rgb(255 255 255 / 24%),
+    inset 0 0 0 4px rgb(242 211 106 / 28%),
+    inset 0 1px 0 rgb(255 255 255 / 52%),
+    inset 0 -12px 22px rgb(0 54 42 / 28%);
 }
 
 .calendar-day[data-rate-level='empty'] {
@@ -1592,9 +1635,9 @@ h1 {
 .calendar-day[data-today='true'] {
   position: relative;
   border-color: #168f78;
-  box-shadow:
-    0 0 0 2px #168f78 inset,
-    0 7px 18px rgb(22 143 120 / 24%);
+  outline: 2px solid #168f78;
+  outline-offset: 1px;
+  filter: drop-shadow(0 5px 12px rgb(22 143 120 / 20%));
   transform: translateY(-1px);
 }
 
@@ -1618,8 +1661,8 @@ h1 {
   position: absolute;
   inset: 50% auto auto 50%;
   z-index: 0;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border: 1.5px solid rgb(175 146 75 / 24%);
   border-radius: 999px;
   background: rgb(255 255 255 / 18%);
@@ -1639,9 +1682,13 @@ h1 {
 }
 
 .calendar-day[data-rate-level='perfect'] .calendar-stamp-slot {
-  border-color: rgb(255 255 255 / 58%);
-  background: rgb(255 255 255 / 14%);
-  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 12%);
+  border-color: rgb(255 224 98 / 78%);
+  background:
+    radial-gradient(circle, rgb(255 255 255 / 20%), rgb(255 255 255 / 7%));
+  box-shadow:
+    0 0 0 3px rgb(255 224 98 / 22%),
+    0 0 18px rgb(255 224 98 / 26%),
+    inset 0 0 0 2px rgb(255 255 255 / 18%);
 }
 
 .calendar-day[data-routine-kind='holiday']::before {
@@ -1664,19 +1711,13 @@ h1 {
 }
 
 .calendar-day[data-selected='true'] {
-  outline: 3px solid #214f43;
-  outline-offset: 2px;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 82%) inset,
-    0 8px 18px rgb(33 79 67 / 20%);
+  outline: 3px solid #17382f;
+  outline-offset: 3px;
+  filter: drop-shadow(0 7px 16px rgb(23 56 47 / 24%));
 }
 
 .calendar-day[data-selected='true'][data-routine-kind='holiday'] {
   outline-color: #214f43;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 82%) inset,
-    0 8px 18px rgb(33 79 67 / 20%),
-    0 0 0 2px rgb(217 107 114 / 18%);
 }
 
 .calendar-day-number {
@@ -1707,7 +1748,7 @@ h1 {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 42px;
+  min-height: 48px;
   place-items: center;
 }
 
@@ -1737,22 +1778,38 @@ h1 {
 .calendar-day-rank {
   z-index: 2;
   min-height: 28px;
-  font-size: 1.46rem;
+  font-size: 1.72rem;
   line-height: 1;
   filter: drop-shadow(0 1px 0 rgb(255 255 255 / 70%));
 }
 
+.calendar-day[data-rate-level='start'] .calendar-day-number,
+.calendar-day[data-rate-level='start'] .calendar-day-rate {
+  color: #2e746c;
+}
+
+.calendar-day[data-rate-level='good'] .calendar-day-number,
+.calendar-day[data-rate-level='good'] .calendar-day-rate {
+  color: #053f52;
+  text-shadow: 0 1px 0 rgb(236 252 255 / 60%);
+}
+
+.calendar-day[data-rate-level='good'] .calendar-day-rank {
+  filter:
+    drop-shadow(0 1px 0 rgb(235 253 255 / 78%))
+    drop-shadow(0 2px 3px rgb(0 65 84 / 15%));
+}
+
 .calendar-day[data-rate-level='great'] .calendar-day-number,
 .calendar-day[data-rate-level='great'] .calendar-day-rate {
-  color: #4d2a00;
-  text-shadow: 0 1px 0 rgb(255 244 211 / 58%);
+  color: #5c1138;
+  text-shadow: 0 1px 0 rgb(255 229 242 / 64%);
 }
 
 .calendar-day[data-rate-level='great'] .calendar-day-rank {
-  font-size: 1.72rem;
   filter:
-    drop-shadow(0 1px 0 rgb(255 245 219 / 78%))
-    drop-shadow(0 2px 3px rgb(104 47 0 / 22%));
+    drop-shadow(0 1px 0 rgb(255 235 247 / 78%))
+    drop-shadow(0 2px 3px rgb(111 15 61 / 22%));
 }
 
 .calendar-day[data-rate-level='excellent'] .calendar-day-number,
@@ -1762,14 +1819,22 @@ h1 {
 }
 
 .calendar-day[data-rate-level='excellent'] .calendar-day-rank {
-  font-size: 1.82rem;
   filter:
     drop-shadow(0 1px 0 rgb(255 255 223 / 84%))
+    drop-shadow(0 0 5px rgb(255 240 116 / 40%))
     drop-shadow(0 2px 4px rgb(97 66 0 / 24%));
 }
 
+.calendar-day[data-rate-level='perfect'] .calendar-day-number,
+.calendar-day[data-rate-level='perfect'] .calendar-day-rate {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgb(0 54 42 / 42%);
+}
+
 .calendar-day[data-rate-level='perfect'] .calendar-day-rank {
-  font-size: 1.9rem;
+  filter:
+    drop-shadow(0 0 6px rgb(255 226 104 / 58%))
+    drop-shadow(0 2px 4px rgb(0 45 35 / 40%));
 }
 
 .history-detail {
@@ -2869,7 +2934,7 @@ h1 {
 
 .daily-memo {
   display: grid;
-  gap: 9px;
+  gap: 11px;
   margin-top: 12px;
   padding: 12px;
   border: 1px solid #d8ecd3;
@@ -2878,42 +2943,20 @@ h1 {
   box-shadow: 0 8px 22px rgb(60 122 18 / 7%);
 }
 
-.daily-memo-heading {
+.daily-record-field {
   display: grid;
-  gap: 5px;
+  gap: 6px;
+}
+
+.daily-record-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(126 168 111 / 35%), transparent);
 }
 
 .daily-memo label {
   color: #3f7a2f;
   font-size: 0.9rem;
   font-weight: 900;
-}
-
-.daily-memo-question {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  margin: 0;
-  padding: 7px 9px;
-  border: 1px solid #dff0cf;
-  border-radius: 8px;
-  background: rgb(255 255 255 / 72%);
-  color: #2f4f35;
-  font-size: 0.88rem;
-  font-weight: 800;
-  line-height: 1.45;
-}
-
-.daily-memo-question span {
-  flex: 0 0 auto;
-}
-
-.daily-memo-hint {
-  margin: 0;
-  color: #7d8a74;
-  font-size: 0.76rem;
-  font-weight: 700;
-  line-height: 1.45;
 }
 
 .daily-memo textarea {
@@ -2932,6 +2975,35 @@ h1 {
 
 .daily-memo textarea::placeholder {
   color: #9e9b88;
+}
+
+.daily-one-line-example {
+  display: grid;
+  gap: 3px;
+  margin-top: 1px;
+  padding-left: 9px;
+  border-left: 3px solid rgb(137 184 106 / 36%);
+}
+
+.daily-one-line-example p {
+  margin: 0;
+  color: #8a927f;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.daily-one-line-example blockquote {
+  margin: 0;
+  color: #5d684f;
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.5;
+}
+
+.history-record-card {
+  margin-top: 0;
+  box-shadow: none;
 }
 
 .routine-context {
@@ -3782,12 +3854,12 @@ h1 {
   }
 
   .calendar-stamp-visual {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .calendar-stamp-slot {
-    width: 39px;
-    height: 39px;
+    width: 42px;
+    height: 42px;
   }
 
   .calendar-day-number {
@@ -3812,7 +3884,7 @@ h1 {
     min-height: 16px;
     justify-self: stretch;
     overflow: hidden;
-    font-size: 0.68rem;
+    font-size: 1.48rem;
     text-align: center;
     text-overflow: clip;
     white-space: nowrap;
@@ -3830,19 +3902,11 @@ h1 {
   }
 
   .calendar-day[data-rate-level='excellent'] .calendar-day-rate {
-    font-size: 0.44rem;
+    font-size: 0.38rem;
   }
 
-  .calendar-day[data-rate-level='great'] .calendar-day-rank {
-    font-size: 1.3rem;
-  }
-
-  .calendar-day[data-rate-level='excellent'] .calendar-day-rank {
-    font-size: 1.4rem;
-  }
-
-  .calendar-day[data-rate-level='perfect'] .calendar-day-rank {
-    font-size: 1.48rem;
+  .calendar-day[data-rate-level='perfect'] .calendar-day-rate {
+    font-size: 0.4rem;
   }
 
   .calendar-day[data-today='true']::after {
@@ -3881,28 +3945,16 @@ h1 {
 
     .calendar-day[data-rate-level='excellent'] .calendar-day-rate,
     .calendar-day[data-rate-level='perfect'] .calendar-day-rate {
-      font-size: 0.4rem;
+      font-size: 0.35rem;
     }
 
     .calendar-stamp-slot {
-      width: 34px;
-      height: 34px;
+      width: 38px;
+      height: 38px;
     }
 
     .calendar-day-rank {
-      font-size: 1.14rem;
-    }
-
-    .calendar-day[data-rate-level='great'] .calendar-day-rank {
-      font-size: 1.24rem;
-    }
-
-    .calendar-day[data-rate-level='excellent'] .calendar-day-rank {
-      font-size: 1.3rem;
-    }
-
-    .calendar-day[data-rate-level='perfect'] .calendar-day-rank {
-      font-size: 1.36rem;
+      font-size: 1.32rem;
     }
   }
 

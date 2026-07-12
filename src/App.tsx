@@ -306,6 +306,17 @@ const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
 
+const isDailyTextStorageKey = (key: string) =>
+  /^hibitin:(memo|events):\d{4}-\d{2}-\d{2}$/.test(key);
+
+const serializeRestoredStorageValue = (key: string, value: unknown) => {
+  if (isDailyTextStorageKey(key) && typeof value === 'string') {
+    return value;
+  }
+
+  return JSON.stringify(value);
+};
+
 const isBackupFile = (value: unknown): value is BackupFile => {
   if (!value || typeof value !== 'object') {
     return false;
@@ -398,32 +409,61 @@ const dailyMessages = [
   '🧭 迷ったら、今できる一個から。',
 ];
 
-const dailyOneLinePrompts = [
-  { id: 'happy-small', text: '今日ちょっと嬉しかったことは？', category: 'fun' },
-  { id: 'noticed', text: '今日気づいたことは？', category: 'discovery' },
-  { id: 'thanks', text: '今日ありがとうと思えたことは？', category: 'gratitude' },
-  { id: 'done-one', text: '今日できたことをひとつ挙げるなら？', category: 'achievement' },
-  { id: 'boss', text: '今日のラスボスは何だった？', category: 'fun' },
-  { id: 'calm', text: '今日一番落ち着いた瞬間は？', category: 'rest' },
-  { id: 'smiled', text: '今日ちょっと笑ったことは？', category: 'fun' },
-  { id: 'praise-self', text: '今日、自分を褒めるなら？', category: 'achievement' },
-  { id: 'small-luck', text: '今日の小さな幸運は？', category: 'gratitude' },
-  { id: 'one-step', text: '今日踏み出した一歩は？', category: 'achievement' },
-  { id: 'learned', text: '今日学んだことは？', category: 'discovery' },
-  { id: 'tomorrow-note', text: '明日の自分へひとこと。', category: 'tomorrow' },
-  { id: 'remembered-words', text: '今日心に残った言葉は？', category: 'discovery' },
-  { id: 'best-food', text: '今日一番おいしかったものは？', category: 'fun' },
-  { id: 'small-effort', text: '今日、少しだけ頑張ったことは？', category: 'achievement' },
-  { id: 'rested', text: '今日休めた瞬間は？', category: 'rest' },
-  { id: 'score', text: '今日の自分に点数をつけるなら？', category: 'emotion' },
-  { id: 'mood-word', text: '今の気分を一言で表すなら？', category: 'emotion' },
-  { id: 'release', text: '今日手放していいことは？', category: 'rest' },
-  { id: 'day-title', text: '今日を一言で名付けるなら？', category: 'fun' },
-  { id: 'tiny-kindness', text: '今日の小さなやさしさは？', category: 'gratitude' },
-  { id: 'good-enough', text: '今日は何が「まあOK」だった？', category: 'emotion' },
+const dailyOneLineExamples = [
+  { id: 'coffee-break', text: 'ひとくちコーヒー。ふう、ひとやすみひとやすみ。', category: 'rest', source: 'system' },
+  { id: 'nice-wind', text: '今日は風が気持ちよかった。', category: 'nature', source: 'system' },
+  { id: 'woke-up', text: '朝ちゃんと起きた。それだけでもよし。', category: 'smallWin', source: 'system' },
+  { id: 'ramen', text: 'ラーメンうまかった。今日はそれで満足。', category: 'food', source: 'system' },
+  { id: 'early-sleep', text: 'ちょっと疲れた。今日は早く寝よう。', category: 'emotion', source: 'system' },
+  { id: 'five-minute-walk', text: '五分だけ歩いた。少し頭がすっきり。', category: 'smallWin', source: 'system' },
+  { id: 'not-bad', text: '今日はなんだか、まあ悪くなかった。', category: 'emotion', source: 'system' },
+  { id: 'bath', text: 'お風呂が気持ちよかった。', category: 'rest', source: 'system' },
+  { id: 'plant-water', text: '植物に水をあげた。今日も元気そう。', category: 'dailyLife', source: 'system' },
+  { id: 'better-than-expected', text: '思ったよりちゃんとやれた。', category: 'smallWin', source: 'system' },
+  { id: 'slow-day', text: '今日はゆっくりでいい日にした。', category: 'rest', source: 'system' },
+  { id: 'one-done', text: 'ひとつ終わった。それで十分。', category: 'smallWin', source: 'system' },
+  { id: 'rain-sound', text: '雨の音がなんだか落ち着いた。', category: 'nature', source: 'system' },
+  { id: 'laughed', text: '今日はよく笑った。', category: 'dailyLife', source: 'system' },
+  { id: 'nothing-day', text: '何もない日。こういう日もいい。', category: 'rest', source: 'system' },
+  { id: 'sleepy-day', text: '眠かったけど、なんとか一日やった。', category: 'emotion', source: 'system' },
+  { id: 'lunch', text: 'お昼ごはん、おいしかった。', category: 'food', source: 'system' },
+  { id: 'kind-to-self', text: '今日は少しだけ自分に優しくできた。', category: 'emotion', source: 'system' },
+  { id: 'deep-breath', text: 'とりあえず深呼吸。ふう。', category: 'rest', source: 'system' },
+  { id: 'tomorrow-me', text: '明日は明日の俺に任せよう。', category: 'humor', source: 'system' },
+  { id: 'good-snack', text: 'おやつがうまい。小さい幸せ。', category: 'food', source: 'system' },
+  { id: 'clean-corner', text: '机のすみだけ片付いた。ちょっとすっきり。', category: 'dailyLife', source: 'system' },
+  { id: 'warm-sun', text: '日なたがあったかかった。', category: 'nature', source: 'system' },
+  { id: 'just-enough', text: '今日はここまで。まあ、十分。', category: 'rest', source: 'system' },
 ];
 
-const defaultDailyNudgeCompletionMessage = 'ひと押し完了。今日も一歩。';
+const dailyEventExamples = [
+  { id: 'early-wakeup', text: '朝、いつもより少し早く起きた。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'lunch-curry', text: 'お昼にカレーを食べた。うまかった。', category: 'food', source: 'system', kind: 'event' },
+  { id: 'new-work', text: '仕事で新しい作業をひとつ覚えた。', category: 'work', source: 'system', kind: 'event' },
+  { id: 'sunset', text: '帰り道、夕焼けがきれいだった。', category: 'nature', source: 'system', kind: 'event' },
+  { id: 'friend-talk', text: '久しぶりに友だちと話した。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'rainy-day', text: '今日は雨がよく降った。', category: 'nature', source: 'system', kind: 'event' },
+  { id: 'cat-walk', text: '散歩をしたら、猫を見かけた。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'shopping', text: '美吹と買い物に行った。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'fridge', text: '冷蔵庫の中を少し片付けた。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'slow-bath', text: 'いつもよりゆっくりお風呂に入った。', category: 'rest', source: 'system', kind: 'event' },
+  { id: 'work-early', text: '仕事が思ったより早く終わった。', category: 'work', source: 'system', kind: 'event' },
+  { id: 'nap', text: '眠かったので、少し昼寝した。', category: 'rest', source: 'system', kind: 'event' },
+  { id: 'new-snack', text: 'コンビニで新しいお菓子を買った。', category: 'food', source: 'system', kind: 'event' },
+  { id: 'short-run', text: '五分だけ走った。', category: 'activity', source: 'system', kind: 'event' },
+  { id: 'plant-water-event', text: '植物に水をあげた。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'dinner', text: '夕飯がおいしかった。', category: 'food', source: 'system', kind: 'event' },
+  { id: 'desk-clear', text: '机の上を少し整理した。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'funny-video', text: '動画を一本見て笑った。', category: 'fun', source: 'system', kind: 'event' },
+  { id: 'quiet-day', text: '今日は特に何もなかった。穏やかな日。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'bedtime-book', text: '寝る前に本を少し読んだ。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'forgotten-task', text: '忘れていた用事をひとつ片付けた。', category: 'smallWin', source: 'system', kind: 'event' },
+  { id: 'cool-wind', text: '外の風が少し涼しかった。', category: 'nature', source: 'system', kind: 'event' },
+  { id: 'laundry', text: '洗濯物をたたんだ。部屋が少し落ち着いた。', category: 'dailyLife', source: 'system', kind: 'event' },
+  { id: 'message', text: '返そうと思っていた連絡を返した。', category: 'dailyLife', source: 'system', kind: 'event' },
+];
+
+const defaultDailyNudgeCompletionMessage = 'お通し完了。今日も一歩。';
 const dailyNudgeCelebrationMessages = [
   '今日の勝ち！まず一歩、いただきました。',
   'いいスタート。動いた時点でもう前進。',
@@ -433,7 +473,7 @@ const dailyNudgeCelebrationMessages = [
   'まず動いた。それが強い。',
   '今日も習慣側に一票。',
   'やる気を待たずに動けた。勝ち。',
-  'ひと押し成功。ここからはボーナスタイム。',
+  'お通し成功。ここからはボーナスタイム。',
   '今日を始めた。それだけでも十分。',
   'よし、今日のエンジン始動。',
   '一歩目クリア。あとは遊ぶだけ。',
@@ -1396,9 +1436,14 @@ const getDateKey = (date: Date) => {
 const getStableStringHash = (value: string) =>
   [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
 
-const getDailyOneLinePrompt = (dateKey: string) =>
-  dailyOneLinePrompts[
-    getStableStringHash(`daily-one-line:${dateKey}`) % dailyOneLinePrompts.length
+const getDailyOneLineExample = (dateKey: string) =>
+  dailyOneLineExamples[
+    getStableStringHash(`daily-one-line-example:${dateKey}`) % dailyOneLineExamples.length
+  ];
+
+const getDailyEventExample = (dateKey: string) =>
+  dailyEventExamples[
+    getStableStringHash(`daily-event-example:${dateKey}`) % dailyEventExamples.length
   ];
 
 const getDailyNudgeRecentCandidateIds = (
@@ -1475,9 +1520,13 @@ const getDailyNudgeStreakCount = (records: DailyNudgeRecords, dateKey: string) =
 
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
+const getDailyEventStorageKey = (date: Date) => `hibitin:events:${getDateKey(date)}`;
 
 const loadDailyMemo = (date: Date) =>
   localStorage.getItem(getDailyMemoStorageKey(date)) ?? '';
+
+const loadDailyEvent = (date: Date) =>
+  localStorage.getItem(getDailyEventStorageKey(date)) ?? '';
 
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -2086,6 +2135,18 @@ const getMasteryAdminRuleText = () => [
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
 const getDailyNudgePointAchievementKey = (dateKey: string) => `daily-nudge:${dateKey}`;
 
+const calculateActiveEarnedPointsForDate = (
+  pointAwards: Record<string, PointAwardRecord>,
+  dateKey: string,
+) =>
+  Object.values(pointAwards).reduce((totalPoints, award) => {
+    if (!award.active || award.dateKey !== dateKey || award.points <= 0) {
+      return totalPoints;
+    }
+
+    return totalPoints + award.points;
+  }, 0);
+
 const findItemContext = (itemId: string, sections: RoutineSection[]) => {
   for (const section of sections) {
     const item = section.items.find((sectionItem) => sectionItem.id === itemId);
@@ -2279,6 +2340,7 @@ function App() {
   const historyDateLabel = historySelectedDate ? questDateFormatter.format(historySelectedDate) : '';
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
+  const eventStorageKey = getDailyEventStorageKey(selectedDate);
   const isToday = selectedDateKey === todayKey;
   const [templateSettings, setTemplateSettings] = useState<RoutineTemplateSettings>(() =>
     loadTemplateSettings(),
@@ -2303,8 +2365,12 @@ function App() {
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
   const [playerUnlocks, setPlayerUnlocks] = useState<PlayerUnlocks>(() => loadPlayerUnlocks());
   const dailyMessage = getDailyMessage(selectedDateKey, playerProfile.displayName);
-  const dailyOneLinePrompt = getDailyOneLinePrompt(selectedDateKey);
+  const dailyOneLineExample = getDailyOneLineExample(selectedDateKey);
+  const dailyEventExample = getDailyEventExample(selectedDateKey);
+  const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
+  const dailyNudgeDisplayLabel = isToday ? '本日のお通しクエスト' : '昨日のお通しクエスト';
+  const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
     loadGameBalanceSettings(),
@@ -2358,8 +2424,14 @@ function App() {
   const [historyCheckedItems, setHistoryCheckedItems] = useState<Record<string, boolean>>({});
   const [backupMessage, setBackupMessage] = useState('');
   const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
+  const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
+  const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
+  const [historyDailyEvent, setHistoryDailyEvent] = useState('');
+  const [historyDailyEventDateKey, setHistoryDailyEventDateKey] = useState('');
+  const [historyDailyMemo, setHistoryDailyMemo] = useState('');
+  const [historyDailyMemoDateKey, setHistoryDailyMemoDateKey] = useState('');
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -2416,6 +2488,10 @@ function App() {
   );
   const selectedDailyNudgeAward =
     playerEconomy.pointAwards[getDailyNudgePointAchievementKey(selectedDateKey)];
+  const selectedDateEarnedPoints = useMemo(
+    () => calculateActiveEarnedPointsForDate(playerEconomy.pointAwards, selectedDateKey),
+    [playerEconomy.pointAwards, selectedDateKey],
+  );
   const historyDateTemplate = historySelectedDate
     ? getBaseTemplateForDate(templateSettings, historySelectedDate)
     : 'normal';
@@ -2583,6 +2659,8 @@ function App() {
   }, [selectedDate]);
 
   useEffect(() => {
+    setDailyEvent(loadDailyEvent(selectedDate));
+    setDailyEventDateKey(selectedDateKey);
     setDailyMemo(loadDailyMemo(selectedDate));
     setDailyMemoDateKey(selectedDateKey);
   }, [selectedDate, selectedDateKey]);
@@ -2590,11 +2668,19 @@ function App() {
   useEffect(() => {
     if (!historySelectedDate) {
       setHistoryCheckedItems({});
+      setHistoryDailyEvent('');
+      setHistoryDailyEventDateKey('');
+      setHistoryDailyMemo('');
+      setHistoryDailyMemoDateKey('');
       return;
     }
 
     setHistoryCheckedItems(loadCheckedItems(historySelectedDate));
-  }, [historySelectedDate]);
+    setHistoryDailyEvent(loadDailyEvent(historySelectedDate));
+    setHistoryDailyEventDateKey(historySelectedDateKey);
+    setHistoryDailyMemo(loadDailyMemo(historySelectedDate));
+    setHistoryDailyMemoDateKey(historySelectedDateKey);
+  }, [historySelectedDate, historySelectedDateKey]);
 
   useEffect(() => {
     localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templateSettings));
@@ -2758,12 +2844,46 @@ function App() {
   }, [checkedItems, checksStorageKey]);
 
   useEffect(() => {
+    if (dailyEventDateKey !== selectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(eventStorageKey, dailyEvent);
+  }, [dailyEvent, dailyEventDateKey, eventStorageKey, selectedDateKey]);
+
+  useEffect(() => {
     if (dailyMemoDateKey !== selectedDateKey) {
       return;
     }
 
     localStorage.setItem(memoStorageKey, dailyMemo);
   }, [dailyMemo, dailyMemoDateKey, memoStorageKey, selectedDateKey]);
+
+  useEffect(() => {
+    if (!historySelectedDate || historyDailyEventDateKey !== historySelectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(getDailyEventStorageKey(historySelectedDate), historyDailyEvent);
+  }, [
+    historyDailyEvent,
+    historyDailyEventDateKey,
+    historySelectedDate,
+    historySelectedDateKey,
+  ]);
+
+  useEffect(() => {
+    if (!historySelectedDate || historyDailyMemoDateKey !== historySelectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(getDailyMemoStorageKey(historySelectedDate), historyDailyMemo);
+  }, [
+    historyDailyMemo,
+    historyDailyMemoDateKey,
+    historySelectedDate,
+    historySelectedDateKey,
+  ]);
 
   useEffect(() => {
     const closePopupPanels = () => {
@@ -3086,7 +3206,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '今日のひとおし',
+          itemLabel: '本日のお通しクエスト',
           sectionId: 'daily-nudge',
           points,
           basePoints,
@@ -3099,7 +3219,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '今日のひとおし',
+          itemLabel: '本日のお通しクエスト',
           sectionId: 'daily-nudge',
           type: 'earn',
           points,
@@ -3113,7 +3233,7 @@ function App() {
           const pointFlash = {
             id: nextLedgerEntry.id,
             points,
-            itemLabel: '今日のひとおし',
+            itemLabel: '本日のお通しクエスト',
           };
 
           setPointToast(pointFlash);
@@ -3280,7 +3400,7 @@ function App() {
     }
 
     const shouldDelete = window.confirm(
-      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みのひとおしは残ります。`,
+      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みのお通しクエストは残ります。`,
     );
 
     if (!shouldDelete) {
@@ -4197,7 +4317,9 @@ function App() {
         const savedValue = window.localStorage.getItem(key);
 
         if (savedValue !== null) {
-          storage[key] = JSON.parse(savedValue) as unknown;
+          storage[key] = isDailyTextStorageKey(key)
+            ? savedValue
+            : JSON.parse(savedValue) as unknown;
         }
       });
     } catch {
@@ -4269,7 +4391,7 @@ function App() {
         .forEach((key) => window.localStorage.removeItem(key));
 
       Object.entries(parsedBackup.data.storage).forEach(([key, value]) => {
-        window.localStorage.setItem(key, JSON.stringify(value));
+        window.localStorage.setItem(key, serializeRestoredStorageValue(key, value));
       });
 
       window.location.reload();
@@ -4291,7 +4413,7 @@ function App() {
     }
 
     const finalConfirmed = window.confirm(
-      '最終確認です。ルーティン、チェック履歴、メモ、タイマー、実績、アーカイブを含む全データを削除します。よろしいですか？',
+      '最終確認です。ルーティン、チェック履歴、記録、メモ、タイマー、実績、アーカイブを含む全データを削除します。よろしいですか？',
     );
 
     if (!finalConfirmed) {
@@ -4317,6 +4439,36 @@ function App() {
     setEditingItemId(null);
     setEditingLabel('');
     setTimerSettingItemId(null);
+  };
+
+  const updateDailyEventForSelectedDate = (value: string) => {
+    setDailyEventDateKey(selectedDateKey);
+    setDailyEvent(value);
+  };
+
+  const updateDailyMemoForSelectedDate = (value: string) => {
+    setDailyMemoDateKey(selectedDateKey);
+    setDailyMemo(value);
+  };
+
+  const updateHistoryDailyEvent = (value: string) => {
+    setHistoryDailyEventDateKey(historySelectedDateKey);
+    setHistoryDailyEvent(value);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyEventDateKey(selectedDateKey);
+      setDailyEvent(value);
+    }
+  };
+
+  const updateHistoryDailyMemo = (value: string) => {
+    setHistoryDailyMemoDateKey(historySelectedDateKey);
+    setHistoryDailyMemo(value);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyMemoDateKey(selectedDateKey);
+      setDailyMemo(value);
+    }
   };
 
   const changePage = (nextPage: PageName) => {
@@ -4577,6 +4729,12 @@ function App() {
                 <span aria-hidden="true">・</span>
                 ×{playerRankProgress.multiplier.toFixed(2)}
               </span>
+              <span
+                className="rank-status-earned"
+                data-empty={selectedDateEarnedPoints === 0 ? 'true' : 'false'}
+              >
+                {selectedDateEarnedPointsLabel} +{selectedDateEarnedPoints}PT
+              </span>
               <span className="rank-status-caret" aria-hidden="true">
                 {isRankPanelOpen ? '▲' : '▼'}
               </span>
@@ -4760,7 +4918,7 @@ function App() {
                     ['normal', '通常クエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
-                    ['dailyNudge', '今日のひとおし'],
+                    ['dailyNudge', '本日のお通しクエスト'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
                     <div className="admin-point-target-row" key={targetKind}>
                       <label>
@@ -4847,8 +5005,8 @@ function App() {
                       <li>累計星によるランク計算</li>
                       <li>ランクによるPT倍率</li>
                       <li>PTおよびランクの表示</li>
-                      <li>今日のひとおし完了によるPT獲得</li>
-                      <li>今日のひとおし連続記録</li>
+                      <li>本日のお通しクエスト完了によるPT獲得</li>
+                      <li>本日のお通しクエスト連続記録</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
                       <li>PTによるクエスト枠購入</li>
@@ -4947,12 +5105,12 @@ function App() {
         )}
 
         {page === 'settings' && gameMode === 'developer' && (
-          <section className="daily-nudge-admin-settings" aria-label="今日のひとおし管理">
+          <section className="daily-nudge-admin-settings" aria-label="お通しクエスト管理">
             <div className="settings-header">
               <div>
-                <h2>今日のひとおし管理</h2>
+                <h2>お通しクエスト管理</h2>
                 <p>
-                  毎日ひとつだけ表示する小さな提案を管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
+                  毎日ひとつだけ表示する小さなお通しクエストを管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
                 </p>
               </div>
             </div>
@@ -5162,12 +5320,12 @@ function App() {
                 dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
               }
               data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
-              aria-label="今日のひとおし"
+              aria-label={dailyNudgeDisplayLabel}
             >
               <div className="daily-nudge-heading">
                 <span aria-hidden="true">👉</span>
                 <div>
-                  <h2>今日のひとおし</h2>
+                  <h2>{dailyNudgeDisplayLabel}</h2>
                   {selectedDailyNudgeRecord && (
                     <p>{selectedDailyNudgeRecord.category}</p>
                   )}
@@ -5206,7 +5364,7 @@ function App() {
                   </div>
                 </>
               ) : (
-                <p className="daily-nudge-empty">今日のひとおしは準備中です</p>
+                <p className="daily-nudge-empty">お通しクエストは準備中です</p>
               )}
             </section>
           )}
@@ -5633,27 +5791,40 @@ function App() {
         )}
 
         {page === 'today' && !isEditMode && (
-          <section className="daily-memo" aria-label={dailyOneLineLabel}>
-            <div className="daily-memo-heading">
+          <section className="daily-memo daily-record-card" aria-label="日付別記録">
+            <div className="daily-record-field daily-record-field-one-line">
               <label htmlFor="daily-memo">
                 📝 {dailyOneLineLabel}
               </label>
-              <p className="daily-memo-question">
-                <span aria-hidden="true">💭</span>
-                {dailyOneLinePrompt.text}
-              </p>
-              <p className="daily-memo-hint">問いはきっかけ。別のことを書いてもOK。</p>
+              <textarea
+                id="daily-memo"
+                onChange={(event) => updateDailyMemoForSelectedDate(event.target.value)}
+                placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                rows={2}
+                value={dailyMemo}
+              />
+              <div className="daily-one-line-example" aria-label="ひとことの例">
+                <p>例えばこんなの</p>
+                <blockquote>「{dailyOneLineExample.text}」</blockquote>
+              </div>
             </div>
-            <textarea
-              id="daily-memo"
-              onChange={(event) => {
-                setDailyMemoDateKey(selectedDateKey);
-                setDailyMemo(event.target.value);
-              }}
-              placeholder="ひとこと書いてみよう"
-              rows={2}
-              value={dailyMemo}
-            />
+            <div className="daily-record-divider" aria-hidden="true" />
+            <div className="daily-record-field daily-record-field-events">
+              <label htmlFor="daily-events">
+                📅 {dailyEventLabel}
+              </label>
+              <textarea
+                id="daily-events"
+                onChange={(event) => updateDailyEventForSelectedDate(event.target.value)}
+                placeholder={`${isToday ? '今日' : '昨日'}あったことを書いてみよう`}
+                rows={2}
+                value={dailyEvent}
+              />
+              <div className="daily-one-line-example" aria-label="できごとの例">
+                <p>例えばこんなの</p>
+                <blockquote>「{dailyEventExample.text}」</blockquote>
+              </div>
+            </div>
           </section>
         )}
 
@@ -5804,6 +5975,33 @@ function App() {
                       </p>
                     </>
                   )}
+                </section>
+                <section className="daily-memo history-record-card" aria-label="その日の記録">
+                  <div className="daily-record-field daily-record-field-one-line">
+                    <label htmlFor="history-daily-memo">
+                      📝 その日のひとこと
+                    </label>
+                    <textarea
+                      id="history-daily-memo"
+                      onChange={(event) => updateHistoryDailyMemo(event.target.value)}
+                      placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                      rows={2}
+                      value={historyDailyMemo}
+                    />
+                  </div>
+                  <div className="daily-record-divider" aria-hidden="true" />
+                  <div className="daily-record-field daily-record-field-events">
+                    <label htmlFor="history-daily-events">
+                      📅 その日のできごと
+                    </label>
+                    <textarea
+                      id="history-daily-events"
+                      onChange={(event) => updateHistoryDailyEvent(event.target.value)}
+                      placeholder="その日にあったことを書いてみよう"
+                      rows={2}
+                      value={historyDailyEvent}
+                    />
+                  </div>
                 </section>
                 <div className="history-routine-list">
                   {historyDisplaySections.map((section) => {
