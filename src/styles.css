@@ -126,8 +126,8 @@ h1 {
 .rank-status-button {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 8px;
-  min-height: 50px;
+  gap: 3px 8px;
+  min-height: 60px;
   align-items: center;
   border: 1px solid rgb(0 168 107 / 18%);
   border-radius: 14px;
@@ -140,9 +140,20 @@ h1 {
   text-align: left;
 }
 
+.rank-status-name {
+  grid-column: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f4f3a;
+  font-size: clamp(1.04rem, 4vw, 1.22rem);
+  font-weight: 1000;
+  line-height: 1.12;
+}
+
 .rank-status-main {
+  grid-column: 1;
   color: #12583f;
-  font-size: 1.08rem;
+  font-size: 0.94rem;
   font-weight: 1000;
   line-height: 1.1;
 }
@@ -161,7 +172,7 @@ h1 {
 }
 
 .rank-status-caret {
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   grid-column: 2;
   color: #4d806a;
   font-size: 0.76rem;
@@ -810,8 +821,8 @@ h1 {
 
 .game-mode-settings,
 .player-profile-settings,
-.player-level-settings,
 .admin-balance-settings,
+.daily-nudge-admin-settings,
 .template-settings {
   display: grid;
   gap: 14px;
@@ -855,14 +866,110 @@ h1 {
   font-size: 0.92rem;
 }
 
-.player-level-settings {
-  border-color: #eadc9a;
-  background: linear-gradient(180deg, #fffaf0, #ffffff);
-}
-
 .admin-balance-settings {
   border-color: #d6d9eb;
   background: linear-gradient(180deg, #f8f8ff, #ffffff);
+}
+
+.daily-nudge-admin-settings {
+  border-color: #f1dbac;
+  background: linear-gradient(180deg, #fffaf0, #ffffff);
+}
+
+.daily-nudge-admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-nudge-admin-card {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #eadfca;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgb(255 255 255 / 78%);
+}
+
+.daily-nudge-admin-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-nudge-admin-card-header label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #73571b;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.daily-nudge-admin-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.daily-nudge-admin-card-actions button,
+.daily-nudge-add-button {
+  min-height: 30px;
+  border: 1px solid #e6d4ad;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: #fff8e7;
+  color: #73571b;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.daily-nudge-admin-card-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.daily-nudge-admin-card > label {
+  display: grid;
+  gap: 5px;
+}
+
+.daily-nudge-admin-card > label span,
+.daily-nudge-admin-id {
+  color: #7b705b;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.daily-nudge-admin-card input[type='text'],
+.daily-nudge-admin-card textarea {
+  width: 100%;
+  border: 1px solid #e2d6c0;
+  border-radius: 8px;
+  padding: 8px;
+  background: #ffffff;
+  color: #2f2a20;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.daily-nudge-admin-card textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.daily-nudge-admin-id {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.daily-nudge-add-button {
+  justify-self: start;
+  min-height: 36px;
+  background: #eac76e;
+  color: #3e2d00;
 }
 
 .admin-balance-grid {
@@ -1036,101 +1143,6 @@ h1 {
   line-height: 1.45;
 }
 
-.admin-balance-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.admin-balance-summary-grid p,
-.admin-section-star-card {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  border: 1px solid #e4e8f4;
-  border-radius: 8px;
-  padding: 9px;
-  background: #ffffff;
-}
-
-.admin-section-star-card h4 {
-  margin: 0;
-  color: #394569;
-  font-size: 0.86rem;
-  font-weight: 900;
-}
-
-.admin-section-star-card label {
-  display: grid;
-  grid-template-columns: auto minmax(68px, 1fr);
-  align-items: center;
-  gap: 6px;
-}
-
-.admin-section-star-card input {
-  width: 100%;
-  min-height: 32px;
-  border: 1px solid #d6dbe7;
-  border-radius: 8px;
-  padding: 0 8px;
-  background: #ffffff;
-  color: #242a38;
-  font: inherit;
-  font-size: 0.86rem;
-}
-
-.admin-balance-summary-grid span {
-  color: #697186;
-  font-size: 0.74rem;
-  font-weight: 800;
-}
-
-.admin-balance-summary-grid strong {
-  color: #394569;
-  font-size: 0.95rem;
-  font-weight: 1000;
-}
-
-.admin-balance-row,
-.admin-unlock-row {
-  display: grid;
-  align-items: center;
-  gap: 7px;
-}
-
-.admin-balance-row {
-  grid-template-columns: auto minmax(64px, 88px) auto minmax(64px, 88px);
-}
-
-.admin-balance-row span,
-.admin-unlock-row span {
-  color: #596073;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.admin-unlock-row {
-  grid-template-columns: minmax(86px, 0.4fr) 1fr;
-}
-
-.admin-unlock-row label {
-  display: grid;
-  gap: 4px;
-}
-
-.admin-balance-row input,
-.admin-unlock-row input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid #d6dbe7;
-  border-radius: 8px;
-  padding: 0 8px;
-  background: #ffffff;
-  color: #242a38;
-  font: inherit;
-  font-size: 0.86rem;
-}
-
 .admin-slot-row {
   display: grid;
   grid-template-columns: minmax(78px, 0.75fr) repeat(3, minmax(0, 1fr));
@@ -1212,42 +1224,6 @@ h1 {
 .admin-balance-actions button:last-child {
   background: #eef1f7;
   color: #4f5a72;
-}
-
-.player-level-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #eadc9a;
-  border-radius: 12px;
-  padding: 14px;
-  background: #ffffff;
-  color: #463b1b;
-}
-
-.section-star-cards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.player-level-label {
-  margin: 0;
-  color: #8a6800;
-  font-size: 1.4rem;
-  font-weight: 1000;
-  line-height: 1;
-}
-
-.player-level-stats {
-  display: grid;
-  gap: 6px;
-}
-
-.player-level-stats p {
-  margin: 0;
-  color: #6d5a22;
-  font-size: 0.86rem;
-  font-weight: 800;
 }
 
 .game-mode-options {
@@ -1486,9 +1462,11 @@ h1 {
 
 .calendar-day {
   position: relative;
+  box-sizing: border-box;
   display: grid;
   align-content: center;
   gap: 2px;
+  min-width: 0;
   border: 1px dashed #dfc67b;
   padding: 4px 2px;
   background: rgb(255 255 255 / 62%);
@@ -1547,25 +1525,45 @@ h1 {
 }
 
 .calendar-day[data-rate-level='great'] {
-  border-color: #ffc082;
-  background: #fff0df;
-  color: #c75d00;
+  border: 2px solid #b8640f;
+  background:
+    linear-gradient(155deg, #ffe7a8 0%, #f3a93a 56%, #c9781c 100%);
+  color: #5a2f00;
+  box-shadow:
+    0 7px 16px rgb(178 95 13 / 22%),
+    inset 0 0 0 1px rgb(255 255 255 / 34%);
 }
 
 .calendar-day[data-rate-level='great'][data-routine-kind='holiday'] {
-  border-color: #ee9f94;
-  background: linear-gradient(180deg, #ffe9ec, #fff0df);
+  border-color: #b8640f;
+  background:
+    linear-gradient(155deg, #ffe7a8 0%, #f3a93a 56%, #c9781c 100%);
+  box-shadow:
+    0 7px 16px rgb(178 95 13 / 22%),
+    inset 0 0 0 2px rgb(194 65 72 / 24%),
+    inset 0 0 0 1px rgb(255 255 255 / 34%);
 }
 
 .calendar-day[data-rate-level='excellent'] {
-  border-color: #e7d96b;
-  background: #fff9c8;
-  color: #7d7000;
+  border: 2px solid #b98500;
+  background:
+    radial-gradient(circle at 50% 22%, rgb(255 255 255 / 46%), transparent 28%),
+    linear-gradient(155deg, #fff3a5 0%, #f0c22f 52%, #c88c00 100%);
+  color: #4f3900;
+  box-shadow:
+    0 8px 18px rgb(177 126 0 / 28%),
+    inset 0 0 0 1px rgb(255 255 255 / 42%);
 }
 
 .calendar-day[data-rate-level='excellent'][data-routine-kind='holiday'] {
-  border-color: #efa7a7;
-  background: linear-gradient(180deg, #ffecef, #fff9c8);
+  border-color: #b98500;
+  background:
+    radial-gradient(circle at 50% 22%, rgb(255 255 255 / 46%), transparent 28%),
+    linear-gradient(155deg, #fff3a5 0%, #f0c22f 52%, #c88c00 100%);
+  box-shadow:
+    0 8px 18px rgb(177 126 0 / 28%),
+    inset 0 0 0 2px rgb(194 65 72 / 24%),
+    inset 0 0 0 1px rgb(255 255 255 / 42%);
 }
 
 .calendar-day[data-rate-level='perfect'] {
@@ -1585,10 +1583,10 @@ h1 {
 
 .calendar-day[data-today='true'] {
   position: relative;
-  border-color: #ffb12f;
+  border-color: #168f78;
   box-shadow:
-    0 0 0 2px #ffb12f inset,
-    0 7px 18px rgb(255 177 47 / 24%);
+    0 0 0 2px #168f78 inset,
+    0 7px 18px rgb(22 143 120 / 24%);
   transform: translateY(-1px);
 }
 
@@ -1601,7 +1599,7 @@ h1 {
   height: 18px;
   place-items: center;
   border-radius: 999px;
-  background: #ffb12f;
+  background: #168f78;
   color: #ffffff;
   content: "▶";
   font-size: 0.62rem;
@@ -1643,6 +1641,14 @@ h1 {
   position: absolute;
   top: 3px;
   left: 4px;
+  z-index: 3;
+  display: grid;
+  min-width: 14px;
+  height: 14px;
+  place-items: center;
+  border: 1px solid rgb(192 90 95 / 22%);
+  border-radius: 999px;
+  background: rgb(255 244 246 / 88%);
   color: #c05a5f;
   content: "休";
   font-size: 0.62rem;
@@ -1651,15 +1657,19 @@ h1 {
 }
 
 .calendar-day[data-selected='true'] {
-  outline: 3px solid #c47a2c;
-  outline-offset: 1px;
+  outline: 3px solid #214f43;
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 82%) inset,
+    0 8px 18px rgb(33 79 67 / 20%);
 }
 
 .calendar-day[data-selected='true'][data-routine-kind='holiday'] {
-  outline-color: #d96b72;
+  outline-color: #214f43;
   box-shadow:
-    0 0 0 1px rgb(255 255 255 / 72%) inset,
-    0 7px 16px rgb(217 107 114 / 18%);
+    0 0 0 1px rgb(255 255 255 / 82%) inset,
+    0 8px 18px rgb(33 79 67 / 20%),
+    0 0 0 2px rgb(217 107 114 / 18%);
 }
 
 .calendar-day-number {
@@ -1698,6 +1708,36 @@ h1 {
   font-size: 1.12rem;
   line-height: 1;
   filter: drop-shadow(0 1px 0 rgb(255 255 255 / 70%));
+}
+
+.calendar-day[data-rate-level='great'] .calendar-day-number,
+.calendar-day[data-rate-level='great'] .calendar-day-rate {
+  color: #4d2a00;
+  text-shadow: 0 1px 0 rgb(255 244 211 / 58%);
+}
+
+.calendar-day[data-rate-level='great'] .calendar-day-rank {
+  font-size: 1.24rem;
+  filter:
+    drop-shadow(0 1px 0 rgb(255 245 219 / 78%))
+    drop-shadow(0 2px 3px rgb(104 47 0 / 22%));
+}
+
+.calendar-day[data-rate-level='excellent'] .calendar-day-number,
+.calendar-day[data-rate-level='excellent'] .calendar-day-rate {
+  color: #3f3000;
+  text-shadow: 0 1px 0 rgb(255 248 196 / 68%);
+}
+
+.calendar-day[data-rate-level='excellent'] .calendar-day-rank {
+  font-size: 1.32rem;
+  filter:
+    drop-shadow(0 1px 0 rgb(255 255 223 / 84%))
+    drop-shadow(0 2px 4px rgb(97 66 0 / 24%));
+}
+
+.calendar-day[data-rate-level='perfect'] .calendar-day-rank {
+  font-size: 1.34rem;
 }
 
 .history-detail {
@@ -2843,6 +2883,142 @@ h1 {
   background: rgb(255 255 255 / 50%);
 }
 
+.quest-slot-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(34 166 107 / 20%);
+  border-radius: 999px;
+  padding: 8px 10px;
+  background: rgb(238 255 247 / 72%);
+  color: #385045;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.quest-slot-usage strong {
+  color: #12633f;
+  font-weight: 1000;
+}
+
+.quest-slot-usage span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgb(255 255 255 / 76%);
+}
+
+.daily-nudge-card {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  border: 1px solid rgb(231 185 69 / 42%);
+  border-radius: 12px;
+  padding: 13px;
+  background:
+    linear-gradient(180deg, rgb(255 251 232 / 96%), rgb(255 255 250 / 98%)),
+    #fffdf4;
+  box-shadow: 0 12px 26px rgb(126 91 13 / 10%);
+}
+
+.daily-nudge-card[data-completed='true'] {
+  border-color: rgb(56 178 121 / 42%);
+  background:
+    linear-gradient(180deg, rgb(239 255 247 / 98%), rgb(255 255 250 / 98%)),
+    #f8fff8;
+}
+
+.daily-nudge-inline {
+  gap: 8px;
+  margin: 8px 0 6px;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: none;
+}
+
+.daily-nudge-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.daily-nudge-heading > span {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 10px;
+  background: #fff0b7;
+  font-size: 1.08rem;
+}
+
+.daily-nudge-heading h2,
+.daily-nudge-heading p,
+.daily-nudge-text,
+.daily-nudge-empty,
+.daily-nudge-actions p {
+  margin: 0;
+}
+
+.daily-nudge-heading h2 {
+  color: #7a5200;
+  font-size: 0.92rem;
+  font-weight: 1000;
+  line-height: 1.1;
+}
+
+.daily-nudge-heading p {
+  margin-top: 2px;
+  color: #876d31;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.daily-nudge-text {
+  color: #26362f;
+  font-size: 0.94rem;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.daily-nudge-empty {
+  color: #7c8079;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.daily-nudge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-nudge-actions button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #22b877, #15915e);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 1000;
+  box-shadow: 0 8px 16px rgb(21 145 94 / 18%);
+}
+
+.daily-nudge-card[data-completed='true'] .daily-nudge-actions button {
+  background: #e9eee9;
+  color: #526057;
+  box-shadow: none;
+}
+
+.daily-nudge-actions p {
+  color: #1f7a5a;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
 .routine-context p:first-child {
   margin-top: 0;
   color: #1f6c50;
@@ -3420,6 +3596,60 @@ h1 {
     grid-column: 2;
     grid-row: 2;
     text-align: right;
+  }
+
+  .calendar-day-rank {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    inline-size: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 16px;
+    justify-self: stretch;
+    overflow: hidden;
+    font-size: 0.68rem;
+    text-align: center;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .calendar-day-rate {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .calendar-day[data-rate-level='excellent'] .calendar-day-rate {
+    font-size: 0.42rem;
+  }
+
+  .calendar-day[data-rate-level='great'] .calendar-day-rank {
+    font-size: 0.76rem;
+  }
+
+  .calendar-day[data-rate-level='excellent'] .calendar-day-rank {
+    font-size: 0.5rem;
+    line-height: 0.92;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .calendar-day[data-rate-level='perfect'] .calendar-day-rank {
+    font-size: 0.5rem;
+  }
+
+  .calendar-day[data-today='true']::after {
+    top: -5px;
+    right: 0;
+    width: 15px;
+    height: 15px;
+    font-size: 0.52rem;
   }
 
   .template-settings {

@@ -43,21 +43,6 @@ type RoutineTemplateSettings = {
   weekdayTypeMap: Record<WeekdayKey, TemplateKind>;
 };
 
-type SectionStars = Record<StartSection, number>;
-
-type LevelRule = {
-  level: number;
-  requiredStars: number;
-};
-
-type UnlockRule = {
-  requiredStars: number;
-  type: 'questSlot' | 'feature';
-  section?: StartSection | 'advanced';
-  amount?: number;
-  label: string;
-};
-
 type RankRule = {
   rank: number;
   requiredLifetimeStars: number;
@@ -88,12 +73,11 @@ type PointTargetKind = 'wake' | 'normal' | 'sleep' | 'advanced';
 
 type QuestSlotExchangeRule = {
   enabled: boolean;
-  initialSlots: number;
-  maxSlots: number;
+  initialTotalSlots: number;
+  maxTotalSlots: number;
   price: number;
 };
 
-type QuestSlotExchangeSettings = Record<StartSection, QuestSlotExchangeRule>;
 type ShopCategory = 'questSlot' | 'feature' | 'customize' | 'item' | 'gacha';
 
 type ShopItem = {
@@ -102,7 +86,6 @@ type ShopItem = {
   label: string;
   price: number;
   enabled: boolean;
-  section?: StartSection;
   maxPurchases?: number;
 };
 
@@ -118,18 +101,11 @@ type LegacyPointSettings = {
   includeAdvanced?: boolean;
 };
 
-type SectionStarRules = {
-  levelRules: LevelRule[];
-  unlockRules: UnlockRule[];
-};
-
 type GameBalanceSettings = {
   schemaVersion: 3;
-  sectionStarRules: Record<StartSection, SectionStarRules>;
-  playerModeLimits: Record<StartSection, number>;
   pointSettings: PointSettings;
   rankRules: RankRule[];
-  questSlotExchange: QuestSlotExchangeSettings;
+  questSlotExchange: QuestSlotExchangeRule;
 };
 
 type PointLedgerEntry = {
@@ -172,7 +148,7 @@ type PlayerEconomy = {
 };
 
 type PlayerUnlocks = {
-  questSlots: Record<StartSection, number>;
+  totalQuestSlots: number;
 };
 
 type PointToast = {
@@ -219,6 +195,28 @@ type BackupDownload = {
 };
 
 type ItemNotes = Record<string, Record<string, string>>;
+
+type DailyNudgeCandidate = {
+  id: string;
+  text: string;
+  completionMessage: string;
+  category: string;
+  enabled: boolean;
+  order: number;
+  createdAt: string;
+};
+
+type DailyNudgeRecord = {
+  candidateId: string;
+  text: string;
+  completionMessage: string;
+  category: string;
+  completed: boolean;
+  assignedAt: string;
+  completedAt?: string;
+};
+
+type DailyNudgeRecords = Record<string, DailyNudgeRecord>;
 
 type NoteEditorTarget = {
   dateKey: string;
@@ -289,14 +287,16 @@ const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
 const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
 const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
+const DAILY_NUDGE_CANDIDATES_STORAGE_KEY = 'hibitin:dailyNudgeCandidates:v1';
+const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
-const SECTION_STARS_STORAGE_KEY = 'hibitin:sectionStars:v1';
 const GAME_BALANCE_STORAGE_KEY = 'hibitin:gameBalance:v1';
 const PLAYER_ECONOMY_STORAGE_KEY = 'hibitin:playerEconomy:v1';
 const PLAYER_PROFILE_STORAGE_KEY = 'hibitin:playerProfile:v1';
-const PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
+const PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v2';
+const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -371,13 +371,6 @@ const sectionIconLabels: Record<string, string> = {
   advanced: '⚙️',
 };
 
-const sectionTextLabels: Record<StartSection, string> = {
-  morning: '朝',
-  noon: '昼',
-  evening: '夕',
-  night: '夜',
-};
-
 const shopCategoryLabels: Record<ShopCategory, string> = {
   questSlot: 'クエスト枠',
   feature: '機能',
@@ -399,6 +392,38 @@ const dailyMessages = [
   '🎯 完璧じゃなくて、前進。',
   '🧭 迷ったら、今できる一個から。',
 ];
+
+const defaultDailyNudgeCompletionMessage = 'ひと押し完了。今日も一歩。';
+const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
+  ['daily-nudge-water', '水を一杯飲もう', '水分補給クリア。体にやさしい一歩。', '健康'],
+  ['daily-nudge-stretch-10', '10秒だけ背伸びしよう', '背伸び完了。少し空気が入れ替わった。', '健康'],
+  ['daily-nudge-breath', '深呼吸をひとつしよう', '深呼吸完了。いま、ここに戻れた。', '休息'],
+  ['daily-nudge-shoulder', '肩を3回まわそう', '肩まわし完了。こわばりを少し解除。', '健康'],
+  ['daily-nudge-step', '立ち上がって一歩歩こう', '一歩完了。ちゃんと動き出した。', '行動開始'],
+  ['daily-nudge-far-look', '遠くを10秒眺めよう', '視界リセット完了。目にも休憩を。', '休息'],
+  ['daily-nudge-close-eyes', '目を閉じて5秒休もう', '5秒休憩完了。小さく回復。', '休息'],
+  ['daily-nudge-desk-one', '机の上を一つだけ片付けよう', '一つ片付いた。場が少し軽くなった。', '行動開始'],
+  ['daily-nudge-posture', '背筋を伸ばそう', '姿勢リセット完了。ちょっといい感じ。', '健康'],
+  ['daily-nudge-done-one', '今日できたことを一つ思い出そう', 'できたこと発見。今日にもちゃんと進捗あり。', '感謝'],
+  ['daily-nudge-like-one', '好きなものを一つ思い出そう', '好きなもの確認。心の燃料を補給。', '感謝'],
+  ['daily-nudge-thanks-self', '自分にありがとうと言おう', '自分へのありがとう完了。ナイス存在。', '感謝'],
+  ['daily-nudge-survive', '今日ここまで生きた。それだけで勝利。', '生存勝利。今日はもう土台クリア。', '休息'],
+  ['daily-nudge-window', '窓の外をちらっと見よう', '外の世界を確認。視点が少し広がった。', '休息'],
+  ['daily-nudge-smile', '口角を少しだけ上げてみよう', '表情ミニ調整完了。気分に小さなバフ。', '遊び'],
+  ['daily-nudge-hands', '手をぎゅっと握って開こう', '手のリセット完了。操作感が戻った。', '健康'],
+  ['daily-nudge-one-word', '今の気分を一言で言ってみよう', '気分ログ完了。自分の現在地を確認。', '記録'],
+  ['daily-nudge-kind', '誰かにやさしくする作戦を一つ考えよう', 'やさしさ作戦セット。実行できたらボーナス。', '感謝'],
+  ['daily-nudge-tiny-start', 'やることを一つだけ小さくしよう', '小さく分解完了。着手しやすくなった。', '行動開始'],
+  ['daily-nudge-floor', '足の裏を床に感じてみよう', '接地完了。ここからまた始められる。', '休息'],
+].map(([id, text, completionMessage, category], index) => ({
+  id,
+  text,
+  completionMessage,
+  category,
+  enabled: true,
+  order: (index + 1) * 10,
+  createdAt: '2026-07-11T00:00:00.000Z',
+}));
 
 const weekdayOptions: { key: WeekdayKey; label: string }[] = [
   { key: 'monday', label: '月' },
@@ -675,6 +700,105 @@ const loadItemNotes = (): ItemNotes => {
   }
 };
 
+const normalizeDailyNudgeCandidate = (
+  candidate: Partial<DailyNudgeCandidate>,
+  index: number,
+): DailyNudgeCandidate | null => {
+  if (typeof candidate.id !== 'string' || !candidate.id.trim()) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    text: typeof candidate.text === 'string' && candidate.text.trim()
+      ? candidate.text
+      : '小さな一歩をひとつ選ぼう',
+    completionMessage:
+      typeof candidate.completionMessage === 'string' && candidate.completionMessage.trim()
+        ? candidate.completionMessage
+        : defaultDailyNudgeCompletionMessage,
+    category: typeof candidate.category === 'string' && candidate.category.trim()
+      ? candidate.category
+      : 'その他',
+    enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : true,
+    order: Number.isFinite(Number(candidate.order))
+      ? Number(candidate.order)
+      : (index + 1) * 10,
+    createdAt: typeof candidate.createdAt === 'string'
+      ? candidate.createdAt
+      : new Date().toISOString(),
+  };
+};
+
+const loadDailyNudgeCandidates = () => {
+  const savedCandidates = localStorage.getItem(DAILY_NUDGE_CANDIDATES_STORAGE_KEY);
+
+  if (!savedCandidates) {
+    return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+  }
+
+  try {
+    const parsedCandidates = JSON.parse(savedCandidates) as unknown;
+
+    if (!Array.isArray(parsedCandidates)) {
+      return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+    }
+
+    const normalizedCandidates = parsedCandidates
+      .map((candidate, index) =>
+        normalizeDailyNudgeCandidate(candidate as Partial<DailyNudgeCandidate>, index),
+      )
+      .filter((candidate): candidate is DailyNudgeCandidate => candidate !== null)
+      .sort((first, second) => first.order - second.order);
+
+    return normalizedCandidates;
+  } catch {
+    return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+  }
+};
+
+const loadDailyNudgeRecords = (): DailyNudgeRecords => {
+  const savedRecords = localStorage.getItem(DAILY_NUDGE_RECORDS_STORAGE_KEY);
+
+  if (!savedRecords) {
+    return {};
+  }
+
+  try {
+    const parsedRecords = JSON.parse(savedRecords) as Record<string, Partial<DailyNudgeRecord>>;
+
+    if (!parsedRecords || typeof parsedRecords !== 'object' || Array.isArray(parsedRecords)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedRecords)
+        .filter(([dateKey, record]) => (
+          /^\d{4}-\d{2}-\d{2}$/.test(dateKey) &&
+          typeof record.candidateId === 'string' &&
+          typeof record.text === 'string' &&
+          typeof record.completionMessage === 'string' &&
+          typeof record.category === 'string' &&
+          typeof record.assignedAt === 'string'
+        ))
+        .map(([dateKey, record]) => [
+          dateKey,
+          {
+            candidateId: record.candidateId ?? '',
+            text: record.text ?? '',
+            completionMessage: record.completionMessage ?? defaultDailyNudgeCompletionMessage,
+            category: record.category ?? 'その他',
+            completed: Boolean(record.completed),
+            assignedAt: record.assignedAt ?? new Date().toISOString(),
+            completedAt: typeof record.completedAt === 'string' ? record.completedAt : undefined,
+          },
+        ]),
+    ) as DailyNudgeRecords;
+  } catch {
+    return {};
+  }
+};
+
 const loadGameMode = (): GameMode => {
   try {
     const savedMode = localStorage.getItem(GAME_MODE_STORAGE_KEY);
@@ -722,12 +846,7 @@ const loadPlayerProfile = () => {
 };
 
 const createDefaultPlayerUnlocks = (): PlayerUnlocks => ({
-  questSlots: {
-    morning: 1,
-    noon: 1,
-    evening: 1,
-    night: 1,
-  },
+  totalQuestSlots: 4,
 });
 
 const normalizePlayerUnlocks = (value: unknown): PlayerUnlocks => {
@@ -735,7 +854,16 @@ const normalizePlayerUnlocks = (value: unknown): PlayerUnlocks => {
     return createDefaultPlayerUnlocks();
   }
 
-  const parsedUnlocks = value as Partial<PlayerUnlocks>;
+  const parsedUnlocks = value as Partial<PlayerUnlocks & {
+    questSlots?: Partial<Record<StartSection, unknown>>;
+  }>;
+
+  if (Number.isFinite(Number(parsedUnlocks.totalQuestSlots))) {
+    return {
+      totalQuestSlots: Math.max(4, Math.floor(Number(parsedUnlocks.totalQuestSlots))),
+    };
+  }
+
   const parsedQuestSlots = (
     parsedUnlocks.questSlots &&
     typeof parsedUnlocks.questSlots === 'object' &&
@@ -743,14 +871,14 @@ const normalizePlayerUnlocks = (value: unknown): PlayerUnlocks => {
   )
     ? parsedUnlocks.questSlots as Partial<Record<StartSection, unknown>>
     : {};
+  const purchasedSlots = dailySectionIds.reduce((total, sectionId) => {
+    const legacySlots = Math.max(1, Math.floor(Number(parsedQuestSlots[sectionId]) || 1));
+
+    return total + Math.max(0, legacySlots - 1);
+  }, 0);
 
   return {
-    questSlots: {
-      morning: Math.max(1, Math.floor(Number(parsedQuestSlots.morning) || 1)),
-      noon: Math.max(1, Math.floor(Number(parsedQuestSlots.noon) || 1)),
-      evening: Math.max(1, Math.floor(Number(parsedQuestSlots.evening) || 1)),
-      night: Math.max(1, Math.floor(Number(parsedQuestSlots.night) || 1)),
-    },
+    totalQuestSlots: 4 + purchasedSlots,
   };
 };
 
@@ -758,8 +886,14 @@ const loadPlayerUnlocks = () => {
   try {
     const savedUnlocks = localStorage.getItem(PLAYER_UNLOCKS_STORAGE_KEY);
 
-    return savedUnlocks
-      ? normalizePlayerUnlocks(JSON.parse(savedUnlocks) as unknown)
+    if (savedUnlocks) {
+      return normalizePlayerUnlocks(JSON.parse(savedUnlocks) as unknown);
+    }
+
+    const legacyUnlocks = localStorage.getItem(LEGACY_PLAYER_UNLOCKS_STORAGE_KEY);
+
+    return legacyUnlocks
+      ? normalizePlayerUnlocks(JSON.parse(legacyUnlocks) as unknown)
       : createDefaultPlayerUnlocks();
   } catch {
     return createDefaultPlayerUnlocks();
@@ -767,100 +901,24 @@ const loadPlayerUnlocks = () => {
 };
 
 const getEffectiveQuestSlotLimit = (
-  sectionId: StartSection,
   unlocks: PlayerUnlocks,
   balanceSettings: GameBalanceSettings,
 ) => {
-  const exchangeRule = balanceSettings.questSlotExchange[sectionId];
-  const unlockedSlots = unlocks.questSlots[sectionId] ?? exchangeRule.initialSlots;
+  const exchangeRule = balanceSettings.questSlotExchange;
+  const unlockedSlots = unlocks.totalQuestSlots;
 
   return Math.min(
-    Math.max(unlockedSlots, exchangeRule.initialSlots),
-    exchangeRule.maxSlots,
+    Math.max(unlockedSlots, exchangeRule.initialTotalSlots),
+    exchangeRule.maxTotalSlots,
   );
 };
 
-const normalizeSectionStars = (value: unknown): SectionStars => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return defaultSectionStars;
-  }
-
-  const parsedStars = value as Partial<Record<StartSection, unknown>>;
-
-  return {
-    morning: Math.max(0, Math.floor(Number(parsedStars.morning) || 0)),
-    noon: Math.max(0, Math.floor(Number(parsedStars.noon) || 0)),
-    evening: Math.max(0, Math.floor(Number(parsedStars.evening) || 0)),
-    night: Math.max(0, Math.floor(Number(parsedStars.night) || 0)),
-  };
-};
-
-const loadSectionStars = () => {
-  try {
-    const savedStars = localStorage.getItem(SECTION_STARS_STORAGE_KEY);
-
-    if (!savedStars) {
-      return defaultSectionStars;
-    }
-
-    return normalizeSectionStars(JSON.parse(savedStars) as unknown);
-  } catch {
-    return defaultSectionStars;
-  }
-};
-
-const normalizeLevelRules = (rules: unknown): LevelRule[] => {
-  if (!Array.isArray(rules)) {
-    return defaultSectionLevelRules;
-  }
-
-  const normalizedRules = rules
-    .map((rule) => ({
-      level: Number(rule?.level),
-      requiredStars: Number(rule?.requiredStars),
-    }))
-    .filter((rule) => (
-      Number.isFinite(rule.level) &&
-      Number.isFinite(rule.requiredStars) &&
-      rule.level >= 1 &&
-      rule.requiredStars >= 0
-    ))
-    .sort((first, second) => first.requiredStars - second.requiredStars);
-
-  return normalizedRules.length > 0 ? normalizedRules : defaultSectionLevelRules;
-};
-
-const normalizeUnlockRules = (rules: unknown, sectionId: StartSection): UnlockRule[] => {
-  if (!Array.isArray(rules)) {
-    return defaultGameBalanceSettings.sectionStarRules[sectionId].unlockRules;
-  }
-
-  return rules
-    .map((rule) => ({
-      requiredStars: Number(rule?.requiredStars),
-      type: rule?.type === 'feature' ? 'feature' as const : 'questSlot' as const,
-      section: rule?.section,
-      amount: Number(rule?.amount),
-      label: typeof rule?.label === 'string' ? rule.label : '',
-    }))
-    .filter((rule) => (
-      Number.isFinite(rule.requiredStars) &&
-      rule.requiredStars >= 0 &&
-      rule.label.trim().length > 0
-    ))
-    .map((rule) => ({
-      ...rule,
-      amount: Number.isFinite(rule.amount) && rule.amount > 0 ? rule.amount : undefined,
-      section: (
-        rule.section === 'morning' ||
-        rule.section === 'noon' ||
-        rule.section === 'evening' ||
-        rule.section === 'night' ||
-        rule.section === 'advanced'
-      ) ? rule.section : undefined,
-    }))
-    .sort((first, second) => first.requiredStars - second.requiredStars);
-};
+const countNormalQuestItems = (sections: RoutineSection[]) =>
+  sections
+    .filter((section) => dailySectionIds.includes(section.id as StartSection))
+    .reduce((total, section) =>
+      total + section.items.filter((item) => !item.fixedKind).length,
+    0);
 
 const normalizePointSettings = (settings: unknown): PointSettings => {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
@@ -956,45 +1014,52 @@ const normalizeRankRules = (rules: unknown): RankRule[] => {
   return normalizedRules.length > 0 ? normalizedRules : defaultRankRules;
 };
 
-const normalizeQuestSlotExchange = (settings: unknown): QuestSlotExchangeSettings => {
-  const parsedSettings = (
-    settings &&
-    typeof settings === 'object' &&
-    !Array.isArray(settings)
-  )
-    ? settings as Partial<Record<StartSection, Partial<QuestSlotExchangeRule>>>
-    : {};
+const normalizeQuestSlotExchange = (settings: unknown): QuestSlotExchangeRule => {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return defaultQuestSlotExchangeSettings;
+  }
 
-  return Object.fromEntries(dailySectionIds.map((sectionId) => {
-    const sectionSettings = parsedSettings[sectionId] ?? {};
-    const defaultSettings = defaultQuestSlotExchangeSettings[sectionId];
-    const initialSlots = Number(sectionSettings.initialSlots);
-    const maxSlots = Number(sectionSettings.maxSlots);
-    const price = Number(sectionSettings.price);
-    const normalizedInitialSlots = Math.max(
-      1,
-      Math.floor(Number.isFinite(initialSlots) ? initialSlots : defaultSettings.initialSlots),
-    );
-    const normalizedMaxSlots = Math.max(
-      normalizedInitialSlots,
-      Math.floor(Number.isFinite(maxSlots) ? maxSlots : defaultSettings.maxSlots),
-    );
+  const parsedSettings = settings as Partial<QuestSlotExchangeRule> &
+    Partial<Record<StartSection, Partial<{
+      enabled: boolean;
+      initialSlots: number;
+      maxSlots: number;
+      price: number;
+    }>>>;
+  const legacyMorningSettings = parsedSettings.morning;
+  const initialTotalSlots = Number(parsedSettings.initialTotalSlots);
+  const maxTotalSlots = Number(parsedSettings.maxTotalSlots);
+  const price = Number(parsedSettings.price ?? legacyMorningSettings?.price);
+  const normalizedInitialTotalSlots = Math.max(
+    1,
+    Math.floor(
+      Number.isFinite(initialTotalSlots)
+        ? initialTotalSlots
+        : defaultQuestSlotExchangeSettings.initialTotalSlots,
+    ),
+  );
+  const normalizedMaxTotalSlots = Math.max(
+    normalizedInitialTotalSlots,
+    Math.floor(
+      Number.isFinite(maxTotalSlots)
+        ? maxTotalSlots
+        : defaultQuestSlotExchangeSettings.maxTotalSlots,
+    ),
+  );
 
-    return [
-      sectionId,
-      {
-        enabled: typeof sectionSettings.enabled === 'boolean'
-          ? sectionSettings.enabled
-          : defaultSettings.enabled,
-        initialSlots: normalizedInitialSlots,
-        maxSlots: normalizedMaxSlots,
-        price: Math.max(
-          0,
-          Math.floor(Number.isFinite(price) ? price : defaultSettings.price),
-        ),
-      },
-    ];
-  })) as QuestSlotExchangeSettings;
+  return {
+    enabled: typeof parsedSettings.enabled === 'boolean'
+      ? parsedSettings.enabled
+      : typeof legacyMorningSettings?.enabled === 'boolean'
+      ? legacyMorningSettings.enabled
+      : defaultQuestSlotExchangeSettings.enabled,
+    initialTotalSlots: normalizedInitialTotalSlots,
+    maxTotalSlots: normalizedMaxTotalSlots,
+    price: Math.max(
+      0,
+      Math.floor(Number.isFinite(price) ? price : defaultQuestSlotExchangeSettings.price),
+    ),
+  };
 };
 
 const normalizeGameBalanceSettings = (settings: unknown): GameBalanceSettings => {
@@ -1004,40 +1069,8 @@ const normalizeGameBalanceSettings = (settings: unknown): GameBalanceSettings =>
 
   const parsedSettings = settings as Partial<GameBalanceSettings>;
 
-  const rawSectionStarRules = (
-    parsedSettings.sectionStarRules &&
-    typeof parsedSettings.sectionStarRules === 'object' &&
-    !Array.isArray(parsedSettings.sectionStarRules)
-  )
-    ? parsedSettings.sectionStarRules as Partial<Record<StartSection, Partial<SectionStarRules>>>
-    : undefined;
-  const playerModeLimits = {
-    ...defaultGameBalanceSettings.playerModeLimits,
-    ...(parsedSettings.playerModeLimits ?? {}),
-  };
-
   return {
     schemaVersion: GAME_BALANCE_SCHEMA_VERSION,
-    sectionStarRules: Object.fromEntries(dailySectionIds.map((sectionId) => {
-      const sectionRules = rawSectionStarRules?.[sectionId];
-
-      return [
-        sectionId,
-        {
-          levelRules: normalizeLevelRules(sectionRules?.levelRules),
-          unlockRules: normalizeUnlockRules(
-            sectionRules?.unlockRules,
-            sectionId,
-          ),
-        },
-      ];
-    })) as Record<StartSection, SectionStarRules>,
-    playerModeLimits: {
-      morning: Math.max(0, Math.floor(Number(playerModeLimits.morning) || 0)),
-      noon: Math.max(0, Math.floor(Number(playerModeLimits.noon) || 0)),
-      evening: Math.max(0, Math.floor(Number(playerModeLimits.evening) || 0)),
-      night: Math.max(0, Math.floor(Number(playerModeLimits.night) || 0)),
-    },
     pointSettings: normalizePointSettings(parsedSettings.pointSettings),
     rankRules: normalizeRankRules(parsedSettings.rankRules),
     questSlotExchange: normalizeQuestSlotExchange(parsedSettings.questSlotExchange),
@@ -1184,28 +1217,6 @@ const calculateQuestPoints = (
   gameBalance.pointSettings.rounding,
 );
 
-const getPlayerLevelProgress = (
-  stars: number,
-  sectionId: StartSection,
-  gameBalance: GameBalanceSettings,
-) => {
-  const safeStars = Math.max(0, Math.floor(stars));
-  const sectionRules = gameBalance.sectionStarRules[sectionId];
-  const currentRule = [...sectionRules.levelRules]
-    .reverse()
-    .find((rule) => safeStars >= rule.requiredStars) ?? sectionRules.levelRules[0];
-  const nextUnlock = sectionRules.unlockRules.find((rule) => rule.requiredStars > safeStars);
-  const starsUntilNextUnlock = nextUnlock
-    ? Math.max(nextUnlock.requiredStars - safeStars, 0)
-    : 0;
-
-  return {
-    currentLevel: currentRule.level,
-    nextUnlockLabel: nextUnlock?.label ?? '次の解放は準備中',
-    starsUntilNextUnlock,
-  };
-};
-
 const isStartSection = (value: unknown): value is StartSection =>
   value === 'morning' || value === 'noon' || value === 'evening' || value === 'night';
 
@@ -1330,6 +1341,57 @@ const getDateKey = (date: Date) => {
 
   return `${year}-${month}-${day}`;
 };
+
+const getStableStringHash = (value: string) =>
+  [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
+
+const getDailyNudgeRecentCandidateIds = (
+  dateKey: string,
+  records: DailyNudgeRecords,
+) => {
+  const date = getDateFromKey(dateKey);
+
+  return Array.from({ length: 3 }, (_, index) => {
+    const previousDateKey = getDateKey(addDays(date, -(index + 1)));
+
+    return records[previousDateKey]?.candidateId;
+  }).filter((candidateId): candidateId is string => Boolean(candidateId));
+};
+
+const selectDailyNudgeCandidate = (
+  dateKey: string,
+  candidates: DailyNudgeCandidate[],
+  records: DailyNudgeRecords,
+) => {
+  const enabledCandidates = candidates
+    .filter((candidate) => candidate.enabled)
+    .sort((first, second) => first.order - second.order);
+
+  if (enabledCandidates.length === 0) {
+    return null;
+  }
+
+  const recentCandidateIds = new Set(getDailyNudgeRecentCandidateIds(dateKey, records));
+  const candidatesWithoutRecent = enabledCandidates.filter(
+    (candidate) => !recentCandidateIds.has(candidate.id),
+  );
+  const selectableCandidates =
+    candidatesWithoutRecent.length > 0 ? candidatesWithoutRecent : enabledCandidates;
+  const selectedIndex = getStableStringHash(dateKey) % selectableCandidates.length;
+
+  return selectableCandidates[selectedIndex];
+};
+
+const createDailyNudgeRecord = (
+  candidate: DailyNudgeCandidate,
+): DailyNudgeRecord => ({
+  candidateId: candidate.id,
+  text: candidate.text,
+  completionMessage: candidate.completionMessage,
+  category: candidate.category,
+  completed: false,
+  assignedAt: new Date().toISOString(),
+});
 
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
@@ -1528,74 +1590,14 @@ const defaultRankRules: RankRule[] = [
   { rank: 6, requiredLifetimeStars: 80, pointMultiplier: 1.5 },
   { rank: 7, requiredLifetimeStars: 120, pointMultiplier: 1.75 },
 ];
-const defaultQuestSlotExchangeSettings: QuestSlotExchangeSettings = {
-  morning: {
-    enabled: true,
-    initialSlots: 1,
-    maxSlots: 3,
-    price: 100,
-  },
-  noon: {
-    enabled: true,
-    initialSlots: 1,
-    maxSlots: 3,
-    price: 100,
-  },
-  evening: {
-    enabled: true,
-    initialSlots: 1,
-    maxSlots: 3,
-    price: 100,
-  },
-  night: {
-    enabled: true,
-    initialSlots: 1,
-    maxSlots: 3,
-    price: 100,
-  },
+const defaultQuestSlotExchangeSettings: QuestSlotExchangeRule = {
+  enabled: true,
+  initialTotalSlots: 4,
+  maxTotalSlots: 10,
+  price: 100,
 };
-const defaultSectionStars: SectionStars = {
-  morning: 0,
-  noon: 0,
-  evening: 0,
-  night: 0,
-};
-const defaultSectionLevelRules: LevelRule[] = [
-  { level: 1, requiredStars: 0 },
-  { level: 2, requiredStars: 3 },
-  { level: 3, requiredStars: 7 },
-  { level: 4, requiredStars: 12 },
-  { level: 5, requiredStars: 20 },
-];
-const createDefaultSectionStarRules = (
-  sectionId: StartSection,
-  label: string,
-): SectionStarRules => ({
-  levelRules: defaultSectionLevelRules,
-  unlockRules: [
-    {
-      requiredStars: 3,
-      type: 'questSlot',
-      section: sectionId,
-      amount: 1,
-      label: `${label}クエスト枠 +1`,
-    },
-  ],
-});
 const defaultGameBalanceSettings: GameBalanceSettings = {
   schemaVersion: GAME_BALANCE_SCHEMA_VERSION,
-  sectionStarRules: {
-    morning: createDefaultSectionStarRules('morning', '朝'),
-    noon: createDefaultSectionStarRules('noon', '昼'),
-    evening: createDefaultSectionStarRules('evening', '夕'),
-    night: createDefaultSectionStarRules('night', '夜'),
-  },
-  playerModeLimits: {
-    morning: 1,
-    noon: 1,
-    evening: 1,
-    night: 1,
-  },
   pointSettings: defaultPointSettings,
   rankRules: defaultRankRules,
   questSlotExchange: defaultQuestSlotExchangeSettings,
@@ -2206,14 +2208,17 @@ function App() {
     loadArchivedItems(),
   );
   const [itemNotes, setItemNotes] = useState<ItemNotes>(() => loadItemNotes());
+  const [dailyNudgeCandidates, setDailyNudgeCandidates] = useState<DailyNudgeCandidate[]>(() =>
+    loadDailyNudgeCandidates(),
+  );
+  const [dailyNudgeRecords, setDailyNudgeRecords] = useState<DailyNudgeRecords>(() =>
+    loadDailyNudgeRecords(),
+  );
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
   const [playerUnlocks, setPlayerUnlocks] = useState<PlayerUnlocks>(() => loadPlayerUnlocks());
   const dailyMessage = getDailyMessage(selectedDateKey, playerProfile.displayName);
-  const [sectionStars, setSectionStars] = useState<SectionStars>(() => loadSectionStars());
-  const [sectionStarsDraft, setSectionStarsDraft] = useState<SectionStars>(() =>
-    loadSectionStars(),
-  );
+  const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
     loadGameBalanceSettings(),
   );
@@ -2311,8 +2316,12 @@ function App() {
   );
   const isCheckMode = page === 'today';
   const canEditRoutines = page === 'settings' || (page === 'today' && isEditMode);
+  const totalQuestSlotLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
+  const usedQuestSlots = countNormalQuestItems(displaySections);
+  const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
+  const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
   const historyDateTemplate = historySelectedDate
     ? getBaseTemplateForDate(templateSettings, historySelectedDate)
     : 'normal';
@@ -2514,6 +2523,40 @@ function App() {
   }, [itemNotes]);
 
   useEffect(() => {
+    localStorage.setItem(
+      DAILY_NUDGE_CANDIDATES_STORAGE_KEY,
+      JSON.stringify(dailyNudgeCandidates),
+    );
+  }, [dailyNudgeCandidates]);
+
+  useEffect(() => {
+    localStorage.setItem(DAILY_NUDGE_RECORDS_STORAGE_KEY, JSON.stringify(dailyNudgeRecords));
+  }, [dailyNudgeRecords]);
+
+  useEffect(() => {
+    setDailyNudgeRecords((currentRecords) => {
+      if (currentRecords[selectedDateKey]) {
+        return currentRecords;
+      }
+
+      const candidate = selectDailyNudgeCandidate(
+        selectedDateKey,
+        dailyNudgeCandidates,
+        currentRecords,
+      );
+
+      if (!candidate) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [selectedDateKey]: createDailyNudgeRecord(candidate),
+      };
+    });
+  }, [dailyNudgeCandidates, selectedDateKey]);
+
+  useEffect(() => {
     localStorage.setItem(GAME_MODE_STORAGE_KEY, JSON.stringify(gameMode));
   }, [gameMode]);
 
@@ -2523,15 +2566,16 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem(PLAYER_UNLOCKS_STORAGE_KEY, JSON.stringify(playerUnlocks));
+    localStorage.removeItem(LEGACY_PLAYER_UNLOCKS_STORAGE_KEY);
   }, [playerUnlocks]);
-
-  useEffect(() => {
-    localStorage.setItem(SECTION_STARS_STORAGE_KEY, JSON.stringify(sectionStars));
-  }, [sectionStars]);
 
   useEffect(() => {
     localStorage.setItem(GAME_BALANCE_STORAGE_KEY, JSON.stringify(gameBalance));
   }, [gameBalance]);
+
+  useEffect(() => {
+    localStorage.removeItem('hibitin:sectionStars:v1');
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(PLAYER_ECONOMY_STORAGE_KEY, JSON.stringify(playerEconomy));
@@ -2909,6 +2953,117 @@ function App() {
     });
   };
 
+  const toggleDailyNudgeCompletion = (dateKey: string) => {
+    setDailyNudgeRecords((currentRecords) => {
+      const currentRecord = currentRecords[dateKey];
+
+      if (!currentRecord) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          ...currentRecord,
+          completed: !currentRecord.completed,
+          completedAt: currentRecord.completed ? undefined : new Date().toISOString(),
+        },
+      };
+    });
+  };
+
+  const updateDailyNudgeCandidate = (
+    candidateId: string,
+    field: keyof Pick<
+      DailyNudgeCandidate,
+      'text' | 'completionMessage' | 'category' | 'enabled'
+    >,
+    value: string | boolean,
+  ) => {
+    setDailyNudgeCandidates((currentCandidates) =>
+      currentCandidates.map((candidate) =>
+        candidate.id === candidateId
+          ? { ...candidate, [field]: value }
+          : candidate,
+      ),
+    );
+  };
+
+  const moveDailyNudgeCandidate = (candidateId: string, direction: -1 | 1) => {
+    setDailyNudgeCandidates((currentCandidates) => {
+      const orderedCandidates = [...currentCandidates].sort(
+        (first, second) => first.order - second.order,
+      );
+      const currentIndex = orderedCandidates.findIndex((candidate) => candidate.id === candidateId);
+      const nextIndex = currentIndex + direction;
+
+      if (
+        currentIndex === -1 ||
+        nextIndex < 0 ||
+        nextIndex >= orderedCandidates.length
+      ) {
+        return currentCandidates;
+      }
+
+      const nextCandidates = [...orderedCandidates];
+      const [movedCandidate] = nextCandidates.splice(currentIndex, 1);
+
+      nextCandidates.splice(nextIndex, 0, movedCandidate);
+
+      return nextCandidates.map((candidate, index) => ({
+        ...candidate,
+        order: (index + 1) * 10,
+      }));
+    });
+  };
+
+  const addDailyNudgeCandidate = () => {
+    const newCandidateId = createRoutineId('daily-nudge');
+
+    setDailyNudgeCandidates((currentCandidates) => [
+      ...currentCandidates,
+      {
+        id: newCandidateId,
+        text: '小さな一歩をひとつ選ぼう',
+        completionMessage: defaultDailyNudgeCompletionMessage,
+        category: 'その他',
+        enabled: true,
+        order:
+          currentCandidates.length === 0
+            ? 10
+            : Math.max(...currentCandidates.map((candidate) => candidate.order)) + 10,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  };
+
+  const deleteDailyNudgeCandidate = (candidateId: string) => {
+    const candidate = dailyNudgeCandidates.find(
+      (currentCandidate) => currentCandidate.id === candidateId,
+    );
+
+    if (!candidate) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みのひとおしは残ります。`,
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDailyNudgeCandidates((currentCandidates) =>
+      currentCandidates
+        .filter((currentCandidate) => currentCandidate.id !== candidateId)
+        .map((currentCandidate, index) => ({
+          ...currentCandidate,
+          order: (index + 1) * 10,
+        })),
+    );
+  };
+
   const toggleItemNoteEditor = (dateKey: string, itemId: string) => {
     setTimerSettingItemId(null);
     setIsRankPanelOpen(false);
@@ -3123,11 +3278,24 @@ function App() {
     setActiveTimer(null);
   };
 
-  const stopFinishedTimerAlert = () => {
+  const closeActiveTimerPanel = () => {
+    if (!activeTimer) {
+      return;
+    }
+
     setTimerAlertSilenced(true);
     alertedFinishedTimerIdRef.current = null;
+    setPausedTimers((currentTimers) => {
+      const nextTimers = { ...currentTimers };
+
+      delete nextTimers[activeTimer.itemId];
+
+      return nextTimers;
+    });
     setActiveTimer(null);
   };
+
+  const stopFinishedTimerAlert = closeActiveTimerPanel;
 
   const extendFinishedTimerByFiveMinutes = () => {
     if (!activeTimer) {
@@ -3572,13 +3740,8 @@ function App() {
         getUpdateTargetForSection(sectionId),
         todayKey,
       );
-      const targetSection = targetSections.find((section) => section.id === sectionId);
-      const questCount = targetSection?.items.filter((item) => !item.fixedKind).length ?? 0;
-      const questLimit = getEffectiveQuestSlotLimit(
-        sectionId as StartSection,
-        playerUnlocks,
-        gameBalance,
-      );
+      const questCount = countNormalQuestItems(targetSections);
+      const questLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
 
       if (questCount >= questLimit) {
         return;
@@ -3928,64 +4091,7 @@ function App() {
     setPage(nextPage);
   };
 
-  const updateGameBalanceLevelRule = (
-    sectionId: StartSection,
-    index: number,
-    field: 'level' | 'requiredStars',
-    value: number,
-  ) => {
-    setGameBalanceDraft((currentBalance) => ({
-      ...currentBalance,
-      sectionStarRules: {
-        ...currentBalance.sectionStarRules,
-        [sectionId]: {
-          ...currentBalance.sectionStarRules[sectionId],
-          levelRules: currentBalance.sectionStarRules[sectionId].levelRules.map((rule, ruleIndex) =>
-            ruleIndex === index
-              ? { ...rule, [field]: Math.max(field === 'level' ? 1 : 0, Math.floor(value || 0)) }
-              : rule,
-          ),
-        },
-      },
-    }));
-  };
-
-  const updateGameBalanceUnlockRule = (
-    sectionId: StartSection,
-    index: number,
-    field: 'requiredStars' | 'label',
-    value: number | string,
-  ) => {
-    setGameBalanceDraft((currentBalance) => ({
-      ...currentBalance,
-      sectionStarRules: {
-        ...currentBalance.sectionStarRules,
-        [sectionId]: {
-          ...currentBalance.sectionStarRules[sectionId],
-          unlockRules: currentBalance.sectionStarRules[sectionId].unlockRules.map((rule, ruleIndex) =>
-            ruleIndex === index
-              ? {
-                  ...rule,
-                  [field]: field === 'requiredStars'
-                    ? Math.max(0, Math.floor(Number(value) || 0))
-                    : String(value),
-                }
-              : rule,
-          ),
-        },
-      },
-    }));
-  };
-
-  const updateSectionStarDraft = (sectionId: StartSection, value: number) => {
-    setSectionStarsDraft((currentStars) => ({
-      ...currentStars,
-      [sectionId]: Math.max(0, Math.floor(value || 0)),
-    }));
-  };
-
   const updateQuestSlotExchangeRule = (
-    sectionId: StartSection,
     field: keyof QuestSlotExchangeRule,
     value: number | boolean,
   ) => {
@@ -3993,12 +4099,9 @@ function App() {
       ...currentBalance,
       questSlotExchange: {
         ...currentBalance.questSlotExchange,
-        [sectionId]: {
-          ...currentBalance.questSlotExchange[sectionId],
-          [field]: field === 'enabled'
-            ? Boolean(value)
-            : Math.max(0, Math.floor(Number(value) || 0)),
-        },
+        [field]: field === 'enabled'
+          ? Boolean(value)
+          : Math.max(0, Math.floor(Number(value) || 0)),
       },
     }));
   };
@@ -4038,41 +4141,35 @@ function App() {
 
   const saveGameBalanceSettings = () => {
     const normalizedBalance = normalizeGameBalanceSettings(gameBalanceDraft);
-    const normalizedStars = normalizeSectionStars(sectionStarsDraft);
 
     setGameBalance(normalizedBalance);
     setGameBalanceDraft(normalizedBalance);
-    setSectionStars(normalizedStars);
-    setSectionStarsDraft(normalizedStars);
   };
 
   const resetGameBalanceSettings = () => {
     setGameBalance(defaultGameBalanceSettings);
     setGameBalanceDraft(defaultGameBalanceSettings);
-    setSectionStars(defaultSectionStars);
-    setSectionStarsDraft(defaultSectionStars);
   };
 
-  const exchangeQuestSlot = (sectionId: StartSection) => {
+  const exchangeQuestSlot = () => {
     if (gameMode !== 'player' || exchangeLockRef.current) {
       return;
     }
 
-    const exchangeRule = gameBalance.questSlotExchange[sectionId];
-    const currentSlots = getEffectiveQuestSlotLimit(sectionId, playerUnlocks, gameBalance);
-    const nextSlots = Math.min(currentSlots + 1, exchangeRule.maxSlots);
+    const exchangeRule = gameBalance.questSlotExchange;
+    const currentSlots = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
+    const nextSlots = Math.min(currentSlots + 1, exchangeRule.maxTotalSlots);
 
     if (
       !exchangeRule.enabled ||
-      currentSlots >= exchangeRule.maxSlots ||
+      currentSlots >= exchangeRule.maxTotalSlots ||
       playerEconomy.currentPoints < exchangeRule.price
     ) {
       return;
     }
 
-    const sectionLabel = sectionTextLabels[sectionId];
     const confirmed = window.confirm(
-      `${exchangeRule.price}PTを使って、${sectionLabel}クエスト枠を1つ増やしますか？`,
+      `${exchangeRule.price}PTを使って、クエスト枠を1つ増やしますか？`,
     );
 
     if (!confirmed) {
@@ -4081,7 +4178,7 @@ function App() {
 
     exchangeLockRef.current = true;
     const now = new Date().toISOString();
-    const reason = `${sectionLabel}クエスト枠 +1`;
+    const reason = 'クエスト枠 +1';
 
     setPlayerEconomy((currentEconomy) => {
       if (currentEconomy.currentPoints < exchangeRule.price) {
@@ -4090,12 +4187,12 @@ function App() {
       }
 
       const spendEntry: PointLedgerEntry = {
-        id: `exchange:questSlot:${sectionId}:${now}`,
-        achievementKey: `exchange:questSlot:${sectionId}`,
+        id: `exchange:questSlot:total:${now}`,
+        achievementKey: 'exchange:questSlot:total',
         dateKey: '',
         itemId: '',
         itemLabel: reason,
-        sectionId,
+        sectionId: 'total',
         type: 'spend',
         points: -exchangeRule.price,
         basePoints: exchangeRule.price,
@@ -4113,51 +4210,43 @@ function App() {
     });
 
     setPlayerUnlocks((currentUnlocks) => {
-      const lockedCurrentSlots = getEffectiveQuestSlotLimit(sectionId, currentUnlocks, gameBalance);
+      const lockedCurrentSlots = getEffectiveQuestSlotLimit(currentUnlocks, gameBalance);
 
-      if (lockedCurrentSlots >= exchangeRule.maxSlots) {
+      if (lockedCurrentSlots >= exchangeRule.maxTotalSlots) {
         return currentUnlocks;
       }
 
       return {
         ...currentUnlocks,
-        questSlots: {
-          ...currentUnlocks.questSlots,
-          [sectionId]: Math.min(lockedCurrentSlots + 1, exchangeRule.maxSlots),
-        },
+        totalQuestSlots: Math.min(lockedCurrentSlots + 1, exchangeRule.maxTotalSlots),
       };
     });
     setExchangeToast({
-      id: `exchange-toast:${sectionId}:${now}`,
-      message: `${sectionLabel}クエスト枠が${nextSlots}個に増えました！`,
+      id: `exchange-toast:quest-slot:${now}`,
+      message: `クエスト枠が${nextSlots}個に増えました！`,
     });
     window.setTimeout(() => {
       exchangeLockRef.current = false;
     }, 0);
   };
 
-  const isPlayerModeQuestLimitReached = (section: RoutineSection) =>
+  const isPlayerModeQuestLimitReached = (sections: RoutineSection[]) =>
     gameMode === 'player' &&
-    dailySectionIds.includes(section.id as StartSection) &&
-    section.items.filter((item) => !item.fixedKind).length >=
-      getEffectiveQuestSlotLimit(section.id as StartSection, playerUnlocks, gameBalance);
-  const sectionStarProgress = Object.fromEntries(dailySectionIds.map((sectionId) => [
-    sectionId,
-    getPlayerLevelProgress(sectionStars[sectionId], sectionId, gameBalance),
-  ])) as Record<StartSection, ReturnType<typeof getPlayerLevelProgress>>;
-  const shopItems: ShopItem[] = dailySectionIds.map((sectionId) => {
-    const exchangeRule = gameBalance.questSlotExchange[sectionId];
-
-    return {
-      id: `quest-slot-${sectionId}`,
+    countNormalQuestItems(sections) >= getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
+  const shopItems: ShopItem[] = [
+    {
+      id: 'quest-slot-total',
       category: 'questSlot',
-      label: `${sectionTextLabels[sectionId]}クエスト枠 +1`,
-      price: exchangeRule.price,
-      enabled: exchangeRule.enabled,
-      section: sectionId,
-      maxPurchases: Math.max(0, exchangeRule.maxSlots - exchangeRule.initialSlots),
-    };
-  });
+      label: 'クエスト枠 +1',
+      price: gameBalance.questSlotExchange.price,
+      enabled: gameBalance.questSlotExchange.enabled,
+      maxPurchases: Math.max(
+        0,
+        gameBalance.questSlotExchange.maxTotalSlots -
+          gameBalance.questSlotExchange.initialTotalSlots,
+      ),
+    },
+  ];
 
   const wakeRoutineItem = displaySections
     .flatMap((section) => section.items)
@@ -4247,6 +4336,7 @@ function App() {
               }}
               type="button"
             >
+              <span className="rank-status-name">{playerDisplayName}</span>
               <span className="rank-status-main">🏅 Rank {playerRankProgress.rank}</span>
               <span className="rank-status-sub">
                 所持 {playerEconomy.currentPoints}PT
@@ -4392,78 +4482,15 @@ function App() {
           </section>
         )}
 
-        {page === 'settings' && (
-          <section className="player-level-settings" aria-label="プレイヤーレベル">
-            <div className="settings-header">
-              <div>
-                <h2>時間帯スター</h2>
-                <p>朝・昼・夕・夜が、それぞれ独立して育つ成長ゲージです。</p>
-              </div>
-            </div>
-            <div className="section-star-cards">
-              {dailySectionIds.map((sectionId) => (
-                <div className="player-level-card" key={sectionId}>
-                  <p className="player-level-label">
-                    {sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]} Lv.
-                    {sectionStarProgress[sectionId].currentLevel}
-                  </p>
-                  <div className="player-level-stats">
-                    <p>現在：{sectionStars[sectionId]}★</p>
-                    <p>次の解放：{sectionStarProgress[sectionId].nextUnlockLabel}</p>
-                    <p>次の解放まであと{sectionStarProgress[sectionId].starsUntilNextUnlock}★</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
         {page === 'settings' && gameMode === 'developer' && (
           <section className="admin-balance-settings" aria-label="ゲームバランス設定">
             <div className="settings-header">
               <div>
                 <h2>ゲームバランス設定</h2>
-                <p>星、解放条件、プレイヤーモード制限をまとめて管理します。</p>
+                <p>PT、ランク、ショップ、プレイヤーモード制限をまとめて管理します。</p>
               </div>
             </div>
             <div className="admin-balance-grid">
-              <div className="admin-balance-block admin-balance-summary">
-                <h3>現在の成長状態</h3>
-                <div className="admin-balance-summary-grid">
-                  {dailySectionIds.map((sectionId) => {
-                    const draftProgress = getPlayerLevelProgress(
-                      sectionStarsDraft[sectionId],
-                      sectionId,
-                      gameBalanceDraft,
-                    );
-
-                    return (
-                      <div className="admin-section-star-card" key={sectionId}>
-                        <h4>{sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]}スター</h4>
-                        <label>
-                          <span>現在値</span>
-                          <input
-                            min="0"
-                            onChange={(event) =>
-                              updateSectionStarDraft(sectionId, Number(event.target.value))
-                            }
-                            type="number"
-                            value={sectionStarsDraft[sectionId]}
-                          />
-                        </label>
-                        <p>Lv.{draftProgress.currentLevel}</p>
-                        <p>次の解放：{draftProgress.nextUnlockLabel}</p>
-                        <p>あと{draftProgress.starsUntilNextUnlock}★</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="admin-balance-note">
-                  連動済み：時間帯スター表示、時間帯ごとの次の解放表示、プレイヤーモードの追加制限、
-                  アイテムごとの星・トロフィー計算。
-                  未実装：時間帯スターの自動獲得、実際の機能解放。
-                </p>
-              </div>
               <div className="admin-balance-block admin-mastery-rules">
                 <h3>星・トロフィー条件</h3>
                 <ul>
@@ -4607,153 +4634,66 @@ function App() {
                   </div>
                 </div>
               </div>
-              {dailySectionIds.map((sectionId) => (
-                <div className="admin-balance-block" key={`balance-${sectionId}`}>
-                  <h3>{sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]}スター条件</h3>
-                  <h4>レベル条件</h4>
-                  {gameBalanceDraft.sectionStarRules[sectionId].levelRules.map((rule, index) => (
-                    <label className="admin-balance-row" key={`level-${sectionId}-${rule.level}-${index}`}>
-                      <span>Lv.</span>
-                      <input
-                        min="1"
-                        onChange={(event) =>
-                          updateGameBalanceLevelRule(
-                            sectionId,
-                            index,
-                            'level',
-                            Number(event.target.value),
-                          )
-                        }
-                        type="number"
-                        value={rule.level}
-                      />
-                      <span>必要★</span>
-                      <input
-                        min="0"
-                        onChange={(event) =>
-                          updateGameBalanceLevelRule(
-                            sectionId,
-                            index,
-                            'requiredStars',
-                            Number(event.target.value),
-                          )
-                        }
-                        type="number"
-                        value={rule.requiredStars}
-                      />
-                    </label>
-                  ))}
-                  <h4>解放条件</h4>
-                  {gameBalanceDraft.sectionStarRules[sectionId].unlockRules.map((rule, index) => (
-                    <div className="admin-unlock-row" key={`unlock-${sectionId}-${rule.requiredStars}-${index}`}>
-                      <label>
-                        <span>必要★</span>
-                        <input
-                          min="0"
-                          onChange={(event) =>
-                            updateGameBalanceUnlockRule(
-                              sectionId,
-                              index,
-                              'requiredStars',
-                              Number(event.target.value),
-                            )
-                          }
-                          type="number"
-                          value={rule.requiredStars}
-                        />
-                      </label>
-                      <label>
-                        <span>表示名</span>
-                        <input
-                          onChange={(event) =>
-                            updateGameBalanceUnlockRule(sectionId, index, 'label', event.target.value)
-                          }
-                          type="text"
-                          value={rule.label}
-                        />
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              ))}
               <div className="admin-balance-block admin-slot-exchange-settings">
                 <h3>クエスト枠交換設定</h3>
-                {dailySectionIds.map((sectionId) => {
-                  const exchangeRule = gameBalanceDraft.questSlotExchange[sectionId];
-                  const currentUnlockedSlots = getEffectiveQuestSlotLimit(
-                    sectionId,
-                    playerUnlocks,
-                    gameBalanceDraft,
-                  );
-
-                  return (
-                    <div className="admin-slot-row" key={`slot-${sectionId}`}>
-                      <h4>{sectionIconLabels[sectionId]} {sectionTextLabels[sectionId]}</h4>
-                      <p>現在の購入済み枠数：{currentUnlockedSlots}枠</p>
-                      <label className="admin-slot-enabled">
-                        <span>販売</span>
-                        <input
-                          checked={exchangeRule.enabled}
-                          onChange={(event) =>
-                            updateQuestSlotExchangeRule(
-                              sectionId,
-                              'enabled',
-                              event.target.checked,
-                            )
-                          }
-                          type="checkbox"
-                        />
-                      </label>
-                      <label>
-                        <span>初期枠数</span>
-                        <input
-                          min="1"
-                          onChange={(event) =>
-                            updateQuestSlotExchangeRule(
-                              sectionId,
-                              'initialSlots',
-                              Number(event.target.value),
-                            )
-                          }
-                          type="number"
-                          value={exchangeRule.initialSlots}
-                        />
-                      </label>
-                      <label>
-                        <span>最大枠数</span>
-                        <input
-                          min="1"
-                          onChange={(event) =>
-                            updateQuestSlotExchangeRule(
-                              sectionId,
-                              'maxSlots',
-                              Number(event.target.value),
-                            )
-                          }
-                          type="number"
-                          value={exchangeRule.maxSlots}
-                        />
-                      </label>
-                      <label>
-                        <span>価格</span>
-                        <input
-                          min="0"
-                          onChange={(event) =>
-                            updateQuestSlotExchangeRule(
-                              sectionId,
-                              'price',
-                              Number(event.target.value),
-                            )
-                          }
-                          type="number"
-                          value={exchangeRule.price}
-                        />
-                      </label>
-                    </div>
-                  );
-                })}
+                <div className="admin-slot-row">
+                  <h4>クエスト枠 +1</h4>
+                  <p>
+                    利用可能：{getEffectiveQuestSlotLimit(playerUnlocks, gameBalanceDraft)}枠 /
+                    使用中：{countNormalQuestItems(displaySections)}枠
+                  </p>
+                  <label className="admin-slot-enabled">
+                    <span>販売</span>
+                    <input
+                      checked={gameBalanceDraft.questSlotExchange.enabled}
+                      onChange={(event) =>
+                        updateQuestSlotExchangeRule('enabled', event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                  </label>
+                  <label>
+                    <span>初期合計枠数</span>
+                    <input
+                      min="1"
+                      onChange={(event) =>
+                        updateQuestSlotExchangeRule(
+                          'initialTotalSlots',
+                          Number(event.target.value),
+                        )
+                      }
+                      type="number"
+                      value={gameBalanceDraft.questSlotExchange.initialTotalSlots}
+                    />
+                  </label>
+                  <label>
+                    <span>最大合計枠数</span>
+                    <input
+                      min="1"
+                      onChange={(event) =>
+                        updateQuestSlotExchangeRule(
+                          'maxTotalSlots',
+                          Number(event.target.value),
+                        )
+                      }
+                      type="number"
+                      value={gameBalanceDraft.questSlotExchange.maxTotalSlots}
+                    />
+                  </label>
+                  <label>
+                    <span>価格</span>
+                    <input
+                      min="0"
+                      onChange={(event) =>
+                        updateQuestSlotExchangeRule('price', Number(event.target.value))
+                      }
+                      type="number"
+                      value={gameBalanceDraft.questSlotExchange.price}
+                    />
+                  </label>
+                </div>
                 <p className="admin-balance-note">
-                  プレイヤーモードでは、この購入済み枠数が追加上限になります。
+                  プレイヤーモードでは、朝・昼・夕・夜の通常クエスト合計数が追加上限になります。
                   開発者モードでは枠制限はありません。
                 </p>
               </div>
@@ -4766,6 +4706,107 @@ function App() {
                 初期値に戻す
               </button>
             </div>
+          </section>
+        )}
+
+        {page === 'settings' && gameMode === 'developer' && (
+          <section className="daily-nudge-admin-settings" aria-label="今日のひとおし管理">
+            <div className="settings-header">
+              <div>
+                <h2>今日のひとおし管理</h2>
+                <p>
+                  毎日ひとつだけ表示する小さな提案を管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
+                </p>
+              </div>
+            </div>
+            <div className="daily-nudge-admin-list">
+              {[...dailyNudgeCandidates]
+                .sort((first, second) => first.order - second.order)
+                .map((candidate, index, orderedCandidates) => (
+                  <article className="daily-nudge-admin-card" key={candidate.id}>
+                    <div className="daily-nudge-admin-card-header">
+                      <label>
+                        <input
+                          checked={candidate.enabled}
+                          onChange={(event) =>
+                            updateDailyNudgeCandidate(
+                              candidate.id,
+                              'enabled',
+                              event.target.checked,
+                            )
+                          }
+                          type="checkbox"
+                        />
+                        <span>{candidate.enabled ? '有効' : '無効'}</span>
+                      </label>
+                      <div className="daily-nudge-admin-card-actions">
+                        <button
+                          disabled={index === 0}
+                          onClick={() => moveDailyNudgeCandidate(candidate.id, -1)}
+                          type="button"
+                        >
+                          上へ
+                        </button>
+                        <button
+                          disabled={index === orderedCandidates.length - 1}
+                          onClick={() => moveDailyNudgeCandidate(candidate.id, 1)}
+                          type="button"
+                        >
+                          下へ
+                        </button>
+                        <button
+                          onClick={() => deleteDailyNudgeCandidate(candidate.id)}
+                          type="button"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                    <label>
+                      <span>提案文</span>
+                      <textarea
+                        onChange={(event) =>
+                          updateDailyNudgeCandidate(candidate.id, 'text', event.target.value)
+                        }
+                        rows={2}
+                        value={candidate.text}
+                      />
+                    </label>
+                    <label>
+                      <span>完了メッセージ</span>
+                      <input
+                        onChange={(event) =>
+                          updateDailyNudgeCandidate(
+                            candidate.id,
+                            'completionMessage',
+                            event.target.value,
+                          )
+                        }
+                        type="text"
+                        value={candidate.completionMessage}
+                      />
+                    </label>
+                    <label>
+                      <span>カテゴリ</span>
+                      <input
+                        onChange={(event) =>
+                          updateDailyNudgeCandidate(candidate.id, 'category', event.target.value)
+                        }
+                        type="text"
+                        value={candidate.category}
+                      />
+                    </label>
+                    <p className="daily-nudge-admin-id">ID: {candidate.id}</p>
+                  </article>
+                ))}
+            </div>
+            <button
+              className="daily-nudge-add-button"
+              onClick={addDailyNudgeCandidate}
+              type="button"
+            >
+              候補追加
+            </button>
           </section>
         )}
 
@@ -4877,6 +4918,41 @@ function App() {
               )}
             </section>
           )}
+          {page === 'today' && (
+            <section
+              className="daily-nudge-card daily-nudge-inline"
+              data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
+              aria-label="今日のひとおし"
+            >
+              <div className="daily-nudge-heading">
+                <span aria-hidden="true">👉</span>
+                <div>
+                  <h2>今日のひとおし</h2>
+                  {selectedDailyNudgeRecord && (
+                    <p>{selectedDailyNudgeRecord.category}</p>
+                  )}
+                </div>
+              </div>
+              {selectedDailyNudgeRecord ? (
+                <>
+                  <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
+                  <div className="daily-nudge-actions">
+                    <button
+                      onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                      type="button"
+                    >
+                      {selectedDailyNudgeRecord.completed ? '完了を取り消す' : '完了'}
+                    </button>
+                    {selectedDailyNudgeRecord.completed && (
+                      <p>{selectedDailyNudgeRecord.completionMessage}</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="daily-nudge-empty">今日のひとおしは準備中です</p>
+              )}
+            </section>
+          )}
           {page === 'today' && isToday && activeTimer && (
             <section
               className="timer-panel"
@@ -4928,6 +5004,9 @@ function App() {
                     <button onClick={resetActiveTimer} type="button">
                       ↺ リセット
                     </button>
+                    <button onClick={closeActiveTimerPanel} type="button">
+                      閉じる
+                    </button>
                   </div>
                 </>
               )}
@@ -4947,13 +5026,21 @@ function App() {
               )}
             </div>
           )}
+          {canEditRoutines && gameMode === 'player' && (
+            <div className="quest-slot-usage" aria-label="通常クエスト枠">
+              <strong>通常クエスト枠</strong>
+              <span>{usedQuestSlots} / {totalQuestSlotLimit} 使用中</span>
+              <span>残り{remainingQuestSlots}枠</span>
+            </div>
+          )}
           {routineRenderSections.map((section) => {
             const isBonusSection = section.id === bonusSectionId;
             const isMilestoneSection =
               section.id === 'wake-milestone' || section.id === 'sleep-milestone';
             const canEditSection =
               !isMilestoneSection && (canEditRoutines || (page === 'today' && isBonusSection));
-            const isPlayerLimitReached = isPlayerModeQuestLimitReached(section);
+            const isPlayerLimitReached =
+              !isBonusSection && isPlayerModeQuestLimitReached(displaySections);
 
             return (
             <section
@@ -5269,7 +5356,7 @@ function App() {
                 </button>
               )}
               {canEditSection && isPlayerLimitReached && (
-                <p className="quest-limit-note">まずはこの1個を育てよう</p>
+                <p className="quest-limit-note">ショップでクエスト枠を増やせます</p>
               )}
             </section>
             );
@@ -5453,7 +5540,8 @@ function App() {
                 <div className="history-routine-list">
                   {historyDisplaySections.map((section) => {
                     const isBonusSection = section.id === bonusSectionId;
-                    const isPlayerLimitReached = isPlayerModeQuestLimitReached(section);
+                    const isPlayerLimitReached =
+                      !isBonusSection && isPlayerModeQuestLimitReached(historyDisplaySections);
 
                     return (
                     <section
@@ -5666,7 +5754,7 @@ function App() {
                       </button>
                     )}
                     {isHistoryEditMode && isPlayerLimitReached && (
-                      <p className="quest-limit-note">まずはこの1個を育てよう</p>
+                      <p className="quest-limit-note">ショップでクエスト枠を増やせます</p>
                     )}
                     </section>
                     );
@@ -5870,18 +5958,10 @@ function App() {
                     {isQuestSlotCategory ? (
                       <div className="point-exchange-list">
                         {categoryItems.map((item) => {
-                          if (!item.section) {
-                            return null;
-                          }
-
-                          const exchangeRule = gameBalance.questSlotExchange[item.section];
-                          const currentSlots = getEffectiveQuestSlotLimit(
-                            item.section,
-                            playerUnlocks,
-                            gameBalance,
-                          );
-                          const nextSlots = Math.min(currentSlots + 1, exchangeRule.maxSlots);
-                          const isMaxUnlocked = currentSlots >= exchangeRule.maxSlots;
+                          const exchangeRule = gameBalance.questSlotExchange;
+                          const currentSlots = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
+                          const nextSlots = Math.min(currentSlots + 1, exchangeRule.maxTotalSlots);
+                          const isMaxUnlocked = currentSlots >= exchangeRule.maxTotalSlots;
                           const isPointEnough = playerEconomy.currentPoints >= item.price;
                           const shortagePoints = Math.max(0, item.price - playerEconomy.currentPoints);
                           const isExchangeDisabled =
@@ -5893,9 +5973,7 @@ function App() {
                           return (
                             <article className="point-exchange-card" key={item.id}>
                               <div>
-                                <h4>
-                                  {sectionIconLabels[item.section]} {item.label}
-                                </h4>
+                                <h4>{item.label}</h4>
                                 <p>価格：{item.price}PT</p>
                                 <p>
                                   現在：{currentSlots}枠
@@ -5907,7 +5985,7 @@ function App() {
                               <div className="point-exchange-action">
                                 <button
                                   disabled={isExchangeDisabled}
-                                  onClick={() => exchangeQuestSlot(item.section as StartSection)}
+                                  onClick={exchangeQuestSlot}
                                   type="button"
                                 >
                                   交換する
