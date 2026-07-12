@@ -20,8 +20,8 @@
 | `hibitin:archivedItems:v1` | 削除済みアイテム | `Record<itemId, ArchivedItem>` | `loadArchivedItems()` | `useEffect([archivedItems])` | 対象 | 現役 |
 | `hibitin:timerState:v1` | 実行中/一時停止タイマー | `StoredTimerState` | `loadStoredTimerState()` | `useEffect([activeTimer, pausedTimers])` | 対象 | 現役 |
 | `hibitin:itemNotes:v1` | 日付別・アイテム別メモ | `{ [dateKey]: { [itemId]: string } }` | `loadItemNotes()` | `useEffect([itemNotes])` | 対象 | 現役 |
-| `hibitin:dailyNudgeCandidates:v1` | お通しクエスト候補一覧（内部名 dailyNudge） | `DailyNudgeCandidate[]` | `loadDailyNudgeCandidates()` | `useEffect([dailyNudgeCandidates])` | 対象 | 現役 |
-| `hibitin:dailyNudgeRecords:v1` | 日付別お通しクエスト割り当て/完了状態（内部名 dailyNudge） | `{ [dateKey]: DailyNudgeRecord }` | `loadDailyNudgeRecords()` | `useEffect([dailyNudgeRecords])`, `toggleDailyNudgeCompletion()` | 対象 | 現役 |
+| `hibitin:dailyNudgeCandidates:v1` | 日替わりクエスト候補一覧（内部名 dailyNudge） | `DailyNudgeCandidate[]` | `loadDailyNudgeCandidates()` | `useEffect([dailyNudgeCandidates])` | 対象 | 現役 |
+| `hibitin:dailyNudgeRecords:v1` | 日付別の日替わりクエスト割り当て/完了状態（内部名 dailyNudge） | `{ [dateKey]: DailyNudgeRecord }` | `loadDailyNudgeRecords()` | `useEffect([dailyNudgeRecords])`, `toggleDailyNudgeCompletion()` | 対象 | 現役 |
 | `hibitin:rhythmSettings:v1` | ノーマル/休日の起床・就寝時刻、開始セクション | `RhythmSettings` | `loadRhythmSettings()` | `useEffect([rhythmSettings])` | 対象 | 現役 |
 | `hibitin:gameMode:v1` | プレイヤー/開発者モード | JSON文字列または旧プレーン文字列対応 | `loadGameMode()` | `useEffect([gameMode])` | 対象 | 現役 |
 | `hibitin:gameBalance:v1` | PT、ランク、クエスト枠交換設定 | `GameBalanceSettings` schemaVersion 3 | `loadGameBalanceSettings()` | `useEffect([gameBalance])` | 対象 | 現役 |

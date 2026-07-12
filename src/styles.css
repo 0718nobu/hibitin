@@ -466,6 +466,11 @@ h1 {
   background: #f3fbf6;
 }
 
+.result-panel[data-rank-level='first'] {
+  border-color: #f1d39d;
+  background: linear-gradient(135deg, #fff8e8, #fffef7);
+}
+
 .result-panel[data-rank-level='ready'] {
   background: #f7f5ef;
 }
@@ -530,6 +535,11 @@ h1 {
 .result-panel[data-rank-level='start'] .result-rank,
 .result-panel[data-rank-level='start'] .result-count {
   color: #2b8a5e;
+}
+
+.result-panel[data-rank-level='first'] .result-rank,
+.result-panel[data-rank-level='first'] .result-count {
+  color: #8a5a16;
 }
 
 .timer-panel {
@@ -842,6 +852,13 @@ h1 {
   .timer-finished-modal,
   .timer-finished-sparkles span {
     animation: none;
+  }
+
+  .routine-list,
+  .routine-list::before,
+  .quest-title-text span,
+  .quest-list-title h2 {
+    transition: none;
   }
 }
 
@@ -1529,15 +1546,52 @@ h1 {
   background: rgb(255 247 219 / 72%);
 }
 
+.calendar-day[data-rate-level='first'] {
+  border: 1px solid #f0c780;
+  background:
+    radial-gradient(circle at 50% 28%, rgb(255 255 255 / 45%), transparent 30%),
+    linear-gradient(160deg, #fff9e8 0%, #ffe8bd 58%, #f6ce8b 100%);
+  color: #805325;
+  box-shadow:
+    0 4px 10px rgb(204 132 42 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 52%),
+    inset 0 0 0 1px rgb(255 255 255 / 26%);
+}
+
+.calendar-day[data-rate-level='first'][data-routine-kind='holiday'] {
+  border-color: #eba980;
+  background:
+    radial-gradient(circle at 50% 28%, rgb(255 255 255 / 45%), transparent 30%),
+    linear-gradient(160deg, #fff6ed 0%, #ffe3bd 58%, #f6c58b 100%);
+  box-shadow:
+    0 4px 10px rgb(204 132 42 / 12%),
+    inset 0 0 0 2px rgb(194 65 72 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 52%),
+    inset 0 0 0 1px rgb(255 255 255 / 26%);
+}
+
 .calendar-day[data-rate-level='start'] {
-  border-color: #b9d7d4;
-  background: linear-gradient(180deg, #f7fbfb 0%, #eef8f6 100%);
-  color: #32736c;
+  border: 1.5px solid #a7c7d3;
+  background:
+    radial-gradient(circle at 50% 24%, rgb(255 255 255 / 58%), transparent 30%),
+    linear-gradient(160deg, #fbfdff 0%, #e9f4f8 55%, #d4e7ee 100%);
+  color: #2f6573;
+  box-shadow:
+    0 5px 12px rgb(84 126 142 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    inset 0 -8px 14px rgb(77 118 132 / 8%);
 }
 
 .calendar-day[data-rate-level='start'][data-routine-kind='holiday'] {
-  border-color: #efb3aa;
-  background: linear-gradient(180deg, #fff3f5 0%, #eef8f6 100%);
+  border-color: #d7a8a0;
+  background:
+    radial-gradient(circle at 50% 24%, rgb(255 255 255 / 58%), transparent 30%),
+    linear-gradient(160deg, #fff5f7 0%, #e9f4f8 55%, #d4e7ee 100%);
+  box-shadow:
+    0 5px 12px rgb(84 126 142 / 14%),
+    inset 0 0 0 2px rgb(194 65 72 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    inset 0 -8px 14px rgb(77 118 132 / 8%);
 }
 
 .calendar-day[data-rate-level='good'] {
@@ -1785,7 +1839,20 @@ h1 {
 
 .calendar-day[data-rate-level='start'] .calendar-day-number,
 .calendar-day[data-rate-level='start'] .calendar-day-rate {
-  color: #2e746c;
+  color: #2d6370;
+  text-shadow: 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+.calendar-day[data-rate-level='first'] .calendar-day-number,
+.calendar-day[data-rate-level='first'] .calendar-day-rate {
+  color: #805325;
+  text-shadow: 0 1px 0 rgb(255 251 234 / 70%);
+}
+
+.calendar-day[data-rate-level='first'] .calendar-day-rank {
+  filter:
+    drop-shadow(0 1px 0 rgb(255 249 231 / 80%))
+    drop-shadow(0 2px 3px rgb(120 75 24 / 12%));
 }
 
 .calendar-day[data-rate-level='good'] .calendar-day-number,
@@ -2850,6 +2917,9 @@ h1 {
 }
 
 .routine-list {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   display: grid;
   gap: 0;
   margin-top: 4px;
@@ -2860,6 +2930,111 @@ h1 {
   box-shadow:
     0 16px 40px rgb(0 112 76 / 12%),
     0 0 0 3px rgb(0 168 107 / 4%);
+  transition:
+    border-color 360ms ease,
+    background 420ms ease,
+    box-shadow 420ms ease,
+    transform 300ms ease;
+}
+
+.routine-list > * {
+  position: relative;
+  z-index: 1;
+}
+
+.routine-list::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgb(255 255 255 / 70%), transparent 28%),
+    linear-gradient(180deg, rgb(255 255 255 / 30%), transparent 42%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 360ms ease;
+}
+
+.routine-list[data-progress-level='ready'] {
+  border-color: #b7ead0;
+  background:
+    linear-gradient(180deg, rgb(246 255 250 / 92%) 0%, #ffffff 42%, #ffffff 100%);
+  box-shadow:
+    0 14px 34px rgb(0 112 76 / 10%),
+    0 0 0 3px rgb(0 168 107 / 4%);
+}
+
+.routine-list[data-progress-level='first'] {
+  border-color: #f0c780;
+  background:
+    radial-gradient(circle at 16% 0%, rgb(255 231 169 / 46%), transparent 32%),
+    linear-gradient(180deg, #fff3da 0%, #fffdfa 39%, #ffffff 100%);
+  box-shadow:
+    0 16px 36px rgb(204 132 42 / 14%),
+    0 0 0 3px rgb(246 197 139 / 10%);
+}
+
+.routine-list[data-progress-level='start'] {
+  border-color: #a7c7d3;
+  background:
+    radial-gradient(circle at 18% 0%, rgb(255 255 255 / 62%), transparent 30%),
+    linear-gradient(180deg, #eef7fa 0%, #fbfdff 42%, #ffffff 100%);
+  box-shadow:
+    0 17px 38px rgb(84 126 142 / 16%),
+    0 0 0 3px rgb(167 199 211 / 12%);
+}
+
+.routine-list[data-progress-level='good'] {
+  border-color: #1698bc;
+  background:
+    radial-gradient(circle at 18% 0%, rgb(231 251 255 / 72%), transparent 31%),
+    linear-gradient(180deg, #def8ff 0%, #f6fdff 42%, #ffffff 100%);
+  box-shadow:
+    0 18px 42px rgb(22 152 188 / 18%),
+    0 0 0 3px rgb(65 175 208 / 12%);
+}
+
+.routine-list[data-progress-level='great'] {
+  border-color: #c43f7c;
+  background:
+    radial-gradient(circle at 18% 0%, rgb(255 230 241 / 78%), transparent 31%),
+    linear-gradient(180deg, #ffe7f1 0%, #fff8fb 42%, #ffffff 100%);
+  box-shadow:
+    0 20px 46px rgb(196 63 124 / 20%),
+    0 0 0 3px rgb(239 121 168 / 13%);
+}
+
+.routine-list[data-progress-level='excellent'] {
+  border-color: #bd8600;
+  background:
+    radial-gradient(circle at 18% 0%, rgb(255 248 184 / 84%), transparent 31%),
+    linear-gradient(180deg, #fff2b8 0%, #fffaf0 42%, #ffffff 100%);
+  box-shadow:
+    0 22px 50px rgb(177 126 0 / 22%),
+    0 0 0 3px rgb(255 231 116 / 16%),
+    0 0 22px rgb(255 214 85 / 16%);
+}
+
+.routine-list[data-progress-level='perfect'] {
+  border-color: #f2d36a;
+  background:
+    radial-gradient(circle at 18% 0%, rgb(255 248 174 / 52%), transparent 26%),
+    radial-gradient(circle at 84% 5%, rgb(255 255 255 / 42%), transparent 18%),
+    linear-gradient(180deg, #0aa174 0%, #eafff6 44%, #ffffff 100%);
+  box-shadow:
+    0 26px 58px rgb(0 112 83 / 30%),
+    0 0 0 2px rgb(242 211 106 / 42%),
+    0 0 28px rgb(0 180 125 / 20%),
+    inset 0 0 0 2px rgb(255 255 255 / 22%);
+}
+
+.routine-list[data-progress-level='first']::before,
+.routine-list[data-progress-level='start']::before,
+.routine-list[data-progress-level='good']::before,
+.routine-list[data-progress-level='great']::before,
+.routine-list[data-progress-level='excellent']::before,
+.routine-list[data-progress-level='perfect']::before {
+  opacity: 1;
 }
 
 .quest-list-title {
@@ -2885,6 +3060,10 @@ h1 {
   background: #00a86b;
   box-shadow: 0 7px 16px rgb(0 128 82 / 22%);
   font-size: 1.06rem;
+  transition:
+    background 360ms ease,
+    box-shadow 360ms ease,
+    color 360ms ease;
 }
 
 .quest-list-title h2 {
@@ -2892,6 +3071,71 @@ h1 {
   color: #0f5f42;
   font-size: 1.12rem;
   line-height: 1.2;
+  transition: color 360ms ease, text-shadow 360ms ease;
+}
+
+.routine-list[data-progress-level='first'] .quest-title-text span {
+  background: #ffe2aa;
+  box-shadow: 0 7px 16px rgb(204 132 42 / 18%);
+}
+
+.routine-list[data-progress-level='first'] .quest-list-title h2 {
+  color: #835416;
+}
+
+.routine-list[data-progress-level='start'] .quest-title-text span {
+  background: linear-gradient(180deg, #ffffff, #d8e8ee);
+  box-shadow: 0 7px 16px rgb(84 126 142 / 18%);
+}
+
+.routine-list[data-progress-level='start'] .quest-list-title h2 {
+  color: #2f6573;
+}
+
+.routine-list[data-progress-level='good'] .quest-title-text span {
+  background: linear-gradient(180deg, #91e5f5, #37a7c8);
+  box-shadow: 0 8px 18px rgb(22 152 188 / 24%);
+}
+
+.routine-list[data-progress-level='good'] .quest-list-title h2 {
+  color: #06495c;
+}
+
+.routine-list[data-progress-level='great'] .quest-title-text span {
+  background: linear-gradient(180deg, #ffabc9, #d94f8a);
+  box-shadow: 0 9px 20px rgb(196 63 124 / 24%);
+}
+
+.routine-list[data-progress-level='great'] .quest-list-title h2 {
+  color: #7d1e4d;
+}
+
+.routine-list[data-progress-level='excellent'] .quest-title-text span {
+  background: linear-gradient(180deg, #fff19a, #d79b00);
+  box-shadow:
+    0 10px 22px rgb(177 126 0 / 26%),
+    0 0 12px rgb(255 231 116 / 26%);
+}
+
+.routine-list[data-progress-level='excellent'] .quest-list-title h2 {
+  color: #7a5700;
+}
+
+.routine-list[data-progress-level='perfect'] .quest-title-text span {
+  background: linear-gradient(180deg, #f8de77, #00a879);
+  box-shadow:
+    0 11px 24px rgb(0 112 83 / 28%),
+    0 0 16px rgb(242 211 106 / 34%);
+}
+
+.routine-list[data-progress-level='perfect'] .quest-list-title h2 {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgb(0 54 42 / 42%);
+}
+
+.routine-list[data-progress-level='perfect'] .quest-date-label {
+  color: #f5fff9;
+  text-shadow: 0 1px 2px rgb(0 54 42 / 30%);
 }
 
 .quest-date-label {
@@ -2903,15 +3147,48 @@ h1 {
 
 .routine-list .result-panel {
   margin: 0 0 12px;
-  padding: 2px 0 14px;
-  border: 0;
-  border-bottom: 1px solid #dceee5;
-  border-radius: 0;
-  background: transparent;
+  padding: 9px 10px 12px;
+  border: 1px solid rgb(220 238 229 / 78%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 76%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 68%);
 }
 
 .routine-list .result-panel[data-rank-level] {
-  background: transparent;
+  background: rgb(255 255 255 / 76%);
+}
+
+.routine-list[data-progress-level='first'] .result-panel {
+  border-color: rgb(240 199 128 / 54%);
+  background: rgb(255 253 247 / 82%);
+}
+
+.routine-list[data-progress-level='start'] .result-panel {
+  border-color: rgb(167 199 211 / 48%);
+  background: rgb(255 255 255 / 80%);
+}
+
+.routine-list[data-progress-level='good'] .result-panel {
+  border-color: rgb(22 152 188 / 34%);
+  background: rgb(247 253 255 / 84%);
+}
+
+.routine-list[data-progress-level='great'] .result-panel {
+  border-color: rgb(196 63 124 / 28%);
+  background: rgb(255 250 252 / 86%);
+}
+
+.routine-list[data-progress-level='excellent'] .result-panel {
+  border-color: rgb(189 134 0 / 30%);
+  background: rgb(255 253 246 / 88%);
+}
+
+.routine-list[data-progress-level='perfect'] .result-panel {
+  border-color: rgb(242 211 106 / 46%);
+  background: rgb(255 255 255 / 88%);
+  box-shadow:
+    0 10px 24px rgb(0 112 83 / 12%),
+    inset 0 0 0 1px rgb(242 211 106 / 12%);
 }
 
 .quest-edit-action {

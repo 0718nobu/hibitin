@@ -463,7 +463,7 @@ const dailyEventExamples = [
   { id: 'message', text: '返そうと思っていた連絡を返した。', category: 'dailyLife', source: 'system', kind: 'event' },
 ];
 
-const defaultDailyNudgeCompletionMessage = 'お通し完了。今日も一歩。';
+const defaultDailyNudgeCompletionMessage = '日替わりクエスト完了。今日も一歩。';
 const dailyNudgeCelebrationMessages = [
   '今日の勝ち！まず一歩、いただきました。',
   'いいスタート。動いた時点でもう前進。',
@@ -473,7 +473,7 @@ const dailyNudgeCelebrationMessages = [
   'まず動いた。それが強い。',
   '今日も習慣側に一票。',
   'やる気を待たずに動けた。勝ち。',
-  'お通し成功。ここからはボーナスタイム。',
+  '日替わり成功。ここからはボーナスタイム。',
   '今日を始めた。それだけでも十分。',
   'よし、今日のエンジン始動。',
   '一歩目クリア。あとは遊ぶだけ。',
@@ -1853,6 +1853,18 @@ const getCompletionRank = (rate: number | null) => {
   return { icon: '☕', label: 'READY?', level: 'ready' };
 };
 
+const getVisualProgressRank = (
+  completionRank: ReturnType<typeof getCompletionRank>,
+  completedCount: number,
+  isDailyNudgeCompleted: boolean,
+) => {
+  if (completedCount === 0 && isDailyNudgeCompleted) {
+    return { icon: '🐣', label: 'FIRST', level: 'first' };
+  }
+
+  return completionRank;
+};
+
 const getItemTimerSeconds = (item: RoutineItem) => {
   if (item.timerSeconds && item.timerSeconds > 0) {
     return Math.round(item.timerSeconds);
@@ -2369,7 +2381,7 @@ function App() {
   const dailyEventExample = getDailyEventExample(selectedDateKey);
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
-  const dailyNudgeDisplayLabel = isToday ? '本日のお通しクエスト' : '昨日のお通しクエスト';
+  const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
@@ -2482,6 +2494,11 @@ function App() {
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
+  const selectedDateVisualRank = getVisualProgressRank(
+    selectedDateRank,
+    selectedDateStats.completedCount,
+    Boolean(selectedDailyNudgeRecord?.completed),
+  );
   const selectedDailyNudgeStreak = useMemo(
     () => getDailyNudgeStreakCount(dailyNudgeRecords, selectedDateKey),
     [dailyNudgeRecords, selectedDateKey],
@@ -2627,15 +2644,24 @@ function App() {
       const daySections = buildDisplaySections(sections, rhythmSettings[baseTemplate]);
       const stats = calculateCompletionStats(daySections, loadCheckedItems(date));
       const rank = getCompletionRank(stats.rate);
+      const calendarRank = getVisualProgressRank(
+        rank,
+        stats.completedCount,
+        Boolean(dailyNudgeRecords[dateKey]?.completed),
+      );
+      const isDailyNudgeOnlyCompleted = calendarRank.level === 'first';
+      const shouldShowCalendarStamp =
+        isDailyNudgeOnlyCompleted || Boolean(stats.rate && stats.rate > 0);
 
       return {
         date,
         dateKey,
         day: date.getDate(),
         rate: stats.rate,
-        rankIcon: rank.icon,
-        rankLabel: rank.label.replace(/!+$/, ''),
-        rankLevel: rank.level,
+        rankIcon: calendarRank.icon,
+        rankLabel: calendarRank.label.replace(/!+$/, ''),
+        rankLevel: calendarRank.level,
+        shouldShowStamp: shouldShowCalendarStamp,
         totalCount: stats.totalCount,
         isFuture: dateKey > todayKey,
         isToday: dateKey === todayKey,
@@ -2647,6 +2673,7 @@ function App() {
     calendarMonth,
     dateOverrides,
     dateSnapshots,
+    dailyNudgeRecords,
     checkedItems,
     historyCheckedItems,
     historySelectedDateKey,
@@ -3206,7 +3233,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '本日のお通しクエスト',
+          itemLabel: '本日の日替わりクエスト',
           sectionId: 'daily-nudge',
           points,
           basePoints,
@@ -3219,7 +3246,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '本日のお通しクエスト',
+          itemLabel: '本日の日替わりクエスト',
           sectionId: 'daily-nudge',
           type: 'earn',
           points,
@@ -3233,7 +3260,7 @@ function App() {
           const pointFlash = {
             id: nextLedgerEntry.id,
             points,
-            itemLabel: '本日のお通しクエスト',
+            itemLabel: '本日の日替わりクエスト',
           };
 
           setPointToast(pointFlash);
@@ -3400,7 +3427,7 @@ function App() {
     }
 
     const shouldDelete = window.confirm(
-      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みのお通しクエストは残ります。`,
+      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みの日替わりクエストは残ります。`,
     );
 
     if (!shouldDelete) {
@@ -4918,7 +4945,7 @@ function App() {
                     ['normal', '通常クエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
-                    ['dailyNudge', '本日のお通しクエスト'],
+                    ['dailyNudge', '本日の日替わりクエスト'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
                     <div className="admin-point-target-row" key={targetKind}>
                       <label>
@@ -5005,8 +5032,8 @@ function App() {
                       <li>累計星によるランク計算</li>
                       <li>ランクによるPT倍率</li>
                       <li>PTおよびランクの表示</li>
-                      <li>本日のお通しクエスト完了によるPT獲得</li>
-                      <li>本日のお通しクエスト連続記録</li>
+                      <li>本日の日替わりクエスト完了によるPT獲得</li>
+                      <li>本日の日替わりクエスト連続記録</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
                       <li>PTによるクエスト枠購入</li>
@@ -5105,12 +5132,12 @@ function App() {
         )}
 
         {page === 'settings' && gameMode === 'developer' && (
-          <section className="daily-nudge-admin-settings" aria-label="お通しクエスト管理">
+          <section className="daily-nudge-admin-settings" aria-label="日替わりクエスト管理">
             <div className="settings-header">
               <div>
-                <h2>お通しクエスト管理</h2>
+                <h2>日替わりクエスト管理</h2>
                 <p>
-                  毎日ひとつだけ表示する小さなお通しクエストを管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
+                  毎日ひとつだけ表示する小さな日替わりクエストを管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
                 </p>
               </div>
             </div>
@@ -5275,7 +5302,10 @@ function App() {
         )}
 
         {(page === 'today' || page === 'settings') && (
-        <div className="routine-list">
+        <div
+          className="routine-list"
+          data-progress-level={page === 'today' ? selectedDateVisualRank.level : undefined}
+        >
           {page === 'today' && (
             <div className="quest-list-title">
               <div className="quest-title-text">
@@ -5290,7 +5320,7 @@ function App() {
           {page === 'today' && (
             <section
               className="result-panel"
-              data-rank-level={selectedDateRank.level}
+              data-rank-level={selectedDateVisualRank.level}
               aria-label={isToday ? '今日の達成率' : '選択日の達成率'}
             >
               {selectedDateStats.rate === null ? (
@@ -5302,8 +5332,8 @@ function App() {
               ) : (
                 <>
                   <p className="result-rank">
-                    <span aria-hidden="true">{selectedDateRank.icon}</span>
-                    {selectedDateRank.label}
+                    <span aria-hidden="true">{selectedDateVisualRank.icon}</span>
+                    {selectedDateVisualRank.label}
                   </p>
                   <p className="result-count">
                     {selectedDateStats.completedCount} / {selectedDateStats.totalCount} 完了
@@ -5364,7 +5394,7 @@ function App() {
                   </div>
                 </>
               ) : (
-                <p className="daily-nudge-empty">お通しクエストは準備中です</p>
+                <p className="daily-nudge-empty">日替わりクエストは準備中です</p>
               )}
             </section>
           )}
@@ -5900,13 +5930,13 @@ function App() {
                         </span>
                       )}
                       <span className="calendar-day-rate">
-                        {day.rate && day.rate > 0 ? day.rankLabel : ''}
+                        {day.shouldShowStamp ? day.rankLabel : ''}
                       </span>
                     </span>
                     <span className="calendar-stamp-visual">
                       <span className="calendar-stamp-slot" aria-hidden="true" />
                       <span className="calendar-day-rank" aria-hidden="true">
-                        {day.rate && day.rate > 0 ? day.rankIcon : ''}
+                        {day.shouldShowStamp ? day.rankIcon : ''}
                       </span>
                     </span>
                   </button>
