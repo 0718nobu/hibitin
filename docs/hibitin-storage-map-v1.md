@@ -29,7 +29,7 @@
 | `hibitin:playerProfile:v1` | プレイヤー名 | `PlayerProfile` | `loadPlayerProfile()` | `useEffect([playerProfile])` | 対象 | 現役 |
 | `hibitin:playerUnlocks:v2` | 合計通常クエスト枠 | `PlayerUnlocks { totalQuestSlots }` | `loadPlayerUnlocks()` | `useEffect([playerUnlocks])` | 対象 | 現役 |
 | `hibitin:checks:YYYY-MM-DD` | 日付別チェック | `Record<itemId, boolean>` | `loadCheckedItems()` / `getStoredCheckDateKeys()` | `useEffect([checkedItems])`, `toggleHistoryItem()` | 対象 | 現役・動的 |
-| `hibitin:memo:YYYY-MM-DD` | 日付別全体メモ | string | `loadDailyMemo()` | `useEffect([dailyMemo])` | 対象 | 現役・動的 |
+| `hibitin:memo:YYYY-MM-DD` | 日付別ひとこと（旧: 全体メモ） | string | `loadDailyMemo()` | `useEffect([dailyMemo])` | 対象 | 現役・動的 |
 | `hibitin-routines:v1` | 旧ルーティン保存 | `RoutineSection[]` | `loadLegacyRoutineSections()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:lifestyleSettings:v1` | 旧生活リズム設定 | 旧 `RhythmConfig` 相当 | `loadRhythmSettings()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:playerUnlocks:v1` | 旧時間帯別クエスト枠 | `{ questSlots: { morning,noon,evening,night } }` | `loadPlayerUnlocks()` | 起動後削除 | 対象だが通常は削除 | 旧仕様・移行のみ |

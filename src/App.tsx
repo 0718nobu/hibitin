@@ -67,9 +67,13 @@ type PointSettings = {
     enabled: boolean;
     basePoints: number;
   };
+  dailyNudge: {
+    enabled: boolean;
+    basePoints: number;
+  };
 };
 
-type PointTargetKind = 'wake' | 'normal' | 'sleep' | 'advanced';
+type PointTargetKind = 'wake' | 'normal' | 'sleep' | 'advanced' | 'dailyNudge';
 
 type QuestSlotExchangeRule = {
   enabled: boolean;
@@ -210,6 +214,7 @@ type DailyNudgeRecord = {
   candidateId: string;
   text: string;
   completionMessage: string;
+  celebrationMessage?: string;
   category: string;
   completed: boolean;
   assignedAt: string;
@@ -393,7 +398,49 @@ const dailyMessages = [
   '🧭 迷ったら、今できる一個から。',
 ];
 
+const dailyOneLinePrompts = [
+  { id: 'happy-small', text: '今日ちょっと嬉しかったことは？', category: 'fun' },
+  { id: 'noticed', text: '今日気づいたことは？', category: 'discovery' },
+  { id: 'thanks', text: '今日ありがとうと思えたことは？', category: 'gratitude' },
+  { id: 'done-one', text: '今日できたことをひとつ挙げるなら？', category: 'achievement' },
+  { id: 'boss', text: '今日のラスボスは何だった？', category: 'fun' },
+  { id: 'calm', text: '今日一番落ち着いた瞬間は？', category: 'rest' },
+  { id: 'smiled', text: '今日ちょっと笑ったことは？', category: 'fun' },
+  { id: 'praise-self', text: '今日、自分を褒めるなら？', category: 'achievement' },
+  { id: 'small-luck', text: '今日の小さな幸運は？', category: 'gratitude' },
+  { id: 'one-step', text: '今日踏み出した一歩は？', category: 'achievement' },
+  { id: 'learned', text: '今日学んだことは？', category: 'discovery' },
+  { id: 'tomorrow-note', text: '明日の自分へひとこと。', category: 'tomorrow' },
+  { id: 'remembered-words', text: '今日心に残った言葉は？', category: 'discovery' },
+  { id: 'best-food', text: '今日一番おいしかったものは？', category: 'fun' },
+  { id: 'small-effort', text: '今日、少しだけ頑張ったことは？', category: 'achievement' },
+  { id: 'rested', text: '今日休めた瞬間は？', category: 'rest' },
+  { id: 'score', text: '今日の自分に点数をつけるなら？', category: 'emotion' },
+  { id: 'mood-word', text: '今の気分を一言で表すなら？', category: 'emotion' },
+  { id: 'release', text: '今日手放していいことは？', category: 'rest' },
+  { id: 'day-title', text: '今日を一言で名付けるなら？', category: 'fun' },
+  { id: 'tiny-kindness', text: '今日の小さなやさしさは？', category: 'gratitude' },
+  { id: 'good-enough', text: '今日は何が「まあOK」だった？', category: 'emotion' },
+];
+
 const defaultDailyNudgeCompletionMessage = 'ひと押し完了。今日も一歩。';
+const dailyNudgeCelebrationMessages = [
+  '今日の勝ち！まず一歩、いただきました。',
+  'いいスタート。動いた時点でもう前進。',
+  '小さくても確かな一歩。',
+  '今日も自分を動かせた。ナイス。',
+  'その一歩が、次の一歩を呼んでくる。',
+  'まず動いた。それが強い。',
+  '今日も習慣側に一票。',
+  'やる気を待たずに動けた。勝ち。',
+  'ひと押し成功。ここからはボーナスタイム。',
+  '今日を始めた。それだけでも十分。',
+  'よし、今日のエンジン始動。',
+  '一歩目クリア。あとは遊ぶだけ。',
+  '今日もちゃんと前へ進んだ。',
+  '小さな行動、でっかい価値。',
+  'OK！今日も一つ積み上がった。',
+];
 const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   ['daily-nudge-water', '水を一杯飲もう', '水分補給クリア。体にやさしい一歩。', '健康'],
   ['daily-nudge-stretch-10', '10秒だけ背伸びしよう', '背伸び完了。少し空気が入れ替わった。', '健康'],
@@ -787,6 +834,9 @@ const loadDailyNudgeRecords = (): DailyNudgeRecords => {
             candidateId: record.candidateId ?? '',
             text: record.text ?? '',
             completionMessage: record.completionMessage ?? defaultDailyNudgeCompletionMessage,
+            celebrationMessage: typeof record.celebrationMessage === 'string'
+              ? record.celebrationMessage
+              : undefined,
             category: record.category ?? 'その他',
             completed: Boolean(record.completed),
             assignedAt: record.assignedAt ?? new Date().toISOString(),
@@ -987,6 +1037,7 @@ const normalizePointSettings = (settings: unknown): PointSettings => {
           enabled: Boolean(parsedSettings.includeAdvanced ?? defaultPointSettings.advanced.enabled),
           basePoints: defaultPointSettings.advanced.basePoints,
         },
+    dailyNudge: normalizeTarget(parsedSettings.dailyNudge, defaultPointSettings.dailyNudge),
   };
 };
 
@@ -1345,6 +1396,11 @@ const getDateKey = (date: Date) => {
 const getStableStringHash = (value: string) =>
   [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
 
+const getDailyOneLinePrompt = (dateKey: string) =>
+  dailyOneLinePrompts[
+    getStableStringHash(`daily-one-line:${dateKey}`) % dailyOneLinePrompts.length
+  ];
+
 const getDailyNudgeRecentCandidateIds = (
   dateKey: string,
   records: DailyNudgeRecords,
@@ -1392,6 +1448,30 @@ const createDailyNudgeRecord = (
   completed: false,
   assignedAt: new Date().toISOString(),
 });
+
+const getDailyNudgeCelebrationMessage = (dateKey: string, candidateId: string) => {
+  const messageIndex = getStableStringHash(`${dateKey}:${candidateId}`) %
+    dailyNudgeCelebrationMessages.length;
+
+  return dailyNudgeCelebrationMessages[messageIndex];
+};
+
+const getDailyNudgeStreakCount = (records: DailyNudgeRecords, dateKey: string) => {
+  let cursorDate = getDateFromKey(dateKey);
+
+  if (!records[dateKey]?.completed) {
+    cursorDate = addDays(cursorDate, -1);
+  }
+
+  let streakCount = 0;
+
+  while (records[getDateKey(cursorDate)]?.completed) {
+    streakCount += 1;
+    cursorDate = addDays(cursorDate, -1);
+  }
+
+  return streakCount;
+};
 
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
@@ -1579,6 +1659,10 @@ const defaultPointSettings: PointSettings = {
   advanced: {
     enabled: false,
     basePoints: 0,
+  },
+  dailyNudge: {
+    enabled: true,
+    basePoints: 10,
   },
 };
 const defaultRankRules: RankRule[] = [
@@ -2000,6 +2084,7 @@ const getMasteryAdminRuleText = () => [
 ];
 
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
+const getDailyNudgePointAchievementKey = (dateKey: string) => `daily-nudge:${dateKey}`;
 
 const findItemContext = (itemId: string, sections: RoutineSection[]) => {
   for (const section of sections) {
@@ -2218,6 +2303,8 @@ function App() {
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
   const [playerUnlocks, setPlayerUnlocks] = useState<PlayerUnlocks>(() => loadPlayerUnlocks());
   const dailyMessage = getDailyMessage(selectedDateKey, playerProfile.displayName);
+  const dailyOneLinePrompt = getDailyOneLinePrompt(selectedDateKey);
+  const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
     loadGameBalanceSettings(),
@@ -2229,6 +2316,7 @@ function App() {
     loadPlayerEconomy(),
   );
   const [pointToast, setPointToast] = useState<PointToast | null>(null);
+  const [dailyNudgePointFlash, setDailyNudgePointFlash] = useState<PointToast | null>(null);
   const [exchangeToast, setExchangeToast] = useState<ExchangeToast | null>(null);
   const [isRankPanelOpen, setIsRankPanelOpen] = useState(false);
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
@@ -2322,6 +2410,12 @@ function App() {
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
+  const selectedDailyNudgeStreak = useMemo(
+    () => getDailyNudgeStreakCount(dailyNudgeRecords, selectedDateKey),
+    [dailyNudgeRecords, selectedDateKey],
+  );
+  const selectedDailyNudgeAward =
+    playerEconomy.pointAwards[getDailyNudgePointAchievementKey(selectedDateKey)];
   const historyDateTemplate = historySelectedDate
     ? getBaseTemplateForDate(templateSettings, historySelectedDate)
     : 'normal';
@@ -2613,6 +2707,16 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [pointToast]);
+
+  useEffect(() => {
+    if (!dailyNudgePointFlash) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setDailyNudgePointFlash(null), 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [dailyNudgePointFlash]);
 
   useEffect(() => {
     if (!exchangeToast) {
@@ -2953,7 +3057,131 @@ function App() {
     });
   };
 
+  const applyPointChangeForDailyNudge = (
+    dateKey: string,
+    nextCompleted: boolean,
+    record: DailyNudgeRecord,
+  ) => {
+    const achievementKey = getDailyNudgePointAchievementKey(dateKey);
+    const now = new Date().toISOString();
+    const pointSetting = gameBalance.pointSettings.dailyNudge;
+
+    setPlayerEconomy((currentEconomy) => {
+      const existingAward = currentEconomy.pointAwards[achievementKey];
+
+      if (nextCompleted) {
+        if (existingAward?.active) {
+          return currentEconomy;
+        }
+
+        if (!pointSetting.enabled && !existingAward) {
+          return currentEconomy;
+        }
+
+        const points = existingAward?.points ??
+          roundPoints(pointSetting.basePoints * playerRankProgress.multiplier, gameBalance.pointSettings.rounding);
+        const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
+        const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+        const nextAward: PointAwardRecord = {
+          achievementKey,
+          dateKey,
+          itemId: 'daily-nudge',
+          itemLabel: '今日のひとおし',
+          sectionId: 'daily-nudge',
+          points,
+          basePoints,
+          multiplier,
+          active: true,
+          awardedAt: existingAward?.awardedAt ?? now,
+        };
+        const nextLedgerEntry: PointLedgerEntry = {
+          id: `${achievementKey}:earn:${now}`,
+          achievementKey,
+          dateKey,
+          itemId: 'daily-nudge',
+          itemLabel: '今日のひとおし',
+          sectionId: 'daily-nudge',
+          type: 'earn',
+          points,
+          basePoints,
+          multiplier,
+          createdAt: now,
+          reason: record.text,
+        };
+
+        if (points > 0 && pointSetting.enabled) {
+          const pointFlash = {
+            id: nextLedgerEntry.id,
+            points,
+            itemLabel: '今日のひとおし',
+          };
+
+          setPointToast(pointFlash);
+          setDailyNudgePointFlash(pointFlash);
+        }
+
+        return {
+          ...currentEconomy,
+          currentPoints: currentEconomy.currentPoints + points,
+          lifetimeEarnedPoints: existingAward
+            ? currentEconomy.lifetimeEarnedPoints
+            : currentEconomy.lifetimeEarnedPoints + points,
+          pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+          pointAwards: {
+            ...currentEconomy.pointAwards,
+            [achievementKey]: nextAward,
+          },
+        };
+      }
+
+      if (!existingAward?.active) {
+        return currentEconomy;
+      }
+
+      const reversalEntry: PointLedgerEntry = {
+        id: `${achievementKey}:reversal:${now}`,
+        achievementKey,
+        dateKey,
+        itemId: existingAward.itemId,
+        itemLabel: existingAward.itemLabel,
+        sectionId: existingAward.sectionId,
+        type: 'reversal',
+        points: -existingAward.points,
+        basePoints: existingAward.basePoints,
+        multiplier: existingAward.multiplier,
+        createdAt: now,
+        reason: record.text,
+      };
+
+      setDailyNudgePointFlash(null);
+
+      return {
+        ...currentEconomy,
+        currentPoints: Math.max(0, currentEconomy.currentPoints - existingAward.points),
+        pointLedger: [...currentEconomy.pointLedger, reversalEntry],
+        pointAwards: {
+          ...currentEconomy.pointAwards,
+          [achievementKey]: {
+            ...existingAward,
+            active: false,
+            reversedAt: now,
+          },
+        },
+      };
+    });
+  };
+
   const toggleDailyNudgeCompletion = (dateKey: string) => {
+    const selectedRecord = dailyNudgeRecords[dateKey];
+
+    if (!selectedRecord) {
+      return;
+    }
+
+    const nextCompleted = !selectedRecord.completed;
+
+    applyPointChangeForDailyNudge(dateKey, nextCompleted, selectedRecord);
+
     setDailyNudgeRecords((currentRecords) => {
       const currentRecord = currentRecords[dateKey];
 
@@ -2961,12 +3189,17 @@ function App() {
         return currentRecords;
       }
 
+      const celebrationMessage =
+        currentRecord.celebrationMessage ??
+        getDailyNudgeCelebrationMessage(dateKey, currentRecord.candidateId);
+
       return {
         ...currentRecords,
         [dateKey]: {
           ...currentRecord,
-          completed: !currentRecord.completed,
-          completedAt: currentRecord.completed ? undefined : new Date().toISOString(),
+          completed: nextCompleted,
+          celebrationMessage,
+          completedAt: nextCompleted ? new Date().toISOString() : undefined,
         },
       };
     });
@@ -4284,6 +4517,7 @@ function App() {
   return (
     <main
       className="app"
+      data-page={page}
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
       <div className="app-content">
@@ -4526,6 +4760,7 @@ function App() {
                     ['normal', '通常クエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
+                    ['dailyNudge', '今日のひとおし'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
                     <div className="admin-point-target-row" key={targetKind}>
                       <label>
@@ -4612,6 +4847,8 @@ function App() {
                       <li>累計星によるランク計算</li>
                       <li>ランクによるPT倍率</li>
                       <li>PTおよびランクの表示</li>
+                      <li>今日のひとおし完了によるPT獲得</li>
+                      <li>今日のひとおし連続記録</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
                       <li>PTによるクエスト枠購入</li>
@@ -4921,6 +5158,9 @@ function App() {
           {page === 'today' && (
             <section
               className="daily-nudge-card daily-nudge-inline"
+              data-celebrating={
+                dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
+              }
               data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
               aria-label="今日のひとおし"
             >
@@ -4932,19 +5172,36 @@ function App() {
                     <p>{selectedDailyNudgeRecord.category}</p>
                   )}
                 </div>
+                <p className="daily-nudge-streak">
+                  {selectedDailyNudgeStreak > 0
+                    ? `🔥 ${selectedDailyNudgeStreak}日連続`
+                    : '今日からスタート'}
+                </p>
               </div>
               {selectedDailyNudgeRecord ? (
                 <>
                   <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
                   <div className="daily-nudge-actions">
-                    <button
-                      onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
-                      type="button"
-                    >
-                      {selectedDailyNudgeRecord.completed ? '完了を取り消す' : '完了'}
-                    </button>
+                    {selectedDailyNudgeRecord.completed ? (
+                      <span className="daily-nudge-win-label">今日の勝ち！</span>
+                    ) : (
+                      <button
+                        onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                        type="button"
+                      >
+                        OK
+                      </button>
+                    )}
+                    {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
+                      <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
+                        +{dailyNudgePointFlash.points}PT
+                      </span>
+                    )}
                     {selectedDailyNudgeRecord.completed && (
-                      <p>{selectedDailyNudgeRecord.completionMessage}</p>
+                      <p className="daily-nudge-celebration">
+                        {selectedDailyNudgeRecord.celebrationMessage ??
+                          selectedDailyNudgeRecord.completionMessage}
+                      </p>
                     )}
                   </div>
                 </>
@@ -5376,18 +5633,25 @@ function App() {
         )}
 
         {page === 'today' && !isEditMode && (
-          <section className="daily-memo" aria-label={isToday ? '今日のメモ' : '昨日のメモ'}>
-            <label htmlFor="daily-memo">
-              📝 {isToday ? '今日のメモ' : '昨日のメモ'}
-            </label>
+          <section className="daily-memo" aria-label={dailyOneLineLabel}>
+            <div className="daily-memo-heading">
+              <label htmlFor="daily-memo">
+                📝 {dailyOneLineLabel}
+              </label>
+              <p className="daily-memo-question">
+                <span aria-hidden="true">💭</span>
+                {dailyOneLinePrompt.text}
+              </p>
+              <p className="daily-memo-hint">問いはきっかけ。別のことを書いてもOK。</p>
+            </div>
             <textarea
               id="daily-memo"
               onChange={(event) => {
                 setDailyMemoDateKey(selectedDateKey);
                 setDailyMemo(event.target.value);
               }}
-              placeholder="ひとことメモを書く"
-              rows={3}
+              placeholder="ひとこと書いてみよう"
+              rows={2}
               value={dailyMemo}
             />
           </section>
@@ -5457,18 +5721,22 @@ function App() {
                     }}
                     type="button"
                   >
-                    <span className="calendar-day-number">{day.day}</span>
-                    {day.routineKind === 'custom' && (
-                      <span className="calendar-day-kind" aria-label="個別カスタム">
-                        ✨
+                    <span className="calendar-date-header">
+                      <span className="calendar-day-number">{day.day}</span>
+                      {day.routineKind === 'custom' && (
+                        <span className="calendar-day-kind" aria-label="個別カスタム">
+                          ✨
+                        </span>
+                      )}
+                      <span className="calendar-day-rate">
+                        {day.rate && day.rate > 0 ? day.rankLabel : ''}
                       </span>
-                    )}
-                    <span className="calendar-day-rate">
-                      {day.rate && day.rate > 0 ? day.rankLabel : ''}
                     </span>
-                    <span className="calendar-stamp-slot" aria-hidden="true" />
-                    <span className="calendar-day-rank" aria-hidden="true">
-                      {day.rate && day.rate > 0 ? day.rankIcon : ''}
+                    <span className="calendar-stamp-visual">
+                      <span className="calendar-stamp-slot" aria-hidden="true" />
+                      <span className="calendar-day-rank" aria-hidden="true">
+                        {day.rate && day.rate > 0 ? day.rankIcon : ''}
+                      </span>
                     </span>
                   </button>
                 );
