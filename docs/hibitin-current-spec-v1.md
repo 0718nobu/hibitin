@@ -530,6 +530,8 @@ type RoutineSection = {
 | 6 | 80 | 1.50 |
 | 7 | 120 | 1.75 |
 
+保存済みのRank条件は `normalizeRankRules()` で読み込み時・保存時に正規化されます。Rank 1は累計スター0個、Rank 2は最低でも累計スター5個が必要で、Rank 2が5個未満で成立する保存値は補正されます。Rank 3以降も必要累計スターが昇順になるよう補正されます。
+
 表示:
 
 - 今日タブ上部に Rank、所持PT、倍率
@@ -688,6 +690,7 @@ type ShopItem = {
 
 - `normalizeGameBalanceSettings()` で保存時・読み込み時に正規化
 - 数値は概ね `Math.max` と `Math.floor` で補正
+- Rank条件は `normalizeRankRules()` で補正され、Rank 1は0★、Rank 2は最低5★、Rank 3以降は昇順を維持
 - Rank倍率は `0.1` 以上
 
 `日替わりクエスト管理` はゲームバランス設定とは別の開発者向け設定ブロックです。既に割り当て済みの日付記録は `hibitin:dailyNudgeRecords:v1` 側に文章ごと保存されるため、候補編集・削除の影響を受けません。

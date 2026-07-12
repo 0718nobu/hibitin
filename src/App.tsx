@@ -161,6 +161,12 @@ type PointToast = {
   itemLabel: string;
 };
 
+type QuestEmote = {
+  id: string;
+  message: string;
+  points: number | null;
+};
+
 type ExchangeToast = {
   id: string;
   message: string;
@@ -227,6 +233,24 @@ type NoteEditorTarget = {
   dateKey: string;
   itemId: string;
 };
+
+const questCompletionEmotes = [
+  'ナイス！',
+  'よし！',
+  '一歩！',
+  'クリア！',
+  'いい感じ。',
+  '積んだ！',
+  '前進。',
+  'やった。',
+  'その調子。',
+  '今日も一つ。',
+  '小さく勝ち。',
+  'グッジョブ。',
+  'ひとつ完了。',
+  '一歩いただき。',
+  'ちゃんと進んだ。',
+];
 
 type TimerStatus = 'running' | 'paused' | 'finished';
 
@@ -1082,25 +1106,53 @@ const normalizePointSettings = (settings: unknown): PointSettings => {
 };
 
 const normalizeRankRules = (rules: unknown): RankRule[] => {
-  if (!Array.isArray(rules)) {
-    return defaultRankRules;
-  }
+  const parsedRules = Array.isArray(rules)
+    ? rules
+      .map((rule) => ({
+        rank: Math.floor(Number(rule?.rank)),
+        requiredLifetimeStars: Math.floor(Number(rule?.requiredLifetimeStars)),
+        pointMultiplier: Number(rule?.pointMultiplier),
+      }))
+      .filter((rule) => (
+        Number.isFinite(rule.rank) &&
+        Number.isFinite(rule.requiredLifetimeStars) &&
+        Number.isFinite(rule.pointMultiplier) &&
+        rule.rank >= 1 &&
+        rule.requiredLifetimeStars >= 0 &&
+        rule.pointMultiplier > 0
+      ))
+    : [];
 
-  const normalizedRules = rules
-    .map((rule) => ({
-      rank: Number(rule?.rank),
-      requiredLifetimeStars: Number(rule?.requiredLifetimeStars),
-      pointMultiplier: Number(rule?.pointMultiplier),
-    }))
-    .filter((rule) => (
-      Number.isFinite(rule.rank) &&
-      Number.isFinite(rule.requiredLifetimeStars) &&
-      Number.isFinite(rule.pointMultiplier) &&
-      rule.rank >= 1 &&
-      rule.requiredLifetimeStars >= 0 &&
-      rule.pointMultiplier > 0
-    ))
-    .sort((first, second) => first.requiredLifetimeStars - second.requiredLifetimeStars);
+  const rulesByRank = new Map(defaultRankRules.map((rule) => [rule.rank, rule]));
+
+  parsedRules.forEach((rule) => {
+    rulesByRank.set(rule.rank, rule);
+  });
+
+  const normalizedRules: RankRule[] = [];
+  let previousRequiredLifetimeStars = 0;
+
+  Array.from(rulesByRank.values())
+    .sort((first, second) => first.rank - second.rank)
+    .forEach((rule) => {
+      let requiredLifetimeStars = rule.requiredLifetimeStars;
+
+      if (rule.rank === 1) {
+        requiredLifetimeStars = 0;
+      } else {
+        requiredLifetimeStars = Math.max(
+          requiredLifetimeStars,
+          rule.rank === 2 ? 5 : previousRequiredLifetimeStars + 1,
+        );
+      }
+
+      normalizedRules.push({
+        rank: rule.rank,
+        requiredLifetimeStars,
+        pointMultiplier: Math.max(0.1, rule.pointMultiplier),
+      });
+      previousRequiredLifetimeStars = requiredLifetimeStars;
+    });
 
   return normalizedRules.length > 0 ? normalizedRules : defaultRankRules;
 };
@@ -1431,6 +1483,172 @@ const getDateKey = (date: Date) => {
   const day = String(date.getDate()).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
+};
+
+const weekdayShortLabels = ['日', '月', '火', '水', '木', '金', '土'];
+
+const getNthMondayDate = (year: number, monthIndex: number, nth: number) => {
+  const firstDate = new Date(year, monthIndex, 1);
+  const firstMondayOffset = (8 - firstDate.getDay()) % 7;
+
+  return 1 + firstMondayOffset + (nth - 1) * 7;
+};
+
+const getVernalEquinoxDay = (year: number) => {
+  if (year <= 1979) {
+    return Math.floor(20.8357 + 0.242194 * (year - 1980) - Math.floor((year - 1983) / 4));
+  }
+
+  return Math.floor(20.8431 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+};
+
+const getAutumnalEquinoxDay = (year: number) => {
+  if (year <= 1979) {
+    return Math.floor(23.2588 + 0.242194 * (year - 1980) - Math.floor((year - 1983) / 4));
+  }
+
+  return Math.floor(23.2488 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+};
+
+const setHoliday = (
+  holidays: Map<string, string>,
+  year: number,
+  monthIndex: number,
+  day: number,
+  name: string,
+) => {
+  holidays.set(getDateKey(new Date(year, monthIndex, day)), name);
+};
+
+const getJapaneseNationalHolidayMap = (year: number) => {
+  const holidays = new Map<string, string>();
+
+  setHoliday(holidays, year, 0, 1, '元日');
+  setHoliday(
+    holidays,
+    year,
+    0,
+    year >= 2000 ? getNthMondayDate(year, 0, 2) : 15,
+    '成人の日',
+  );
+  if (year >= 1967) {
+    setHoliday(holidays, year, 1, 11, '建国記念の日');
+  }
+  if (year >= 2020) {
+    setHoliday(holidays, year, 1, 23, '天皇誕生日');
+  } else if (year >= 1989 && year <= 2018) {
+    setHoliday(holidays, year, 11, 23, '天皇誕生日');
+  }
+  setHoliday(holidays, year, 2, getVernalEquinoxDay(year), '春分の日');
+  setHoliday(holidays, year, 3, 29, '昭和の日');
+  setHoliday(holidays, year, 4, 3, '憲法記念日');
+  setHoliday(holidays, year, 4, 4, 'みどりの日');
+  setHoliday(holidays, year, 4, 5, 'こどもの日');
+
+  if (year === 2020) {
+    setHoliday(holidays, year, 6, 23, '海の日');
+  } else if (year === 2021) {
+    setHoliday(holidays, year, 6, 22, '海の日');
+  } else if (year >= 2003) {
+    setHoliday(holidays, year, 6, getNthMondayDate(year, 6, 3), '海の日');
+  } else if (year >= 1996) {
+    setHoliday(holidays, year, 6, 20, '海の日');
+  }
+
+  if (year === 2020) {
+    setHoliday(holidays, year, 7, 10, '山の日');
+  } else if (year === 2021) {
+    setHoliday(holidays, year, 7, 8, '山の日');
+  } else if (year >= 2016) {
+    setHoliday(holidays, year, 7, 11, '山の日');
+  }
+
+  setHoliday(
+    holidays,
+    year,
+    8,
+    year >= 2003 ? getNthMondayDate(year, 8, 3) : 15,
+    '敬老の日',
+  );
+  setHoliday(holidays, year, 8, getAutumnalEquinoxDay(year), '秋分の日');
+
+  if (year === 2020) {
+    setHoliday(holidays, year, 6, 24, 'スポーツの日');
+  } else if (year === 2021) {
+    setHoliday(holidays, year, 6, 23, 'スポーツの日');
+  } else {
+    setHoliday(
+      holidays,
+      year,
+      9,
+      year >= 2000 ? getNthMondayDate(year, 9, 2) : 10,
+      year >= 2020 ? 'スポーツの日' : '体育の日',
+    );
+  }
+
+  setHoliday(holidays, year, 10, 3, '文化の日');
+  setHoliday(holidays, year, 10, 23, '勤労感謝の日');
+
+  if (year === 2019) {
+    setHoliday(holidays, year, 4, 1, '即位の日');
+    setHoliday(holidays, year, 9, 22, '即位礼正殿の儀');
+  }
+
+  for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+    for (let day = 2; day < daysInMonth; day += 1) {
+      const dateKey = getDateKey(new Date(year, monthIndex, day));
+      const previousDateKey = getDateKey(new Date(year, monthIndex, day - 1));
+      const nextDateKey = getDateKey(new Date(year, monthIndex, day + 1));
+
+      if (!holidays.has(dateKey) && holidays.has(previousDateKey) && holidays.has(nextDateKey)) {
+        holidays.set(dateKey, '国民の休日');
+      }
+    }
+  }
+
+  Array.from(holidays.entries())
+    .sort(([firstDateKey], [secondDateKey]) => firstDateKey.localeCompare(secondDateKey))
+    .forEach(([dateKey]) => {
+      const holidayDate = getDateFromKey(dateKey);
+
+      if (holidayDate.getDay() !== 0) {
+        return;
+      }
+
+      let substituteDate = new Date(
+        holidayDate.getFullYear(),
+        holidayDate.getMonth(),
+        holidayDate.getDate() + 1,
+      );
+
+      while (holidays.has(getDateKey(substituteDate))) {
+        substituteDate = new Date(
+          substituteDate.getFullYear(),
+          substituteDate.getMonth(),
+          substituteDate.getDate() + 1,
+        );
+      }
+
+      holidays.set(getDateKey(substituteDate), '振替休日');
+    });
+
+  return holidays;
+};
+
+const getHolidayName = (date: Date) =>
+  getJapaneseNationalHolidayMap(date.getFullYear()).get(getDateKey(date)) ?? '';
+
+const formatQuestDateLabel = (date: Date) => {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const weekday = weekdayShortLabels[date.getDay()];
+  const holidayName = getHolidayName(date);
+  const weekdayLabel = holidayName ? `${weekday}・${holidayName}` : `${weekday}曜日`;
+
+  return `${year}年${month}月${day}日（${weekdayLabel}）`;
 };
 
 const getStableStringHash = (value: string) =>
@@ -2333,6 +2551,7 @@ function App() {
   const initialTimerStateRef = useRef<StoredTimerState | null>(null);
   const alertedFinishedTimerIdRef = useRef<string | null>(null);
   const exchangeLockRef = useRef(false);
+  const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -2347,9 +2566,9 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const selectedDateKey = getDateKey(selectedDate);
-  const questDateLabel = questDateFormatter.format(selectedDate);
+  const questDateLabel = formatQuestDateLabel(selectedDate);
   const historySelectedDateKey = historySelectedDate ? getDateKey(historySelectedDate) : '';
-  const historyDateLabel = historySelectedDate ? questDateFormatter.format(historySelectedDate) : '';
+  const historyDateLabel = historySelectedDate ? formatQuestDateLabel(historySelectedDate) : '';
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const eventStorageKey = getDailyEventStorageKey(selectedDate);
@@ -2396,6 +2615,7 @@ function App() {
   const [pointToast, setPointToast] = useState<PointToast | null>(null);
   const [dailyNudgePointFlash, setDailyNudgePointFlash] = useState<PointToast | null>(null);
   const [exchangeToast, setExchangeToast] = useState<ExchangeToast | null>(null);
+  const [questEmotes, setQuestEmotes] = useState<Record<string, QuestEmote>>({});
   const [isRankPanelOpen, setIsRankPanelOpen] = useState(false);
   const [rhythmSettings, setRhythmSettings] = useState<RhythmSettings>(() =>
     loadRhythmSettings(),
@@ -3113,6 +3333,10 @@ function App() {
     if (backupDownloadUrlRef.current) {
       URL.revokeObjectURL(backupDownloadUrlRef.current);
     }
+
+    Object.values(questEmoteTimeoutsRef.current).forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
   }, []);
 
   const updateSectionsForTarget = (
@@ -3181,6 +3405,46 @@ function App() {
   };
 
   const getItemNote = (dateKey: string, itemId: string) => itemNotes[dateKey]?.[itemId] ?? '';
+
+  const getQuestEmoteKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
+
+  const triggerQuestEmote = (dateKey: string, itemId: string, points: number | null) => {
+    const emoteKey = getQuestEmoteKey(dateKey, itemId);
+    const currentTimeoutId = questEmoteTimeoutsRef.current[emoteKey];
+
+    if (currentTimeoutId) {
+      window.clearTimeout(currentTimeoutId);
+    }
+
+    const id = `${emoteKey}:${Date.now()}`;
+    const message =
+      questCompletionEmotes[Math.floor(Math.random() * questCompletionEmotes.length)];
+
+    setQuestEmotes((currentEmotes) => ({
+      ...currentEmotes,
+      [emoteKey]: {
+        id,
+        message,
+        points,
+      },
+    }));
+
+    questEmoteTimeoutsRef.current[emoteKey] = window.setTimeout(() => {
+      setQuestEmotes((currentEmotes) => {
+        if (currentEmotes[emoteKey]?.id !== id) {
+          return currentEmotes;
+        }
+
+        const nextEmotes = { ...currentEmotes };
+
+        delete nextEmotes[emoteKey];
+
+        return nextEmotes;
+      });
+
+      delete questEmoteTimeoutsRef.current[emoteKey];
+    }, 1100);
+  };
 
   const updateItemNote = (dateKey: string, itemId: string, note: string) => {
     setItemNotes((currentNotes) => {
@@ -3467,6 +3731,7 @@ function App() {
     nextChecked: boolean,
     sections: RoutineSection[],
   ) => {
+    let awardedPoints: number | null = null;
     const itemContext = findItemContext(itemId, sections);
     const pointTargetKind = itemContext
       ? getPointTargetKind(itemContext.item, itemContext.section.id)
@@ -3477,11 +3742,17 @@ function App() {
       !pointTargetKind ||
       !isPointEligibleItem(itemContext.item, itemContext.section.id, gameBalance)
     ) {
-      return;
+      return awardedPoints;
     }
 
     const achievementKey = getPointAchievementKey(dateKey, itemId);
     const now = new Date().toISOString();
+    const currentAward = playerEconomy.pointAwards[achievementKey];
+
+    if (nextChecked && !currentAward?.active) {
+      awardedPoints = currentAward?.points ??
+        calculateQuestPoints(gameBalance, playerRankProgress.multiplier, pointTargetKind);
+    }
 
     setPlayerEconomy((currentEconomy) => {
       const existingAward = currentEconomy.pointAwards[achievementKey];
@@ -3499,6 +3770,7 @@ function App() {
         const basePoints = existingAward?.basePoints ??
           gameBalance.pointSettings[pointTargetKind].basePoints;
         const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+        awardedPoints = points;
         const nextAward: PointAwardRecord = {
           achievementKey,
           dateKey,
@@ -3577,6 +3849,8 @@ function App() {
         },
       };
     });
+
+    return awardedPoints;
   };
 
   const toggleItem = (id: string) => {
@@ -3587,7 +3861,16 @@ function App() {
         [id]: nextChecked,
       };
 
-      applyPointChangeForItemCheck(selectedDateKey, id, nextChecked, displaySections);
+      const awardedPoints = applyPointChangeForItemCheck(
+        selectedDateKey,
+        id,
+        nextChecked,
+        displaySections,
+      );
+
+      if (nextChecked) {
+        triggerQuestEmote(selectedDateKey, id, awardedPoints);
+      }
 
       if (historySelectedDate && historySelectedDateKey === selectedDateKey) {
         setHistoryCheckedItems(nextChecks);
@@ -3609,7 +3892,16 @@ function App() {
         [id]: nextChecked,
       };
 
-      applyPointChangeForItemCheck(historySelectedDateKey, id, nextChecked, historyDisplaySections);
+      const awardedPoints = applyPointChangeForItemCheck(
+        historySelectedDateKey,
+        id,
+        nextChecked,
+        historyDisplaySections,
+      );
+
+      if (nextChecked) {
+        triggerQuestEmote(historySelectedDateKey, id, awardedPoints);
+      }
 
       localStorage.setItem(
         getChecksStorageKey(historySelectedDate),
@@ -5551,6 +5843,7 @@ function App() {
                   const isItemNoteOpen =
                     noteEditorTarget?.dateKey === selectedDateKey &&
                     noteEditorTarget.itemId === item.id;
+                  const questEmote = questEmotes[getQuestEmoteKey(selectedDateKey, item.id)];
 
                   return (
                     <div
@@ -5756,6 +6049,20 @@ function App() {
                         >
                           {itemNote.trim() ? '📝✨' : '📝'}
                         </button>
+                      )}
+                      {page === 'today' && itemNote.trim() && (
+                        <p className="item-note-preview">📝 {itemNote.trim()}</p>
+                      )}
+                      {questEmote && (
+                        <div className="quest-emote" key={questEmote.id} role="status">
+                          <span>{questEmote.message}</span>
+                          {questEmote.points !== null && questEmote.points > 0 && (
+                            <strong>+{questEmote.points}PT</strong>
+                          )}
+                          <i aria-hidden="true">✦</i>
+                          <i aria-hidden="true">✧</i>
+                          <i aria-hidden="true">✦</i>
+                        </div>
                       )}
                       {!isFixedItem && canEditSection && (
                         <button
@@ -6074,6 +6381,8 @@ function App() {
                         const isHistoryItemNoteOpen =
                           noteEditorTarget?.dateKey === historySelectedDateKey &&
                           noteEditorTarget.itemId === item.id;
+                        const historyQuestEmote =
+                          questEmotes[getQuestEmoteKey(historySelectedDateKey, item.id)];
 
                         return (
                         <div
@@ -6202,6 +6511,25 @@ function App() {
                           >
                             {historyItemNote.trim() ? '📝✨' : '📝'}
                           </button>
+                          {historyItemNote.trim() && (
+                            <p className="item-note-preview">📝 {historyItemNote.trim()}</p>
+                          )}
+                          {historyQuestEmote && (
+                            <div
+                              className="quest-emote history-quest-emote"
+                              key={historyQuestEmote.id}
+                              role="status"
+                            >
+                              <span>{historyQuestEmote.message}</span>
+                              {historyQuestEmote.points !== null &&
+                                historyQuestEmote.points > 0 && (
+                                <strong>+{historyQuestEmote.points}PT</strong>
+                              )}
+                              <i aria-hidden="true">✦</i>
+                              <i aria-hidden="true">✧</i>
+                              <i aria-hidden="true">✦</i>
+                            </div>
+                          )}
                           {!isFixedItem && isHistoryEditMode && (
                             <button
                               aria-label={`${item.label}を削除`}
