@@ -175,6 +175,27 @@ h1 {
   color: #9aae9f;
 }
 
+.rank-status-routines {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: #426454;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.rank-status-routines span {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgb(0 128 82 / 12%);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgb(255 255 255 / 56%);
+  white-space: nowrap;
+}
+
 .rank-status-earned {
   grid-column: 1;
   display: inline-flex;
@@ -195,7 +216,7 @@ h1 {
 }
 
 .rank-status-caret {
-  grid-row: 1 / span 4;
+  grid-row: 1 / span 5;
   grid-column: 2;
   color: #4d806a;
   font-size: 0.76rem;
@@ -3953,6 +3974,79 @@ h1 {
 .routine-list[data-progress-level='perfect'] .routine-item,
 .routine-list[data-progress-level='perfect'] .routine-item[data-fixed='true'] {
   background: rgb(255 255 255 / 84%);
+}
+
+.routine-item[data-core-routine='true'],
+.history-routine-item[data-core-routine='true'] {
+  cursor: pointer;
+}
+
+.routine-item[data-core-routine='true'] {
+  border: 1px solid rgb(139 184 122 / 24%);
+  background:
+    linear-gradient(90deg, rgb(255 250 224 / 56%), rgb(255 255 255 / 68%)),
+    rgb(255 255 255 / 62%);
+}
+
+.routine-item[data-core-routine='true'][data-checked='true'] {
+  border-color: rgb(34 168 109 / 26%);
+  background:
+    linear-gradient(90deg, rgb(40 180 113 / 18%), rgb(255 255 255 / 72%)),
+    #f4fff8;
+}
+
+.core-routine-name {
+  display: grid;
+  gap: 3px;
+}
+
+.core-routine-name .routine-name-button,
+.core-routine-name .history-routine-name-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.core-routine-mini-badge {
+  width: fit-content;
+  border: 1px solid rgb(137 184 106 / 22%);
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: rgb(255 248 222 / 72%);
+  color: #6f7b5e;
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.routine-item[data-core-routine='true'][data-checked='true'] .core-routine-mini-badge,
+.history-routine-item[data-core-routine='true'][data-checked='true'] .core-routine-mini-badge {
+  border-color: rgb(34 168 109 / 22%);
+  background: rgb(232 255 242 / 78%);
+  color: #1f7a5a;
+}
+
+.core-routine-section-select {
+  display: inline-grid;
+  flex: 0 0 auto;
+  gap: 3px;
+  color: #637267;
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+.core-routine-section-select select {
+  min-height: 28px;
+  border: 1px solid #c8d6cf;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #25483a;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .routine-item[draggable='true'] {

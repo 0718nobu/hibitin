@@ -86,9 +86,9 @@ type PageName = 'today' | 'history' | 'achievements' | 'shop' | 'settings';
 
 - チェック操作は達成率、スタンプ帳、PT、実績の熟練度計算に影響します。
 - アドバンストはチェック可能ですが、達成率と熟練度の対象外です。
-- アドバンストはボーナスログ扱いで、通常クエスト枠の制限を受けず自由に追加できます。
+- アドバンストはボーナスログ扱いで、フリークエスト枠の制限を受けず自由に追加できます。
 - 起床・就寝は達成率とPT対象です。ただし熟練度の対象外です。
-- 日替わりクエストは通常ルーティンとは独立し、達成率、熟練度、通常クエスト枠、スタンプ帳ランクには影響しません。PTは `gameBalance.pointSettings.dailyNudge` が有効な場合のみ付与されます。
+- 日替わりクエストはフリークエストとは独立し、達成率、熟練度、フリークエスト枠、スタンプ帳ランクには影響しません。PTは `gameBalance.pointSettings.dailyNudge` が有効な場合のみ付与されます。
 
 ### スタンプ帳
 
@@ -147,8 +147,8 @@ type PageName = 'today' | 'history' | 'achievements' | 'shop' | 'settings';
 表示内容:
 
 - 所持PT
-- 商品カテゴリ: クエスト枠、機能、カスタマイズ、アイテム、ガチャ
-- 実装済み商品: `クエスト枠 +1`
+- 商品カテゴリ: フリークエスト枠、機能、カスタマイズ、アイテム、ガチャ
+- 実装済み商品: `フリークエスト枠 +1`
 - 他カテゴリは準備中
 
 主なstate:
@@ -255,7 +255,7 @@ type RoutineSection = {
 - 就寝: 22:30
 - 1日の始まり: 朝
 
-初期通常クエスト:
+初期フリークエスト:
 
 | セクション | アイテムID | 表示名 | タイマー | source |
 |---|---|---|---:|---|
@@ -411,6 +411,23 @@ type RoutineSection = {
 - 自動保存
 - 達成率、PT、星、トロフィー、ランク、スタンプ帳ランクには影響しない
 
+コアルーティン「今日を残す」:
+
+- Phase3で追加された、フリークエストとはデータ上分離された固定クエスト表示です。
+- 定義は `src/coreRoutines.ts` の `coreRoutineDefinitions`。
+- 対象は `今日を一言で残す` と `今日のできごとを残す`。
+- 達成状態は `hibitin:memo:YYYY-MM-DD` と `hibitin:events:YYYY-MM-DD` の本文から `trim().length > 0` で導出します。
+- コアルーティン専用のboolean保存キーはありません。
+- 配置保存キーは `hibitin:coreRoutinePlacements:v1` です。本文ではなく、表示する時間帯と順番だけを保存します。
+- Today画面では、フリークエストと同じ行デザインで朝・昼・夕・夜の一覧内に表示します。
+- 初期配置は `今日を一言で残す` が朝、`今日のできごとを残す` が夜です。
+- Today編集モードでは、コアルーティンの時間帯変更と同一セクション内の並び替えができます。
+- 名称変更、削除、アーカイブ、タイマー設定、メモ設定はできません。
+- スタンプ帳詳細では、該当する時間帯の一覧内で状態を表示します。
+- タップすると対応する記録入力欄へスクロールし、フォーカスします。
+- フリークエスト枠、達成率、FIRST/PERFECT判定、PT、星、トロフィー、アーカイブ、テンプレート編集には影響しません。
+- 未来日は本文が存在しても達成扱いにしません。
+
 アイテム別メモ:
 
 - 保存キー: `hibitin:itemNotes:v1`
@@ -430,7 +447,7 @@ type RoutineSection = {
 
 ## 8.1 本日の日替わりクエスト
 
-通常ルーティンとは独立した、日付ごとの小さな提案機能です。
+フリークエストとは独立した、日付ごとの小さな提案機能です。
 
 内部型名と保存キーは既存互換のため `dailyNudge` のままです。
 
@@ -458,7 +475,7 @@ type RoutineSection = {
 完了:
 
 - `toggleDailyNudgeCompletion()` でON/OFFします。
-- 通常ルーティンの `toggleItem()` は使いません。
+- フリークエストの `toggleItem()` は使いません。
 - 達成率、星、トロフィー、ショップ、スタンプ帳には影響しません。
 - PTは `pointSettings.dailyNudge.enabled` が有効な場合のみ付与され、付与記録は `pointAwards` で日付ごとに二重取得を防ぎます。
 
@@ -567,7 +584,7 @@ PT対象:
 | 対象 | targetKind | 初期enabled | 初期basePoints |
 |---|---|---:|---:|
 | 起床 | wake | true | 5 |
-| 朝・昼・夕・夜の通常クエスト | normal | true | 10 |
+| 朝・昼・夕・夜のフリークエスト | normal | true | 10 |
 | 就寝 | sleep | true | 5 |
 | アドバンスト | advanced | false | 0 |
 
@@ -594,7 +611,7 @@ PT対象:
 
 カテゴリ:
 
-- クエスト枠
+- フリークエスト枠
 - 機能
 - カスタマイズ
 - アイテム
@@ -602,7 +619,7 @@ PT対象:
 
 実装済み商品:
 
-- `クエスト枠 +1`
+- `フリークエスト枠 +1`
 
 商品構造:
 
@@ -617,7 +634,7 @@ type ShopItem = {
 };
 ```
 
-クエスト枠:
+フリークエスト枠:
 
 - 保存キー: `hibitin:playerUnlocks:v2`
 - 構造: `{ totalQuestSlots: number }`
@@ -651,12 +668,12 @@ type ShopItem = {
 
 違い:
 
-- プレイヤーモード: 通常クエスト合計枠制限あり。ショップで枠を増やします。
+- プレイヤーモード: フリークエスト合計枠制限あり。ショップで枠を増やします。
 - 開発者モード: 枠制限なし。ゲームバランス設定が表示されます。
 
 制限:
 
-- `countNormalQuestItems()` が朝・昼・夕・夜の通常アイテムを合計
+- `countFreeQuestItems()` が朝・昼・夕・夜のフリークエストを合計
 - `getEffectiveQuestSlotLimit()` が `playerUnlocks` と `gameBalance.questSlotExchange` から有効上限を計算
 - 追加時と追加ボタン表示時に判定
 
@@ -674,13 +691,13 @@ type ShopItem = {
 | 星・トロフィー条件 | コード固定 | 表示のみ | `MASTERY_RULES`, `TROPHY_RULES` |
 | 丸め方 | `gameBalance.pointSettings.rounding` | PT計算に連動 | round |
 | 起床 基礎PT/対象 | `pointSettings.wake` | PT付与に連動 | enabled true, 5 |
-| 通常クエスト 基礎PT/対象 | `pointSettings.normal` | PT付与に連動 | enabled true, 10 |
+| フリークエスト 基礎PT/対象 | `pointSettings.normal` | PT付与に連動 | enabled true, 10 |
 | 就寝 基礎PT/対象 | `pointSettings.sleep` | PT付与に連動 | enabled true, 5 |
 | アドバンスト 基礎PT/対象 | `pointSettings.advanced` | PT付与に連動 | enabled false, 0 |
 | Rank | `rankRules[].rank` | ランク表示に連動 | 1〜7 |
 | 必要累計★ | `rankRules[].requiredLifetimeStars` | ランク算出に連動 | 0,5,15,30,50,80,120 |
 | PT倍率 | `rankRules[].pointMultiplier` | PT計算に連動 | 1.00〜1.75 |
-| クエスト枠販売 | `questSlotExchange.enabled` | ショップ購入可否に連動 | true |
+| フリークエスト枠販売 | `questSlotExchange.enabled` | ショップ購入可否に連動 | true |
 | 初期合計枠数 | `questSlotExchange.initialTotalSlots` | 有効枠下限に連動 | 4 |
 | 最大合計枠数 | `questSlotExchange.maxTotalSlots` | 有効枠上限/ショップ上限に連動 | 10 |
 | 価格 | `questSlotExchange.price` | ショップ購入額に連動 | 100 |
@@ -815,7 +832,7 @@ Service Worker:
 - PT獲得/取消/二重取得防止
 - プレイヤーランク/PT倍率
 - ショップタブ
-- 合計クエスト枠 +1 購入
+- 合計フリークエスト枠 +1 購入
 - プレイヤーモード/開発者モード
 - ゲームバランス設定
 - バックアップ/復元/初期化
@@ -826,7 +843,7 @@ Service Worker:
 - `MasteryStats` 型に `totalCompletions` が重複定義されています。TypeScript上は同一型なのでビルドは通っていますが整理対象です。
 - `dateSnapshots` は表示時に自動保存されるため、localStorage増加リスクがあります。
 - バックアップ復元の必須キー条件により、旧バックアップ互換は限定的です。
-- 通常クエスト枠のv1→v2移行は「旧各時間帯枠の購入分を合計」する方式です。過去の購入履歴からの厳密復元ではありません。
+- フリークエスト枠のv1→v2移行は「旧各時間帯枠の購入分を合計」する方式です。過去の購入履歴からの厳密復元ではありません。
 
 ### 未実装
 

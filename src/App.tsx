@@ -1,4 +1,13 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  defaultCoreRoutinePlacements,
+  coreRoutineDefinitions,
+  getCoreRoutineCompletion,
+  type CoreRoutineDefinition,
+  type CoreRoutineId,
+  type CoreRoutineKind,
+  type CoreRoutinePlacements,
+} from './coreRoutines';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
@@ -234,6 +243,20 @@ type NoteEditorTarget = {
   itemId: string;
 };
 
+type RoutineRenderEntry =
+  | {
+      kind: 'routine';
+      key: string;
+      order: number;
+      item: RoutineItem;
+    }
+  | {
+      kind: 'core';
+      key: string;
+      order: number;
+      coreRoutine: CoreRoutineDefinition;
+    };
+
 const questCompletionEmotes = [
   'ナイス！',
   'よし！',
@@ -316,6 +339,7 @@ const DATE_OVERRIDES_STORAGE_KEY = 'hibitin:dateOverrides:v1';
 const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
 const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
+const CORE_ROUTINE_PLACEMENTS_STORAGE_KEY = 'hibitin:coreRoutinePlacements:v1';
 const DAILY_NUDGE_CANDIDATES_STORAGE_KEY = 'hibitin:dailyNudgeCandidates:v1';
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
@@ -412,7 +436,7 @@ const sectionIconLabels: Record<string, string> = {
 };
 
 const shopCategoryLabels: Record<ShopCategory, string> = {
-  questSlot: 'クエスト枠',
+  questSlot: 'フリークエスト枠',
   feature: '機能',
   customize: 'カスタマイズ',
   item: 'アイテム',
@@ -662,12 +686,6 @@ const removeFixedRoutineItems = (sections: RoutineSection[]) =>
     items: section.items.filter((item) => !fixedRoutineIds.has(item.id)),
   }));
 
-const normalizeItemOrders = (items: RoutineItem[]) =>
-  items.map((item, index) => ({
-    ...item,
-    order: (index + 1) * 10,
-  }));
-
 const createDefaultSettings = (): RoutineTemplateSettings => ({
   templates: {
     normal: copySections(defaultRoutineSections),
@@ -808,6 +826,52 @@ const loadItemNotes = (): ItemNotes => {
     ) as ItemNotes;
   } catch {
     return {};
+  }
+};
+
+const normalizeCoreRoutinePlacements = (value: unknown): CoreRoutinePlacements => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ...defaultCoreRoutinePlacements };
+  }
+
+  const parsedPlacements = value as Partial<Record<CoreRoutineId, Partial<{
+    sectionId: unknown;
+    order: unknown;
+  }>>>;
+
+  return Object.fromEntries(
+    coreRoutineDefinitions.map((definition) => {
+      const defaultPlacement = defaultCoreRoutinePlacements[definition.id];
+      const parsedPlacement = parsedPlacements[definition.id];
+      const sectionId = isStartSection(parsedPlacement?.sectionId)
+        ? parsedPlacement.sectionId
+        : defaultPlacement.sectionId;
+      const order = Number.isFinite(Number(parsedPlacement?.order))
+        ? Number(parsedPlacement?.order)
+        : defaultPlacement.order;
+
+      return [
+        definition.id,
+        {
+          sectionId,
+          order,
+        },
+      ];
+    }),
+  ) as CoreRoutinePlacements;
+};
+
+const loadCoreRoutinePlacements = () => {
+  const savedPlacements = localStorage.getItem(CORE_ROUTINE_PLACEMENTS_STORAGE_KEY);
+
+  if (!savedPlacements) {
+    return { ...defaultCoreRoutinePlacements };
+  }
+
+  try {
+    return normalizeCoreRoutinePlacements(JSON.parse(savedPlacements) as unknown);
+  } catch {
+    return { ...defaultCoreRoutinePlacements };
   }
 };
 
@@ -1027,12 +1091,14 @@ const getEffectiveQuestSlotLimit = (
   );
 };
 
-const countNormalQuestItems = (sections: RoutineSection[]) =>
+const countFreeQuestItems = (sections: RoutineSection[]) =>
   sections
     .filter((section) => dailySectionIds.includes(section.id as StartSection))
     .reduce((total, section) =>
       total + section.items.filter((item) => !item.fixedKind).length,
     0);
+
+const countCoreRoutineItems = () => fixedRoutineIds.size + coreRoutineDefinitions.length;
 
 const normalizePointSettings = (settings: unknown): PointSettings => {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
@@ -2352,7 +2418,7 @@ const formatMasteryStars = (starCount: number, trophyCount = 0) => {
 };
 
 const getMasteryAdminRuleText = () => [
-  '対象：朝・昼・夕・夜の通常ルーティン',
+  '対象：朝・昼・夕・夜のフリークエスト',
   `星1〜3：${MASTERY_RULES.earlyStarStreakDays}日連続達成ごとに+1`,
   `星4：星3到達後、${MASTERY_RULES.fourthStarStreakDays}日連続達成で獲得`,
   `星5：星4到達後、${MASTERY_RULES.fifthStarStreakDays}日連続達成で獲得`,
@@ -2548,6 +2614,10 @@ function App() {
   const today = useMemo(() => new Date(), []);
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
+  const dailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyDailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyDailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTimerStateRef = useRef<StoredTimerState | null>(null);
   const alertedFinishedTimerIdRef = useRef<string | null>(null);
   const exchangeLockRef = useRef(false);
@@ -2586,6 +2656,9 @@ function App() {
     loadArchivedItems(),
   );
   const [itemNotes, setItemNotes] = useState<ItemNotes>(() => loadItemNotes());
+  const [coreRoutinePlacements, setCoreRoutinePlacements] = useState<CoreRoutinePlacements>(() =>
+    loadCoreRoutinePlacements(),
+  );
   const [dailyNudgeCandidates, setDailyNudgeCandidates] = useState<DailyNudgeCandidate[]>(() =>
     loadDailyNudgeCandidates(),
   );
@@ -2601,6 +2674,7 @@ function App() {
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
+  const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
@@ -2709,10 +2783,14 @@ function App() {
   const isCheckMode = page === 'today';
   const canEditRoutines = page === 'settings' || (page === 'today' && isEditMode);
   const totalQuestSlotLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
-  const usedQuestSlots = countNormalQuestItems(displaySections);
+  const usedQuestSlots = countFreeQuestItems(displaySections);
   const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
+  const coreRoutineCount = countCoreRoutineItems();
+  const freeQuestCount = countFreeQuestItems(displaySections);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
+  const selectedCoreRoutineCompletion = getCoreRoutineCompletion(dailyMemo, dailyEvent);
+  const selectedCoreRoutineCanComplete = selectedDateKey <= todayKey;
   const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
   const selectedDateVisualRank = getVisualProgressRank(
     selectedDateRank,
@@ -2774,6 +2852,13 @@ function App() {
     historyCheckedItems,
   );
   const historyDateRank = getCompletionRank(historyDateStats.rate);
+  const historyCoreRoutineCompletion = getCoreRoutineCompletion(
+    historyDailyMemo,
+    historyDailyEvent,
+  );
+  const historyCoreRoutineCanComplete = Boolean(
+    historySelectedDateKey && historySelectedDateKey <= todayKey,
+  );
   const masteryStats = useMemo(() => calculateMasteryStats(
     templateSettings,
     dateOverrides,
@@ -2948,6 +3033,13 @@ function App() {
   useEffect(() => {
     localStorage.setItem(ITEM_NOTES_STORAGE_KEY, JSON.stringify(itemNotes));
   }, [itemNotes]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      CORE_ROUTINE_PLACEMENTS_STORAGE_KEY,
+      JSON.stringify(coreRoutinePlacements),
+    );
+  }, [coreRoutinePlacements]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -4297,44 +4389,6 @@ function App() {
     setEditingLabel('');
   };
 
-  const reorderRoutineItem = (
-    sectionId: string,
-    draggedId: string,
-    targetId: string,
-  ) => {
-    if (draggedId === targetId) {
-      return;
-    }
-
-    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
-      currentSections.map((section) => {
-        if (section.id !== sectionId) {
-          return section;
-        }
-
-        const orderedItems = [...section.items].sort(
-          (first, second) => first.order - second.order,
-        );
-        const draggedIndex = orderedItems.findIndex((item) => item.id === draggedId);
-        const targetIndex = orderedItems.findIndex((item) => item.id === targetId);
-
-        if (draggedIndex === -1 || targetIndex === -1) {
-          return section;
-        }
-
-        const nextItems = [...orderedItems];
-        const [draggedItem] = nextItems.splice(draggedIndex, 1);
-
-        nextItems.splice(targetIndex, 0, draggedItem);
-
-        return {
-          ...section,
-          items: normalizeItemOrders(nextItems),
-        };
-      }),
-    );
-  };
-
   const toggleSortingSection = (sectionId: string) => {
     setSortingSectionId((currentSectionId) =>
       currentSectionId === sectionId ? null : sectionId,
@@ -4412,7 +4466,7 @@ function App() {
         getUpdateTargetForSection(sectionId),
         todayKey,
       );
-      const questCount = countNormalQuestItems(targetSections);
+      const questCount = countFreeQuestItems(targetSections);
       const questLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
 
       if (questCount >= questLimit) {
@@ -4873,7 +4927,7 @@ function App() {
     }
 
     const confirmed = window.confirm(
-      `${exchangeRule.price}PTを使って、クエスト枠を1つ増やしますか？`,
+      `${exchangeRule.price}PTを使って、フリークエスト枠を1つ増やしますか？`,
     );
 
     if (!confirmed) {
@@ -4882,7 +4936,7 @@ function App() {
 
     exchangeLockRef.current = true;
     const now = new Date().toISOString();
-    const reason = 'クエスト枠 +1';
+    const reason = 'フリークエスト枠 +1';
 
     setPlayerEconomy((currentEconomy) => {
       if (currentEconomy.currentPoints < exchangeRule.price) {
@@ -4927,7 +4981,7 @@ function App() {
     });
     setExchangeToast({
       id: `exchange-toast:quest-slot:${now}`,
-      message: `クエスト枠が${nextSlots}個に増えました！`,
+      message: `フリークエスト枠が${nextSlots}個に増えました！`,
     });
     window.setTimeout(() => {
       exchangeLockRef.current = false;
@@ -4936,12 +4990,12 @@ function App() {
 
   const isPlayerModeQuestLimitReached = (sections: RoutineSection[]) =>
     gameMode === 'player' &&
-    countNormalQuestItems(sections) >= getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
+    countFreeQuestItems(sections) >= getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
   const shopItems: ShopItem[] = [
     {
       id: 'quest-slot-total',
       category: 'questSlot',
-      label: 'クエスト枠 +1',
+      label: 'フリークエスト枠 +1',
       price: gameBalance.questSlotExchange.price,
       enabled: gameBalance.questSlotExchange.enabled,
       maxPurchases: Math.max(
@@ -4951,6 +5005,147 @@ function App() {
       ),
     },
   ];
+  const focusDailyRecordField = (
+    kind: CoreRoutineKind,
+    context: 'today' | 'history' = 'today',
+  ) => {
+    const targetRef =
+      context === 'history'
+        ? kind === 'memo'
+          ? historyDailyMemoTextareaRef
+          : historyDailyEventTextareaRef
+        : kind === 'memo'
+        ? dailyMemoTextareaRef
+        : dailyEventTextareaRef;
+
+    targetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => targetRef.current?.focus(), 240);
+  };
+  const getCoreRoutineEntryKey = (coreRoutineId: CoreRoutineId) => `core:${coreRoutineId}`;
+  const getSectionCoreRoutineEntries = (sectionId: string): RoutineRenderEntry[] =>
+    dailySectionIds.includes(sectionId as StartSection)
+      ? coreRoutineDefinitions
+        .filter((definition) => coreRoutinePlacements[definition.id]?.sectionId === sectionId)
+        .map((definition) => ({
+          kind: 'core' as const,
+          key: getCoreRoutineEntryKey(definition.id),
+          order: coreRoutinePlacements[definition.id]?.order ?? 9000,
+          coreRoutine: definition,
+        }))
+      : [];
+  const getMixedRoutineEntries = (
+    section: RoutineSection,
+    options: { includeCoreRoutines: boolean },
+  ): RoutineRenderEntry[] => [
+    ...section.items.map((item) => ({
+      kind: 'routine' as const,
+      key: item.id,
+      order: item.order,
+      item,
+    })),
+    ...(options.includeCoreRoutines ? getSectionCoreRoutineEntries(section.id) : []),
+  ].sort((first, second) => first.order - second.order);
+  const moveCoreRoutineToSection = (
+    coreRoutineId: CoreRoutineId,
+    nextSectionId: StartSection,
+  ) => {
+    setCoreRoutinePlacements((currentPlacements) => {
+      const sectionItems = displaySections.find((section) => section.id === nextSectionId)?.items ?? [];
+      const coreOrders = coreRoutineDefinitions
+        .filter((definition) =>
+          definition.id !== coreRoutineId &&
+          currentPlacements[definition.id]?.sectionId === nextSectionId,
+        )
+        .map((definition) => currentPlacements[definition.id]?.order ?? 0);
+      const nextOrder = Math.max(
+        0,
+        ...sectionItems.filter((item) => !item.fixedKind).map((item) => item.order),
+        ...coreOrders,
+      ) + 10;
+
+      return {
+        ...currentPlacements,
+        [coreRoutineId]: {
+          sectionId: nextSectionId,
+          order: nextOrder,
+        },
+      };
+    });
+  };
+  const reorderMixedRoutineEntry = (
+    sectionId: string,
+    draggedKey: string,
+    targetKey: string,
+  ) => {
+    if (draggedKey === targetKey || !dailySectionIds.includes(sectionId as StartSection)) {
+      return;
+    }
+
+    const currentSections = removeFixedRoutineItems(getSectionsForTarget(
+      templateSettings,
+      dateOverrides,
+      dateSnapshots,
+      getUpdateTargetForSection(sectionId),
+      todayKey,
+    ));
+    const section = currentSections.find((currentSection) => currentSection.id === sectionId);
+
+    if (!section) {
+      return;
+    }
+
+    const orderedEntries = getMixedRoutineEntries(section, { includeCoreRoutines: true });
+    const draggedIndex = orderedEntries.findIndex((entry) => entry.key === draggedKey);
+    const targetIndex = orderedEntries.findIndex((entry) => entry.key === targetKey);
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      return;
+    }
+
+    const nextEntries = [...orderedEntries];
+    const [draggedEntry] = nextEntries.splice(draggedIndex, 1);
+
+    nextEntries.splice(targetIndex, 0, draggedEntry);
+
+    const nextOrders = new Map(nextEntries.map((entry, index) => [
+      entry.key,
+      (index + 1) * 10,
+    ]));
+
+    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentTargetSections) =>
+      currentTargetSections.map((currentSection) => {
+        if (currentSection.id !== sectionId) {
+          return currentSection;
+        }
+
+        return {
+          ...currentSection,
+          items: currentSection.items.map((item) => ({
+            ...item,
+            order: nextOrders.get(item.id) ?? item.order,
+          })),
+        };
+      }),
+    );
+
+    setCoreRoutinePlacements((currentPlacements) => {
+      const nextPlacements = { ...currentPlacements };
+
+      coreRoutineDefinitions.forEach((definition) => {
+        const entryKey = getCoreRoutineEntryKey(definition.id);
+        const nextOrder = nextOrders.get(entryKey);
+
+        if (nextOrder !== undefined) {
+          nextPlacements[definition.id] = {
+            sectionId: sectionId as StartSection,
+            order: nextOrder,
+          };
+        }
+      });
+
+      return nextPlacements;
+    });
+  };
 
   const wakeRoutineItem = displaySections
     .flatMap((section) => section.items)
@@ -5047,6 +5242,10 @@ function App() {
                 所持 {playerEconomy.currentPoints}PT
                 <span aria-hidden="true">・</span>
                 ×{playerRankProgress.multiplier.toFixed(2)}
+              </span>
+              <span className="rank-status-routines" aria-label="ルーティン数">
+                <span>📜 コアルーティン {coreRoutineCount}個</span>
+                <span>🎯 フリークエスト {freeQuestCount}個</span>
               </span>
               <span
                 className="rank-status-earned"
@@ -5234,7 +5433,7 @@ function App() {
                 <div className="admin-point-targets">
                   {([
                     ['wake', '起床'],
-                    ['normal', '通常クエスト'],
+                    ['normal', 'フリークエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
                     ['dailyNudge', '本日の日替わりクエスト'],
@@ -5318,7 +5517,7 @@ function App() {
                   <div>
                     <h4>実装済み</h4>
                     <ul>
-                      <li>通常クエスト完了によるPT獲得</li>
+                      <li>フリークエスト完了によるPT獲得</li>
                       <li>チェック解除によるPT取消</li>
                       <li>二重獲得防止</li>
                       <li>累計星によるランク計算</li>
@@ -5328,7 +5527,7 @@ function App() {
                       <li>本日の日替わりクエスト連続記録</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
-                      <li>PTによるクエスト枠購入</li>
+                      <li>PTによるフリークエスト枠購入</li>
                       <li>PT支出履歴</li>
                       <li>所持PT不足判定</li>
                       <li>最大枠判定</li>
@@ -5349,12 +5548,12 @@ function App() {
                 </div>
               </div>
               <div className="admin-balance-block admin-slot-exchange-settings">
-                <h3>クエスト枠交換設定</h3>
+                <h3>フリークエスト枠交換設定</h3>
                 <div className="admin-slot-row">
-                  <h4>クエスト枠 +1</h4>
+                  <h4>フリークエスト枠 +1</h4>
                   <p>
                     利用可能：{getEffectiveQuestSlotLimit(playerUnlocks, gameBalanceDraft)}枠 /
-                    使用中：{countNormalQuestItems(displaySections)}枠
+                    使用中：{countFreeQuestItems(displaySections)}枠
                   </p>
                   <label className="admin-slot-enabled">
                     <span>販売</span>
@@ -5407,7 +5606,7 @@ function App() {
                   </label>
                 </div>
                 <p className="admin-balance-note">
-                  プレイヤーモードでは、朝・昼・夕・夜の通常クエスト合計数が追加上限になります。
+                  プレイヤーモードでは、朝・昼・夕・夜のフリークエスト合計数が追加上限になります。
                   開発者モードでは枠制限はありません。
                 </p>
               </div>
@@ -5764,8 +5963,8 @@ function App() {
             </div>
           )}
           {canEditRoutines && gameMode === 'player' && (
-            <div className="quest-slot-usage" aria-label="通常クエスト枠">
-              <strong>通常クエスト枠</strong>
+            <div className="quest-slot-usage" aria-label="フリークエスト枠">
+              <strong>フリークエスト枠</strong>
               <span>{usedQuestSlots} / {totalQuestSlotLimit} 使用中</span>
               <span>残り{remainingQuestSlots}枠</span>
             </div>
@@ -5819,10 +6018,152 @@ function App() {
                       {sortingSectionId === section.id ? '完了' : '並び替え'}
                     </button>
                   </div>
-                )}
+              )}
               </div>
               <div className="routine-items">
-                {section.items.map((item) => {
+                {getMixedRoutineEntries(section, {
+                  includeCoreRoutines: page === 'today' && !isMilestoneSection && !isBonusSection,
+                }).map((entry) => {
+                  if (entry.kind === 'core') {
+                    const coreRoutine = entry.coreRoutine;
+                    const inputId = `core-routine-${coreRoutine.id}`;
+                    const isCompleted =
+                      selectedCoreRoutineCanComplete &&
+                      selectedCoreRoutineCompletion[coreRoutine.id];
+                    const canEditCoreRoutine =
+                      canEditRoutines && dailySectionIds.includes(section.id as StartSection);
+                    const coreRoutineLabel = coreRoutine.label.replace('今日', coreRoutineDateLabel);
+
+                    return (
+                      <div
+                        className="routine-item core-routine-row"
+                        data-checked={isCompleted ? 'true' : 'false'}
+                        data-core-routine="true"
+                        data-dragging={draggedItemId === entry.key ? 'true' : 'false'}
+                        data-routine-id={entry.key}
+                        data-section-id={section.id}
+                        draggable={canEditCoreRoutine && sortingSectionId === section.id}
+                        key={entry.key}
+                        onClick={(event) => {
+                          if ((event.target as HTMLElement).closest('select')) {
+                            return;
+                          }
+
+                          focusDailyRecordField(coreRoutine.kind);
+                        }}
+                        onDragEnd={() => setDraggedItemId(null)}
+                        onDragOver={(event) => {
+                          if (canEditCoreRoutine && sortingSectionId === section.id) {
+                            event.preventDefault();
+                          }
+                        }}
+                        onDragStart={(event) => {
+                          setDraggedItemId(entry.key);
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', entry.key);
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const draggedId =
+                            draggedItemId || event.dataTransfer.getData('text/plain');
+
+                          if (sortingSectionId === section.id && draggedId) {
+                            reorderMixedRoutineEntry(section.id, draggedId, entry.key);
+                          }
+
+                          setDraggedItemId(null);
+                        }}
+                      >
+                        {canEditCoreRoutine && sortingSectionId === section.id && (
+                          <span
+                            className="drag-handle"
+                            aria-hidden="true"
+                            onPointerDown={(event) => {
+                              setDraggedItemId(entry.key);
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                            }}
+                            onPointerMove={(event) => {
+                              if (sortingSectionId !== section.id) {
+                                return;
+                              }
+
+                              const targetElement = document.elementFromPoint(
+                                event.clientX,
+                                event.clientY,
+                              );
+                              const targetItem = targetElement?.closest<HTMLElement>(
+                                `.routine-item[data-section-id="${section.id}"]`,
+                              );
+                              const targetItemId = targetItem?.dataset.routineId;
+
+                              if (targetItemId && targetItemId !== entry.key) {
+                                reorderMixedRoutineEntry(section.id, entry.key, targetItemId);
+                              }
+                            }}
+                            onPointerUp={(event) => {
+                              setDraggedItemId(null);
+
+                              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                event.currentTarget.releasePointerCapture(event.pointerId);
+                              }
+                            }}
+                          >
+                            ☰
+                          </span>
+                        )}
+                        <label className="routine-check" htmlFor={inputId}>
+                          <input
+                            aria-label={`${coreRoutineLabel}の達成状態`}
+                            checked={isCompleted}
+                            id={inputId}
+                            readOnly
+                            tabIndex={-1}
+                            type="checkbox"
+                          />
+                        </label>
+                        <div className="routine-name core-routine-name">
+                          <button
+                            className="routine-name-button"
+                            onClick={() => focusDailyRecordField(coreRoutine.kind)}
+                            type="button"
+                          >
+                            <span aria-hidden="true">{coreRoutine.icon}</span>
+                            {coreRoutineLabel}
+                          </button>
+                          <span className="core-routine-mini-badge">コアルーティン</span>
+                        </div>
+                        {canEditCoreRoutine && (
+                          <label className="core-routine-section-select">
+                            <span>場所</span>
+                            <select
+                              aria-label={`${coreRoutineLabel}の時間帯`}
+                              onChange={(event) =>
+                                moveCoreRoutineToSection(
+                                  coreRoutine.id,
+                                  event.target.value as StartSection,
+                                )
+                              }
+                              value={coreRoutinePlacements[coreRoutine.id].sectionId}
+                            >
+                              {dailySectionIds.map((sectionId) => (
+                                <option key={sectionId} value={sectionId}>
+                                  {sectionId === 'morning'
+                                    ? '朝'
+                                    : sectionId === 'noon'
+                                    ? '昼'
+                                    : sectionId === 'evening'
+                                    ? '夕'
+                                    : '夜'}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  const item = entry.item;
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
@@ -5879,7 +6220,7 @@ function App() {
                           draggedItemId || event.dataTransfer.getData('text/plain');
 
                         if (sortingSectionId === section.id && draggedId) {
-                          reorderRoutineItem(section.id, draggedId, item.id);
+                          reorderMixedRoutineEntry(section.id, draggedId, item.id);
                         }
 
                         setDraggedItemId(null);
@@ -5909,7 +6250,7 @@ function App() {
                             const targetItemId = targetItem?.dataset.routineId;
 
                             if (targetItemId && targetItemId !== item.id) {
-                              reorderRoutineItem(section.id, item.id, targetItemId);
+                              reorderMixedRoutineEntry(section.id, item.id, targetItemId);
                             }
                           }}
                           onPointerUp={(event) => {
@@ -6108,7 +6449,7 @@ function App() {
                 </button>
               )}
               {canEditSection && isPlayerLimitReached && (
-                <p className="quest-limit-note">ショップでクエスト枠を増やせます</p>
+                <p className="quest-limit-note">ショップでフリークエスト枠を増やせます</p>
               )}
             </section>
             );
@@ -6137,6 +6478,7 @@ function App() {
                 id="daily-memo"
                 onChange={(event) => updateDailyMemoForSelectedDate(event.target.value)}
                 placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                ref={dailyMemoTextareaRef}
                 rows={2}
                 value={dailyMemo}
               />
@@ -6154,6 +6496,7 @@ function App() {
                 id="daily-events"
                 onChange={(event) => updateDailyEventForSelectedDate(event.target.value)}
                 placeholder={`${isToday ? '今日' : '昨日'}あったことを書いてみよう`}
+                ref={dailyEventTextareaRef}
                 rows={2}
                 value={dailyEvent}
               />
@@ -6322,6 +6665,7 @@ function App() {
                       id="history-daily-memo"
                       onChange={(event) => updateHistoryDailyMemo(event.target.value)}
                       placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                      ref={historyDailyMemoTextareaRef}
                       rows={2}
                       value={historyDailyMemo}
                     />
@@ -6335,6 +6679,7 @@ function App() {
                       id="history-daily-events"
                       onChange={(event) => updateHistoryDailyEvent(event.target.value)}
                       placeholder="その日にあったことを書いてみよう"
+                      ref={historyDailyEventTextareaRef}
                       rows={2}
                       value={historyDailyEvent}
                     />
@@ -6373,7 +6718,48 @@ function App() {
                       )}
                     </div>
                     <div className="history-routine-items">
-                      {section.items.map((item) => {
+                      {getMixedRoutineEntries(section, {
+                        includeCoreRoutines: !isBonusSection,
+                      }).map((entry) => {
+                        if (entry.kind === 'core') {
+                          const coreRoutine = entry.coreRoutine;
+                          const inputId = `history-core-routine-${coreRoutine.id}`;
+                          const isCompleted =
+                            historyCoreRoutineCanComplete &&
+                            historyCoreRoutineCompletion[coreRoutine.id];
+
+                          return (
+                            <div
+                              className="history-routine-item core-routine-row"
+                              data-checked={isCompleted ? 'true' : 'false'}
+                              data-core-routine="true"
+                              key={entry.key}
+                              onClick={() => focusDailyRecordField(coreRoutine.kind, 'history')}
+                            >
+                              <input
+                                aria-label={`${coreRoutine.label.replace('今日', 'その日')}の達成状態`}
+                                checked={isCompleted}
+                                id={inputId}
+                                readOnly
+                                tabIndex={-1}
+                                type="checkbox"
+                              />
+                              <span className="history-routine-name core-routine-name">
+                                <button
+                                  className="history-routine-name-button"
+                                  onClick={() => focusDailyRecordField(coreRoutine.kind, 'history')}
+                                  type="button"
+                                >
+                                  <span aria-hidden="true">{coreRoutine.icon}</span>
+                                  {coreRoutine.label.replace('今日', 'その日')}
+                                </button>
+                                <span className="core-routine-mini-badge">コアルーティン</span>
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        const item = entry.item;
                         const isEditing = editingItemId === item.id;
                         const isFixedItem = fixedRoutineIds.has(item.id);
                         const historyItemTimerSeconds = getItemTimerSeconds(item);
@@ -6426,7 +6812,7 @@ function App() {
                               draggedItemId || event.dataTransfer.getData('text/plain');
 
                             if (sortingSectionId === section.id && draggedId) {
-                              reorderRoutineItem(section.id, draggedId, item.id);
+                              reorderMixedRoutineEntry(section.id, draggedId, item.id);
                             }
 
                             setDraggedItemId(null);
@@ -6578,7 +6964,7 @@ function App() {
                       </button>
                     )}
                     {isHistoryEditMode && isPlayerLimitReached && (
-                      <p className="quest-limit-note">ショップでクエスト枠を増やせます</p>
+                      <p className="quest-limit-note">ショップでフリークエスト枠を増やせます</p>
                     )}
                     </section>
                     );
