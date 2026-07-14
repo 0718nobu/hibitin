@@ -3,6 +3,7 @@ import {
   defaultCoreRoutinePlacements,
   coreRoutineDefinitions,
   getCoreRoutineCompletion,
+  hasMeaningfulText,
   type CoreRoutineDefinition,
   type CoreRoutineId,
   type CoreRoutineKind,
@@ -80,9 +81,24 @@ type PointSettings = {
     enabled: boolean;
     basePoints: number;
   };
+  coreMemo: {
+    enabled: boolean;
+    basePoints: number;
+  };
+  coreEvents: {
+    enabled: boolean;
+    basePoints: number;
+  };
 };
 
-type PointTargetKind = 'wake' | 'normal' | 'sleep' | 'advanced' | 'dailyNudge';
+type PointTargetKind =
+  | 'wake'
+  | 'normal'
+  | 'sleep'
+  | 'advanced'
+  | 'dailyNudge'
+  | 'coreMemo'
+  | 'coreEvents';
 
 type QuestSlotExchangeRule = {
   enabled: boolean;
@@ -102,8 +118,17 @@ type ShopItem = {
   maxPurchases?: number;
 };
 
+type PlayerIconId = 'smile' | 'cool' | 'chick' | 'cat' | 'dog' | 'fox' | 'bear' | 'sprout';
+
+type PlayerIconOption = {
+  id: PlayerIconId;
+  emoji: string;
+  label: string;
+};
+
 type PlayerProfile = {
   displayName: string;
+  iconId: PlayerIconId;
 };
 
 type LegacyPointSettings = {
@@ -168,6 +193,9 @@ type PointToast = {
   id: string;
   points: number;
   itemLabel: string;
+  message?: string;
+  icon?: string;
+  variant?: 'default' | 'memory';
 };
 
 type QuestEmote = {
@@ -997,9 +1025,28 @@ const loadGameMode = (): GameMode => {
   }
 };
 
+const playerIconOptions: PlayerIconOption[] = [
+  { id: 'smile', emoji: '🙂', label: 'スマイル' },
+  { id: 'cool', emoji: '😎', label: 'クール' },
+  { id: 'chick', emoji: '🐣', label: 'ひよこ' },
+  { id: 'cat', emoji: '🐱', label: 'ねこ' },
+  { id: 'dog', emoji: '🐶', label: 'いぬ' },
+  { id: 'fox', emoji: '🦊', label: 'きつね' },
+  { id: 'bear', emoji: '🐻', label: 'くま' },
+  { id: 'sprout', emoji: '🌱', label: '芽' },
+];
+
+const defaultPlayerIconId: PlayerIconId = 'smile';
+
+const isPlayerIconId = (value: unknown): value is PlayerIconId =>
+  typeof value === 'string' && playerIconOptions.some((option) => option.id === value);
+
+const getPlayerIconOption = (iconId: PlayerIconId) =>
+  playerIconOptions.find((option) => option.id === iconId) ?? playerIconOptions[0];
+
 const normalizePlayerProfile = (value: unknown): PlayerProfile => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { displayName: '' };
+    return { displayName: '', iconId: defaultPlayerIconId };
   }
 
   const parsedProfile = value as Partial<PlayerProfile>;
@@ -1008,6 +1055,7 @@ const normalizePlayerProfile = (value: unknown): PlayerProfile => {
     displayName: typeof parsedProfile.displayName === 'string'
       ? parsedProfile.displayName.trim().slice(0, 20)
       : '',
+    iconId: isPlayerIconId(parsedProfile.iconId) ? parsedProfile.iconId : defaultPlayerIconId,
   };
 };
 
@@ -1017,9 +1065,9 @@ const loadPlayerProfile = () => {
 
     return savedProfile
       ? normalizePlayerProfile(JSON.parse(savedProfile) as unknown)
-      : { displayName: '' };
+      : { displayName: '', iconId: defaultPlayerIconId };
   } catch {
-    return { displayName: '' };
+    return { displayName: '', iconId: defaultPlayerIconId };
   }
 };
 
@@ -1168,6 +1216,8 @@ const normalizePointSettings = (settings: unknown): PointSettings => {
           basePoints: defaultPointSettings.advanced.basePoints,
         },
     dailyNudge: normalizeTarget(parsedSettings.dailyNudge, defaultPointSettings.dailyNudge),
+    coreMemo: normalizeTarget(parsedSettings.coreMemo, defaultPointSettings.coreMemo),
+    coreEvents: normalizeTarget(parsedSettings.coreEvents, defaultPointSettings.coreEvents),
   };
 };
 
@@ -1806,11 +1856,136 @@ const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
 const getDailyEventStorageKey = (date: Date) => `hibitin:events:${getDateKey(date)}`;
 
+type DailyRecordEntry = {
+  text: string;
+  saved: boolean;
+};
+
+type DailyRecordEntries = DailyRecordEntry[];
+
+const createDailyRecordEntry = (text = '', saved = false): DailyRecordEntry => ({
+  text,
+  saved,
+});
+
+const hasSavedDailyRecordEntries = (entries: DailyRecordEntries) =>
+  entries.some((entry) => entry.saved && hasMeaningfulText(entry.text));
+
+const normalizeDailyRecordEntries = (entries: unknown): DailyRecordEntries => {
+  if (!Array.isArray(entries)) {
+    return [createDailyRecordEntry()];
+  }
+
+  const normalizedEntries = entries
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return createDailyRecordEntry(entry, hasMeaningfulText(entry));
+      }
+
+      if (
+        entry &&
+        typeof entry === 'object' &&
+        'text' in entry &&
+        typeof (entry as { text: unknown }).text === 'string'
+      ) {
+        const text = (entry as { text: string }).text;
+        const saved =
+          'saved' in entry && typeof (entry as { saved: unknown }).saved === 'boolean'
+            ? (entry as { saved: boolean }).saved
+            : hasMeaningfulText(text);
+
+        return createDailyRecordEntry(text, saved && hasMeaningfulText(text));
+      }
+
+      return null;
+    })
+    .filter((entry): entry is DailyRecordEntry => Boolean(entry))
+    .filter((entry) => entry.saved || hasMeaningfulText(entry.text));
+
+  const hasDraft = normalizedEntries.some((entry) => !entry.saved);
+
+  if (!hasDraft) {
+    normalizedEntries.push(createDailyRecordEntry());
+  }
+
+  return normalizedEntries.length > 0 ? normalizedEntries : [createDailyRecordEntry()];
+};
+
+const parseDailyRecordEntries = (rawValue: string | null): DailyRecordEntries => {
+  if (!rawValue) {
+    return [createDailyRecordEntry()];
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue) as unknown;
+
+    if (Array.isArray(parsedValue)) {
+      return normalizeDailyRecordEntries(parsedValue);
+    }
+  } catch {
+    // Legacy records were stored as a plain string. Treat it as the first entry.
+  }
+
+  return normalizeDailyRecordEntries([rawValue]);
+};
+
+const serializeDailyRecordEntries = (entries: DailyRecordEntries) =>
+  JSON.stringify(
+    entries
+      .filter((entry) => entry.saved && hasMeaningfulText(entry.text))
+      .map((entry) => entry.text),
+  );
+
+const updateDailyRecordEntry = (
+  entries: DailyRecordEntries,
+  index: number,
+  value: string,
+): DailyRecordEntries => {
+  const nextEntries = [...entries];
+  const currentEntry = nextEntries[index] ?? createDailyRecordEntry();
+
+  nextEntries[index] = {
+    ...currentEntry,
+    text: value,
+    saved: currentEntry.saved && hasMeaningfulText(value),
+  };
+
+  return normalizeDailyRecordEntries(nextEntries);
+};
+
+const saveDailyRecordEntry = (
+  entries: DailyRecordEntries,
+  index: number,
+): DailyRecordEntries => {
+  const nextEntries = [...entries];
+  const currentEntry = nextEntries[index] ?? createDailyRecordEntry();
+
+  if (!hasMeaningfulText(currentEntry.text)) {
+    return normalizeDailyRecordEntries(nextEntries);
+  }
+
+  nextEntries[index] = {
+    ...currentEntry,
+    saved: true,
+  };
+
+  return normalizeDailyRecordEntries(nextEntries);
+};
+
+const adjustTextareaHeight = (textarea: HTMLTextAreaElement | null) => {
+  if (!textarea) {
+    return;
+  }
+
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
+};
+
 const loadDailyMemo = (date: Date) =>
-  localStorage.getItem(getDailyMemoStorageKey(date)) ?? '';
+  parseDailyRecordEntries(localStorage.getItem(getDailyMemoStorageKey(date)));
 
 const loadDailyEvent = (date: Date) =>
-  localStorage.getItem(getDailyEventStorageKey(date)) ?? '';
+  parseDailyRecordEntries(localStorage.getItem(getDailyEventStorageKey(date)));
 
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -1996,6 +2171,14 @@ const defaultPointSettings: PointSettings = {
   dailyNudge: {
     enabled: true,
     basePoints: 10,
+  },
+  coreMemo: {
+    enabled: true,
+    basePoints: 5,
+  },
+  coreEvents: {
+    enabled: true,
+    basePoints: 5,
   },
 };
 const defaultRankRules: RankRule[] = [
@@ -2430,6 +2613,17 @@ const getMasteryAdminRuleText = () => [
 
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
 const getDailyNudgePointAchievementKey = (dateKey: string) => `daily-nudge:${dateKey}`;
+const getCoreRoutinePointAchievementKey = (dateKey: string, kind: CoreRoutineKind) =>
+  `core-${kind === 'memo' ? 'memo' : 'events'}:${dateKey}`;
+
+const getCoreRoutinePointTargetKind = (kind: CoreRoutineKind): PointTargetKind =>
+  kind === 'memo' ? 'coreMemo' : 'coreEvents';
+
+const getCoreRoutinePointLabel = (kind: CoreRoutineKind) =>
+  kind === 'memo' ? '今日のひとことを残す' : '今日のできごとを残す';
+
+const getCoreRoutinePointMessage = (kind: CoreRoutineKind) =>
+  kind === 'memo' ? '今日の想いを残しました' : '今日の記憶を残しました';
 
 const calculateActiveEarnedPointsForDate = (
   pointAwards: Record<string, PointAwardRecord>,
@@ -2677,6 +2871,7 @@ function App() {
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
+  const playerIcon = getPlayerIconOption(playerProfile.iconId);
   const [gameBalance, setGameBalance] = useState<GameBalanceSettings>(() =>
     loadGameBalanceSettings(),
   );
@@ -2687,6 +2882,7 @@ function App() {
     loadPlayerEconomy(),
   );
   const [pointToast, setPointToast] = useState<PointToast | null>(null);
+  const [pointToastQueue, setPointToastQueue] = useState<PointToast[]>([]);
   const [dailyNudgePointFlash, setDailyNudgePointFlash] = useState<PointToast | null>(null);
   const [exchangeToast, setExchangeToast] = useState<ExchangeToast | null>(null);
   const [questEmotes, setQuestEmotes] = useState<Record<string, QuestEmote>>({});
@@ -2734,9 +2930,13 @@ function App() {
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
-  const [historyDailyEvent, setHistoryDailyEvent] = useState('');
+  const [historyDailyEvent, setHistoryDailyEvent] = useState<DailyRecordEntries>([
+    createDailyRecordEntry(),
+  ]);
   const [historyDailyEventDateKey, setHistoryDailyEventDateKey] = useState('');
-  const [historyDailyMemo, setHistoryDailyMemo] = useState('');
+  const [historyDailyMemo, setHistoryDailyMemo] = useState<DailyRecordEntries>([
+    createDailyRecordEntry(),
+  ]);
   const [historyDailyMemoDateKey, setHistoryDailyMemoDateKey] = useState('');
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
@@ -3000,9 +3200,9 @@ function App() {
   useEffect(() => {
     if (!historySelectedDate) {
       setHistoryCheckedItems({});
-      setHistoryDailyEvent('');
+      setHistoryDailyEvent([createDailyRecordEntry()]);
       setHistoryDailyEventDateKey('');
-      setHistoryDailyMemo('');
+      setHistoryDailyMemo([createDailyRecordEntry()]);
       setHistoryDailyMemoDateKey('');
       return;
     }
@@ -3123,12 +3323,27 @@ function App() {
     });
   }, [estimatedLifetimeStarsEarned, gameBalance]);
 
+  const enqueuePointToast = (toast: PointToast) => {
+    setPointToastQueue((currentQueue) => [...currentQueue, toast]);
+  };
+
+  useEffect(() => {
+    if (pointToast || pointToastQueue.length === 0) {
+      return;
+    }
+
+    const [nextToast, ...remainingToasts] = pointToastQueue;
+
+    setPointToast(nextToast);
+    setPointToastQueue(remainingToasts);
+  }, [pointToast, pointToastQueue]);
+
   useEffect(() => {
     if (!pointToast) {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setPointToast(null), 1600);
+    const timeoutId = window.setTimeout(() => setPointToast(null), 2800);
 
     return () => window.clearTimeout(timeoutId);
   }, [pointToast]);
@@ -3138,7 +3353,7 @@ function App() {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setDailyNudgePointFlash(null), 1600);
+    const timeoutId = window.setTimeout(() => setDailyNudgePointFlash(null), 2800);
 
     return () => window.clearTimeout(timeoutId);
   }, [dailyNudgePointFlash]);
@@ -3187,7 +3402,7 @@ function App() {
       return;
     }
 
-    localStorage.setItem(eventStorageKey, dailyEvent);
+    localStorage.setItem(eventStorageKey, serializeDailyRecordEntries(dailyEvent));
   }, [dailyEvent, dailyEventDateKey, eventStorageKey, selectedDateKey]);
 
   useEffect(() => {
@@ -3195,7 +3410,7 @@ function App() {
       return;
     }
 
-    localStorage.setItem(memoStorageKey, dailyMemo);
+    localStorage.setItem(memoStorageKey, serializeDailyRecordEntries(dailyMemo));
   }, [dailyMemo, dailyMemoDateKey, memoStorageKey, selectedDateKey]);
 
   useEffect(() => {
@@ -3203,7 +3418,10 @@ function App() {
       return;
     }
 
-    localStorage.setItem(getDailyEventStorageKey(historySelectedDate), historyDailyEvent);
+    localStorage.setItem(
+      getDailyEventStorageKey(historySelectedDate),
+      serializeDailyRecordEntries(historyDailyEvent),
+    );
   }, [
     historyDailyEvent,
     historyDailyEventDateKey,
@@ -3216,7 +3434,10 @@ function App() {
       return;
     }
 
-    localStorage.setItem(getDailyMemoStorageKey(historySelectedDate), historyDailyMemo);
+    localStorage.setItem(
+      getDailyMemoStorageKey(historySelectedDate),
+      serializeDailyRecordEntries(historyDailyMemo),
+    );
   }, [
     historyDailyMemo,
     historyDailyMemoDateKey,
@@ -3619,7 +3840,7 @@ function App() {
             itemLabel: '本日の日替わりクエスト',
           };
 
-          setPointToast(pointFlash);
+          enqueuePointToast(pointFlash);
           setDailyNudgePointFlash(pointFlash);
         }
 
@@ -3703,6 +3924,120 @@ function App() {
           completed: nextCompleted,
           celebrationMessage,
           completedAt: nextCompleted ? new Date().toISOString() : undefined,
+        },
+      };
+    });
+  };
+
+  const applyPointChangeForCoreRoutine = (
+    dateKey: string,
+    kind: CoreRoutineKind,
+    nextCompleted: boolean,
+  ) => {
+    if (!dateKey || dateKey > todayKey) {
+      return;
+    }
+
+    const achievementKey = getCoreRoutinePointAchievementKey(dateKey, kind);
+    const pointTargetKind = getCoreRoutinePointTargetKind(kind);
+    const pointSetting = gameBalance.pointSettings[pointTargetKind];
+    const itemLabel = getCoreRoutinePointLabel(kind);
+    const now = new Date().toISOString();
+
+    setPlayerEconomy((currentEconomy) => {
+      const existingAward = currentEconomy.pointAwards[achievementKey];
+
+      if (nextCompleted) {
+        if (existingAward?.active || !pointSetting.enabled) {
+          return currentEconomy;
+        }
+
+        const points = existingAward?.points ??
+          calculateQuestPoints(gameBalance, playerRankProgress.multiplier, pointTargetKind);
+        const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
+        const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+        const nextAward: PointAwardRecord = {
+          achievementKey,
+          dateKey,
+          itemId: `core-${kind}`,
+          itemLabel,
+          sectionId: 'core-routine',
+          points,
+          basePoints,
+          multiplier,
+          active: true,
+          awardedAt: existingAward?.awardedAt ?? now,
+        };
+        const nextLedgerEntry: PointLedgerEntry = {
+          id: `${achievementKey}:earn:${now}`,
+          achievementKey,
+          dateKey,
+          itemId: `core-${kind}`,
+          itemLabel,
+          sectionId: 'core-routine',
+          type: 'earn',
+          points,
+          basePoints,
+          multiplier,
+          createdAt: now,
+          reason: getCoreRoutinePointMessage(kind),
+        };
+
+        if (points > 0) {
+          enqueuePointToast({
+            id: nextLedgerEntry.id,
+            points,
+            itemLabel,
+            message: getCoreRoutinePointMessage(kind),
+            icon: kind === 'memo' ? '🪶' : '🔖',
+            variant: 'memory',
+          });
+        }
+
+        return {
+          ...currentEconomy,
+          currentPoints: currentEconomy.currentPoints + points,
+          lifetimeEarnedPoints: existingAward
+            ? currentEconomy.lifetimeEarnedPoints
+            : currentEconomy.lifetimeEarnedPoints + points,
+          pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+          pointAwards: {
+            ...currentEconomy.pointAwards,
+            [achievementKey]: nextAward,
+          },
+        };
+      }
+
+      if (!existingAward?.active) {
+        return currentEconomy;
+      }
+
+      const reversalEntry: PointLedgerEntry = {
+        id: `${achievementKey}:reversal:${now}`,
+        achievementKey,
+        dateKey,
+        itemId: existingAward.itemId,
+        itemLabel: existingAward.itemLabel,
+        sectionId: existingAward.sectionId,
+        type: 'reversal',
+        points: -existingAward.points,
+        basePoints: existingAward.basePoints,
+        multiplier: existingAward.multiplier,
+        createdAt: now,
+        reason: '本文削除によるコアルーティン未達成',
+      };
+
+      return {
+        ...currentEconomy,
+        currentPoints: Math.max(0, currentEconomy.currentPoints - existingAward.points),
+        pointLedger: [...currentEconomy.pointLedger, reversalEntry],
+        pointAwards: {
+          ...currentEconomy.pointAwards,
+          [achievementKey]: {
+            ...existingAward,
+            active: false,
+            reversedAt: now,
+          },
         },
       };
     });
@@ -3889,7 +4224,7 @@ function App() {
           createdAt: now,
         };
 
-        setPointToast({
+        enqueuePointToast({
           id: nextLedgerEntry.id,
           points,
           itemLabel: itemContext.item.label,
@@ -4814,33 +5149,127 @@ function App() {
     setTimerSettingItemId(null);
   };
 
-  const updateDailyEventForSelectedDate = (value: string) => {
+  const updateDailyEventForSelectedDate = (index: number, value: string) => {
+    const wasCompleted = hasSavedDailyRecordEntries(dailyEvent);
+    const nextEntries = updateDailyRecordEntry(dailyEvent, index, value);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
     setDailyEventDateKey(selectedDateKey);
-    setDailyEvent(value);
-  };
+    setDailyEvent(nextEntries);
 
-  const updateDailyMemoForSelectedDate = (value: string) => {
-    setDailyMemoDateKey(selectedDateKey);
-    setDailyMemo(value);
-  };
-
-  const updateHistoryDailyEvent = (value: string) => {
-    setHistoryDailyEventDateKey(historySelectedDateKey);
-    setHistoryDailyEvent(value);
-
-    if (historySelectedDateKey === selectedDateKey) {
-      setDailyEventDateKey(selectedDateKey);
-      setDailyEvent(value);
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(selectedDateKey, 'events', nextCompleted);
     }
   };
 
-  const updateHistoryDailyMemo = (value: string) => {
+  const saveDailyEventForSelectedDate = (index: number) => {
+    const wasCompleted = hasSavedDailyRecordEntries(dailyEvent);
+    const nextEntries = saveDailyRecordEntry(dailyEvent, index);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setDailyEventDateKey(selectedDateKey);
+    setDailyEvent(nextEntries);
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(selectedDateKey, 'events', nextCompleted);
+    }
+  };
+
+  const updateDailyMemoForSelectedDate = (index: number, value: string) => {
+    const wasCompleted = hasSavedDailyRecordEntries(dailyMemo);
+    const nextEntries = updateDailyRecordEntry(dailyMemo, index, value);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setDailyMemoDateKey(selectedDateKey);
+    setDailyMemo(nextEntries);
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(selectedDateKey, 'memo', nextCompleted);
+    }
+  };
+
+  const saveDailyMemoForSelectedDate = (index: number) => {
+    const wasCompleted = hasSavedDailyRecordEntries(dailyMemo);
+    const nextEntries = saveDailyRecordEntry(dailyMemo, index);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setDailyMemoDateKey(selectedDateKey);
+    setDailyMemo(nextEntries);
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(selectedDateKey, 'memo', nextCompleted);
+    }
+  };
+
+  const updateHistoryDailyEvent = (index: number, value: string) => {
+    const wasCompleted = hasSavedDailyRecordEntries(historyDailyEvent);
+    const nextEntries = updateDailyRecordEntry(historyDailyEvent, index, value);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setHistoryDailyEventDateKey(historySelectedDateKey);
+    setHistoryDailyEvent(nextEntries);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyEventDateKey(selectedDateKey);
+      setDailyEvent(nextEntries);
+    }
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(historySelectedDateKey, 'events', nextCompleted);
+    }
+  };
+
+  const saveHistoryDailyEvent = (index: number) => {
+    const wasCompleted = hasSavedDailyRecordEntries(historyDailyEvent);
+    const nextEntries = saveDailyRecordEntry(historyDailyEvent, index);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setHistoryDailyEventDateKey(historySelectedDateKey);
+    setHistoryDailyEvent(nextEntries);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyEventDateKey(selectedDateKey);
+      setDailyEvent(nextEntries);
+    }
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(historySelectedDateKey, 'events', nextCompleted);
+    }
+  };
+
+  const updateHistoryDailyMemo = (index: number, value: string) => {
+    const wasCompleted = hasSavedDailyRecordEntries(historyDailyMemo);
+    const nextEntries = updateDailyRecordEntry(historyDailyMemo, index, value);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
     setHistoryDailyMemoDateKey(historySelectedDateKey);
-    setHistoryDailyMemo(value);
+    setHistoryDailyMemo(nextEntries);
 
     if (historySelectedDateKey === selectedDateKey) {
       setDailyMemoDateKey(selectedDateKey);
-      setDailyMemo(value);
+      setDailyMemo(nextEntries);
+    }
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(historySelectedDateKey, 'memo', nextCompleted);
+    }
+  };
+
+  const saveHistoryDailyMemo = (index: number) => {
+    const wasCompleted = hasSavedDailyRecordEntries(historyDailyMemo);
+    const nextEntries = saveDailyRecordEntry(historyDailyMemo, index);
+    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
+
+    setHistoryDailyMemoDateKey(historySelectedDateKey);
+    setHistoryDailyMemo(nextEntries);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyMemoDateKey(selectedDateKey);
+      setDailyMemo(nextEntries);
+    }
+
+    if (wasCompleted !== nextCompleted) {
+      applyPointChangeForCoreRoutine(historySelectedDateKey, 'memo', nextCompleted);
     }
   };
 
@@ -5236,12 +5665,20 @@ function App() {
               }}
               type="button"
             >
-              <span className="rank-status-name">{playerDisplayName}</span>
-              <span className="rank-status-main">🏅 Rank {playerRankProgress.rank}</span>
-              <span className="rank-status-sub">
-                所持 {playerEconomy.currentPoints}PT
-                <span aria-hidden="true">・</span>
-                ×{playerRankProgress.multiplier.toFixed(2)}
+              <span className="rank-status-hero">
+                <span className="rank-status-avatar" aria-hidden="true">
+                  {playerIcon.emoji}
+                </span>
+                <span className="rank-status-identity">
+                  <span className="rank-status-name">{playerDisplayName}</span>
+                  <span className="rank-status-main">🏅 Rank {playerRankProgress.rank}</span>
+                </span>
+              </span>
+              <span className="rank-status-pt">
+                <span className="rank-status-pt-main">💰 {playerEconomy.currentPoints}PT</span>
+                <span className="rank-status-multiplier">
+                  ×{playerRankProgress.multiplier.toFixed(2)}
+                </span>
               </span>
               <span className="rank-status-routines" aria-label="ルーティン数">
                 <span>📜 コアルーティン {coreRoutineCount}個</span>
@@ -5251,7 +5688,7 @@ function App() {
                 className="rank-status-earned"
                 data-empty={selectedDateEarnedPoints === 0 ? 'true' : 'false'}
               >
-                {selectedDateEarnedPointsLabel} +{selectedDateEarnedPoints}PT
+                ✨ {selectedDateEarnedPointsLabel} +{selectedDateEarnedPoints}PT
               </span>
               <span className="rank-status-caret" aria-hidden="true">
                 {isRankPanelOpen ? '▲' : '▼'}
@@ -5312,9 +5749,20 @@ function App() {
           </section>
         )}
 
-        {page === 'today' && pointToast && (
-          <div className="point-toast" key={pointToast.id} role="status">
-            +{pointToast.points}PT
+        {pointToast && (
+          <div
+            className="point-toast"
+            data-variant={pointToast.variant ?? 'default'}
+            key={pointToast.id}
+            role="status"
+          >
+            {pointToast.icon && <span className="point-toast-icon" aria-hidden="true">{pointToast.icon}</span>}
+            <span className="point-toast-body">
+              {pointToast.message && (
+                <span className="point-toast-message">{pointToast.message}</span>
+              )}
+              <span className="point-toast-points">+{pointToast.points}PT</span>
+            </span>
           </div>
         )}
 
@@ -5379,16 +5827,46 @@ function App() {
               <input
                 maxLength={20}
                 onBlur={(event) =>
-                  setPlayerProfile({ displayName: event.target.value.trim().slice(0, 20) })
+                  setPlayerProfile((currentProfile) => ({
+                    ...currentProfile,
+                    displayName: event.target.value.trim().slice(0, 20),
+                  }))
                 }
                 onChange={(event) =>
-                  setPlayerProfile({ displayName: event.target.value.slice(0, 20) })
+                  setPlayerProfile((currentProfile) => ({
+                    ...currentProfile,
+                    displayName: event.target.value.slice(0, 20),
+                  }))
                 }
                 placeholder="名前を入力"
                 type="text"
                 value={playerProfile.displayName}
               />
             </label>
+            <div className="player-icon-settings">
+              <span>プレイヤーアイコン</span>
+              <div className="player-icon-options" role="radiogroup" aria-label="プレイヤーアイコン">
+                {playerIconOptions.map((option) => (
+                  <button
+                    aria-checked={playerProfile.iconId === option.id}
+                    aria-label={option.label}
+                    className="player-icon-option"
+                    data-active={playerProfile.iconId === option.id ? 'true' : 'false'}
+                    key={option.id}
+                    onClick={() =>
+                      setPlayerProfile((currentProfile) => ({
+                        ...currentProfile,
+                        iconId: option.id,
+                      }))
+                    }
+                    role="radio"
+                    type="button"
+                  >
+                    <span aria-hidden="true">{option.emoji}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </section>
         )}
 
@@ -5437,6 +5915,8 @@ function App() {
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
                     ['dailyNudge', '本日の日替わりクエスト'],
+                    ['coreMemo', '今日のひとことを残す'],
+                    ['coreEvents', '今日のできごとを残す'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
                     <div className="admin-point-target-row" key={targetKind}>
                       <label>
@@ -5525,6 +6005,8 @@ function App() {
                       <li>PTおよびランクの表示</li>
                       <li>本日の日替わりクエスト完了によるPT獲得</li>
                       <li>本日の日替わりクエスト連続記録</li>
+                      <li>記憶系コアルーティン完了によるPT獲得</li>
+                      <li>記憶系コアルーティン本文削除によるPT取消</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
                       <li>PTによるフリークエスト枠購入</li>
@@ -6474,14 +6956,43 @@ function App() {
               <label htmlFor="daily-memo">
                 📝 {dailyOneLineLabel}
               </label>
-              <textarea
-                id="daily-memo"
-                onChange={(event) => updateDailyMemoForSelectedDate(event.target.value)}
-                placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
-                ref={dailyMemoTextareaRef}
-                rows={2}
-                value={dailyMemo}
-              />
+              <div className="daily-record-entry-list">
+                {dailyMemo.map((entry, index) => {
+                  const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
+
+                  return (
+                    <div className="daily-record-entry-row" key={`daily-memo-${index}`}>
+                      <textarea
+                        aria-label={`${dailyOneLineLabel} ${index + 1}`}
+                        id={index === 0 ? 'daily-memo' : `daily-memo-${index}`}
+                        onChange={(event) => {
+                          adjustTextareaHeight(event.currentTarget);
+                          updateDailyMemoForSelectedDate(index, event.target.value);
+                        }}
+                        placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                        ref={(element) => {
+                          if (index === 0) {
+                            dailyMemoTextareaRef.current = element;
+                          }
+
+                          adjustTextareaHeight(element);
+                        }}
+                        rows={1}
+                        value={entry.text}
+                      />
+                      <button
+                        aria-label={`${dailyOneLineLabel} ${index + 1}をOKにする`}
+                        className="daily-record-save-button"
+                        disabled={!canSaveEntry}
+                        onClick={() => saveDailyMemoForSelectedDate(index)}
+                        type="button"
+                      >
+                        {entry.saved ? 'OK済み' : 'OK'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="daily-one-line-example" aria-label="ひとことの例">
                 <p>例えばこんなの</p>
                 <blockquote>「{dailyOneLineExample.text}」</blockquote>
@@ -6492,14 +7003,43 @@ function App() {
               <label htmlFor="daily-events">
                 📅 {dailyEventLabel}
               </label>
-              <textarea
-                id="daily-events"
-                onChange={(event) => updateDailyEventForSelectedDate(event.target.value)}
-                placeholder={`${isToday ? '今日' : '昨日'}あったことを書いてみよう`}
-                ref={dailyEventTextareaRef}
-                rows={2}
-                value={dailyEvent}
-              />
+              <div className="daily-record-entry-list">
+                {dailyEvent.map((entry, index) => {
+                  const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
+
+                  return (
+                    <div className="daily-record-entry-row" key={`daily-events-${index}`}>
+                      <textarea
+                        aria-label={`${dailyEventLabel} ${index + 1}`}
+                        id={index === 0 ? 'daily-events' : `daily-events-${index}`}
+                        onChange={(event) => {
+                          adjustTextareaHeight(event.currentTarget);
+                          updateDailyEventForSelectedDate(index, event.target.value);
+                        }}
+                        placeholder={`${isToday ? '今日' : '昨日'}あったことを書いてみよう`}
+                        ref={(element) => {
+                          if (index === 0) {
+                            dailyEventTextareaRef.current = element;
+                          }
+
+                          adjustTextareaHeight(element);
+                        }}
+                        rows={1}
+                        value={entry.text}
+                      />
+                      <button
+                        aria-label={`${dailyEventLabel} ${index + 1}をOKにする`}
+                        className="daily-record-save-button"
+                        disabled={!canSaveEntry}
+                        onClick={() => saveDailyEventForSelectedDate(index)}
+                        type="button"
+                      >
+                        {entry.saved ? 'OK済み' : 'OK'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="daily-one-line-example" aria-label="できごとの例">
                 <p>例えばこんなの</p>
                 <blockquote>「{dailyEventExample.text}」</blockquote>
@@ -6661,28 +7201,96 @@ function App() {
                     <label htmlFor="history-daily-memo">
                       📝 その日のひとこと
                     </label>
-                    <textarea
-                      id="history-daily-memo"
-                      onChange={(event) => updateHistoryDailyMemo(event.target.value)}
-                      placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
-                      ref={historyDailyMemoTextareaRef}
-                      rows={2}
-                      value={historyDailyMemo}
-                    />
+                    <div className="daily-record-entry-list">
+                      {historyDailyMemo.map((entry, index) => {
+                        const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
+
+                        return (
+                          <div
+                            className="daily-record-entry-row"
+                            key={`history-daily-memo-${index}`}
+                          >
+                            <textarea
+                              aria-label={`その日のひとこと ${index + 1}`}
+                              id={index === 0 ? 'history-daily-memo' : `history-daily-memo-${index}`}
+                              onChange={(event) => {
+                                adjustTextareaHeight(event.currentTarget);
+                                updateHistoryDailyMemo(index, event.target.value);
+                              }}
+                              placeholder="なんでも今日思ったこと、今の気持ちを書いてみよう"
+                              ref={(element) => {
+                                if (index === 0) {
+                                  historyDailyMemoTextareaRef.current = element;
+                                }
+
+                                adjustTextareaHeight(element);
+                              }}
+                              rows={1}
+                              value={entry.text}
+                            />
+                            <button
+                              aria-label={`その日のひとこと ${index + 1}をOKにする`}
+                              className="daily-record-save-button"
+                              disabled={!canSaveEntry}
+                              onClick={() => saveHistoryDailyMemo(index)}
+                              type="button"
+                            >
+                              {entry.saved ? 'OK済み' : 'OK'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="daily-record-divider" aria-hidden="true" />
                   <div className="daily-record-field daily-record-field-events">
                     <label htmlFor="history-daily-events">
                       📅 その日のできごと
                     </label>
-                    <textarea
-                      id="history-daily-events"
-                      onChange={(event) => updateHistoryDailyEvent(event.target.value)}
-                      placeholder="その日にあったことを書いてみよう"
-                      ref={historyDailyEventTextareaRef}
-                      rows={2}
-                      value={historyDailyEvent}
-                    />
+                    <div className="daily-record-entry-list">
+                      {historyDailyEvent.map((entry, index) => {
+                        const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
+
+                        return (
+                          <div
+                            className="daily-record-entry-row"
+                            key={`history-daily-events-${index}`}
+                          >
+                            <textarea
+                              aria-label={`その日のできごと ${index + 1}`}
+                              id={
+                                index === 0
+                                  ? 'history-daily-events'
+                                  : `history-daily-events-${index}`
+                              }
+                              onChange={(event) => {
+                                adjustTextareaHeight(event.currentTarget);
+                                updateHistoryDailyEvent(index, event.target.value);
+                              }}
+                              placeholder="その日にあったことを書いてみよう"
+                              ref={(element) => {
+                                if (index === 0) {
+                                  historyDailyEventTextareaRef.current = element;
+                                }
+
+                                adjustTextareaHeight(element);
+                              }}
+                              rows={1}
+                              value={entry.text}
+                            />
+                            <button
+                              aria-label={`その日のできごと ${index + 1}をOKにする`}
+                              className="daily-record-save-button"
+                              disabled={!canSaveEntry}
+                              onClick={() => saveHistoryDailyEvent(index)}
+                              type="button"
+                            >
+                              {entry.saved ? 'OK済み' : 'OK'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </section>
                 <div className="history-routine-list">

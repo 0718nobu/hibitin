@@ -351,12 +351,15 @@ PERFECTデザイン:
 コアルーティン「今日を残す」:
 
 - `src/coreRoutines.ts` にフリークエストとは別定義。
-- `今日を一言で残す`: `hibitin:memo:YYYY-MM-DD` の本文が空白以外1文字以上なら達成。
-- `今日のできごとを残す`: `hibitin:events:YYYY-MM-DD` の本文が空白以外1文字以上なら達成。
+- `今日のひとことを残す`: `hibitin:memo:YYYY-MM-DD` の保存済み本文が空白以外1文字以上なら達成。
+- `hibitin:memo:YYYY-MM-DD` / `hibitin:events:YYYY-MM-DD` は新形式では保存済み文字列のJSON配列。旧文字列は保存済み1件目として読み込む。入力中の下書きは達成・PT・保存対象外で、各入力欄の `OK` を押すと確定し、次の空欄が現れる。
+- 記憶系コアルーティンは `pointSettings.coreMemo` / `pointSettings.coreEvents` で個別にPT対象と基礎PTを管理する。初期値は各5PT。
+- PT付与キーは `core-memo:YYYY-MM-DD` / `core-events:YYYY-MM-DD`。保存済み本文を全削除すると付与時のPT額と倍率を使って取消する。
+- `今日のできごとを残す`: `hibitin:events:YYYY-MM-DD` の保存済み本文が空白以外1文字以上なら達成。
 - 追加のboolean保存はしない。
 - 配置は `hibitin:coreRoutinePlacements:v1` に時間帯と順番だけ保存する。
 - フリークエストと同じ一覧行で表示されるが、`RoutineItem` には混ぜない。
-- 初期配置は「今日を一言で残す」が朝、「今日のできごとを残す」が夜。
+- 初期配置は「今日のひとことを残す」が朝、「今日のできごとを残す」が夜。
 - Today編集モードで時間帯変更と並び替えが可能。名称変更・削除は禁止。
 - フリークエスト枠、達成率、FIRST/PERFECT判定、PT、星、トロフィーには影響しない。
 - スタンプ帳詳細でも該当時間帯の一覧内に表示。

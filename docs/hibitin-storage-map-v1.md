@@ -25,13 +25,13 @@
 | `hibitin:dailyNudgeRecords:v1` | 日付別の日替わりクエスト割り当て/完了状態（内部名 dailyNudge） | `{ [dateKey]: DailyNudgeRecord }` | `loadDailyNudgeRecords()` | `useEffect([dailyNudgeRecords])`, `toggleDailyNudgeCompletion()` | 対象 | 現役 |
 | `hibitin:rhythmSettings:v1` | ノーマル/休日の起床・就寝時刻、開始セクション | `RhythmSettings` | `loadRhythmSettings()` | `useEffect([rhythmSettings])` | 対象 | 現役 |
 | `hibitin:gameMode:v1` | プレイヤー/開発者モード | JSON文字列または旧プレーン文字列対応 | `loadGameMode()` | `useEffect([gameMode])` | 対象 | 現役 |
-| `hibitin:gameBalance:v1` | PT、ランク、フリークエスト枠交換設定 | `GameBalanceSettings` schemaVersion 3 | `loadGameBalanceSettings()` | `useEffect([gameBalance])` | 対象 | 現役 |
-| `hibitin:playerEconomy:v1` | PT、累計スター、ランク、台帳、付与記録 | `PlayerEconomy` | `loadPlayerEconomy()` | `useEffect([playerEconomy])` | 対象 | 現役 |
-| `hibitin:playerProfile:v1` | プレイヤー名 | `PlayerProfile` | `loadPlayerProfile()` | `useEffect([playerProfile])` | 対象 | 現役 |
+| `hibitin:gameBalance:v1` | PT、ランク、フリークエスト枠交換設定、記憶系コアルーティンPT設定 | `GameBalanceSettings` schemaVersion 3 | `loadGameBalanceSettings()` | `useEffect([gameBalance])` | 対象 | 現役 |
+| `hibitin:playerEconomy:v1` | PT、累計スター、ランク、台帳、付与記録。記憶系コアルーティンは `core-memo:YYYY-MM-DD` / `core-events:YYYY-MM-DD` を `pointAwards` に保存 | `PlayerEconomy` | `loadPlayerEconomy()` | `useEffect([playerEconomy])` | 対象 | 現役 |
+| `hibitin:playerProfile:v1` | プレイヤー名とプレイヤーアイコン | `PlayerProfile { displayName, iconId }`。旧データに `iconId` がない場合は初期アイコンを補完 | `loadPlayerProfile()` | `useEffect([playerProfile])` | 対象 | 現役 |
 | `hibitin:playerUnlocks:v2` | 合計フリークエスト枠 | `PlayerUnlocks { totalQuestSlots }` | `loadPlayerUnlocks()` | `useEffect([playerUnlocks])` | 対象 | 現役 |
 | `hibitin:checks:YYYY-MM-DD` | 日付別チェック | `Record<itemId, boolean>` | `loadCheckedItems()` / `getStoredCheckDateKeys()` | `useEffect([checkedItems])`, `toggleHistoryItem()` | 対象 | 現役・動的 |
-| `hibitin:events:YYYY-MM-DD` | 日付別のできごと記録 | string | `loadDailyEvent()` | `useEffect([dailyEvent])`, `useEffect([historyDailyEvent])` | 対象 | 現役・動的 |
-| `hibitin:memo:YYYY-MM-DD` | 日付別ひとこと（旧: 全体メモ） | string | `loadDailyMemo()` | `useEffect([dailyMemo])`, `useEffect([historyDailyMemo])` | 対象 | 現役・動的 |
+| `hibitin:events:YYYY-MM-DD` | 日付別のできごと記録 | 保存済み文字列のJSON配列。旧形式stringも保存済み1件目として読込。入力中の下書きは保存対象外 | `loadDailyEvent()` | `useEffect([dailyEvent])`, `useEffect([historyDailyEvent])` | 対象 | 現役・動的 |
+| `hibitin:memo:YYYY-MM-DD` | 日付別ひとこと（旧: 全体メモ） | 保存済み文字列のJSON配列。旧形式stringも保存済み1件目として読込。入力中の下書きは保存対象外 | `loadDailyMemo()` | `useEffect([dailyMemo])`, `useEffect([historyDailyMemo])` | 対象 | 現役・動的 |
 | `hibitin-routines:v1` | 旧ルーティン保存 | `RoutineSection[]` | `loadLegacyRoutineSections()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:lifestyleSettings:v1` | 旧生活リズム設定 | 旧 `RhythmConfig` 相当 | `loadRhythmSettings()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:playerUnlocks:v1` | 旧時間帯別フリークエスト枠 | `{ questSlots: { morning,noon,evening,night } }` | `loadPlayerUnlocks()` | 起動後削除 | 対象だが通常は削除 | 旧仕様・移行のみ |

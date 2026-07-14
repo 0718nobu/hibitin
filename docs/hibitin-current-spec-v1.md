@@ -393,13 +393,15 @@ type RoutineSection = {
 - 例文の保存: なし。回答のみ既存キーへ保存
 - プレースホルダー: `なんでも今日思ったこと、今の気持ちを書いてみよう`
 - 例文は入力欄へ自動反映しない
-- 自動保存
-- 達成率、PT、星、トロフィー、ランク、スタンプ帳ランクには影響しない
+- 1件ずつ小さな入力欄に書き、各入力欄右端の `OK` で確定する
+- 入力途中の下書きは達成・PT付与・次欄追加の対象外
+- 保存済みの内容のみ `hibitin:memo:YYYY-MM-DD` へJSON文字列配列で保存する
+- 達成率、星、トロフィー、ランク、スタンプ帳ランクには影響しない
 
 今日/昨日のできごと:
 
 - 保存キー: `hibitin:events:YYYY-MM-DD`
-- データ構造: string
+- データ構造: 保存済み文字列のJSON配列。旧形式stringも1件目として読込
 - UI: 今日タブ下部の記録カード、スタンプ帳詳細の「その日の記録」
 - 画面名: 今日表示では「今日のできごと」、昨日表示では「昨日のできごと」、スタンプ帳詳細では「その日のできごと」
 - 今日タブでは「今日/昨日のひとこと」の下に表示
@@ -408,19 +410,24 @@ type RoutineSection = {
 - 例文選択: `daily-event-example:YYYY-MM-DD` の安定ハッシュで選択
 - 例文の保存: なし。入力内容のみ既存キーへ保存
 - 例文は入力欄へ自動反映しない
-- 自動保存
-- 達成率、PT、星、トロフィー、ランク、スタンプ帳ランクには影響しない
+- 1件ずつ小さな入力欄に書き、各入力欄右端の `OK` で確定する
+- 入力途中の下書きは達成・PT付与・次欄追加の対象外
+- 保存済みの内容のみ `hibitin:events:YYYY-MM-DD` へJSON文字列配列で保存する
+- 達成率、星、トロフィー、ランク、スタンプ帳ランクには影響しない
 
 コアルーティン「今日を残す」:
 
 - Phase3で追加された、フリークエストとはデータ上分離された固定クエスト表示です。
 - 定義は `src/coreRoutines.ts` の `coreRoutineDefinitions`。
-- 対象は `今日を一言で残す` と `今日のできごとを残す`。
-- 達成状態は `hibitin:memo:YYYY-MM-DD` と `hibitin:events:YYYY-MM-DD` の本文から `trim().length > 0` で導出します。
+- 対象は `今日のひとことを残す` と `今日のできごとを残す`。
+- 達成状態は `hibitin:memo:YYYY-MM-DD` と `hibitin:events:YYYY-MM-DD` の保存済み本文から導出します。新形式は保存済み文字列配列で、空白以外の保存済み項目が1件以上あれば達成です。旧形式の文字列は保存済み1件目として読み込みます。
+- 達成時は `pointSettings.coreMemo` / `pointSettings.coreEvents` に基づき、初期値では各5PTを付与します。日付別の `pointAwards` キーは `core-memo:YYYY-MM-DD` / `core-events:YYYY-MM-DD` です。
+- 保存済み本文をすべて空白だけに戻すと未達成となり、付与時のPT額と倍率で取消します。
+- ひとこと/できごとは1件ずつ小さなtextareaで入力し、`OK` で確定したタイミングで次の空欄が1つ追加されます。textareaは内容に合わせて縦に伸びます。
 - コアルーティン専用のboolean保存キーはありません。
 - 配置保存キーは `hibitin:coreRoutinePlacements:v1` です。本文ではなく、表示する時間帯と順番だけを保存します。
 - Today画面では、フリークエストと同じ行デザインで朝・昼・夕・夜の一覧内に表示します。
-- 初期配置は `今日を一言で残す` が朝、`今日のできごとを残す` が夜です。
+- 初期配置は `今日のひとことを残す` が朝、`今日のできごとを残す` が夜です。
 - Today編集モードでは、コアルーティンの時間帯変更と同一セクション内の並び替えができます。
 - 名称変更、削除、アーカイブ、タイマー設定、メモ設定はできません。
 - スタンプ帳詳細では、該当する時間帯の一覧内で状態を表示します。
@@ -694,6 +701,8 @@ type ShopItem = {
 | フリークエスト 基礎PT/対象 | `pointSettings.normal` | PT付与に連動 | enabled true, 10 |
 | 就寝 基礎PT/対象 | `pointSettings.sleep` | PT付与に連動 | enabled true, 5 |
 | アドバンスト 基礎PT/対象 | `pointSettings.advanced` | PT付与に連動 | enabled false, 0 |
+| 今日のひとことを残す 基礎PT/対象 | `pointSettings.coreMemo` | PT付与に連動 | enabled true, 5 |
+| 今日のできごとを残す 基礎PT/対象 | `pointSettings.coreEvents` | PT付与に連動 | enabled true, 5 |
 | Rank | `rankRules[].rank` | ランク表示に連動 | 1〜7 |
 | 必要累計★ | `rankRules[].requiredLifetimeStars` | ランク算出に連動 | 0,5,15,30,50,80,120 |
 | PT倍率 | `rankRules[].pointMultiplier` | PT計算に連動 | 1.00〜1.75 |
