@@ -16,7 +16,7 @@
 - ビルド方法: `npm run build`
 - Node条件: `package.json` の `engines.node` は `>=24`
 - 2026-07-11時点のビルド結果: `npm run build` 成功
-- 主要画面: 今日、スタンプ帳、実績、ショップ、設定
+- 主要画面: 今日、スタンプ帳、記録、実績、ショップ、設定
 
 PWA構成は `vite.config.ts` の `VitePWA` で定義されています。`registerType: 'autoUpdate'`、`display: 'standalone'`、manifest名は `日々のルーティンチェック帳`、short_name は `日々ティン` です。Service Workerは vite-plugin-pwa の `generateSW` 方式でビルド時に `dist/sw.js` と Workboxファイルが生成されます。
 
@@ -25,13 +25,14 @@ PWA構成は `vite.config.ts` の `VitePWA` で定義されています。`regis
 画面管理は `src/App.tsx` の `PageName` です。
 
 ```ts
-type PageName = 'today' | 'history' | 'achievements' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'settings';
 ```
 
-下部タブは5つです。
+下部タブは6つです。
 
 - `today`: 🎮 今日
 - `history`: 📅 スタンプ帳
+- `records`: 📖 記録
 - `achievements`: 🏆 実績
 - `shop`: 🛍️ ショップ
 - `settings`: ⚙️ 設定
@@ -89,6 +90,38 @@ type PageName = 'today' | 'history' | 'achievements' | 'shop' | 'settings';
 - アドバンストはボーナスログ扱いで、フリークエスト枠の制限を受けず自由に追加できます。
 - 起床・就寝は達成率とPT対象です。ただし熟練度の対象外です。
 - 日替わりクエストはフリークエストとは独立し、達成率、熟練度、フリークエスト枠、スタンプ帳ランクには影響しません。PTは `gameBalance.pointSettings.dailyNudge` が有効な場合のみ付与されます。
+
+### 記録
+
+表示内容:
+
+- 月移動: 前月 / 今日へ / 翌月
+- 1日から月末までの日付カード縦一覧
+- 日付、曜日、祝日名、今日マーカー
+- その日のひとこと
+- その日のできごと
+- その日のやること
+
+主なstate:
+
+- `recordMonth`
+- `expandedRecordDates`
+- `recordRevision`
+
+保存データ:
+
+- `hibitin:memo:YYYY-MM-DD`
+- `hibitin:events:YYYY-MM-DD`
+- `hibitin:todos:YYYY-MM-DD`
+
+連動:
+
+- Today画面と同じ保存キーを読み書きし、二重管理しません。
+- 内容がない日はコンパクトな日付カードとして表示し、タップすると入力欄を展開します。
+- 内容がある日は自動で本文を表示します。
+- 未来日にもひとこと、できごと、やることを入力できます。
+- 記録タブでの編集自体はPT、達成率、FIRST、スタンプ、Rank、スター、トロフィー、フリークエスト枠へ影響しません。
+- 記録タブは `applyPointChangeForCoreRoutine()` を呼ばず、未来日入力でもコアルーティン報酬や演出を発火させません。
 
 ### スタンプ帳
 
@@ -414,6 +447,16 @@ type RoutineSection = {
 - 入力途中の下書きは達成・PT付与・次欄追加の対象外
 - 保存済みの内容のみ `hibitin:events:YYYY-MM-DD` へJSON文字列配列で保存する
 - 達成率、星、トロフィー、ランク、スタンプ帳ランクには影響しない
+
+今日/昨日のやること:
+
+- 保存キー: `hibitin:todos:YYYY-MM-DD`
+- データ構造: `{ id, text, completed }[]`
+- UI: Today画面の一番下、今日/昨日の記録カードより下に表示。スタンプ帳詳細では「その日のやること」として表示
+- 入力済み項目の下に空欄が1つ自動追加される
+- 各項目はチェック、内容編集、削除が可能
+- 完了項目は薄く取り消し線で表示
+- PT、達成率、FIRST/PERFECT判定、スタンプ、Rank、星、トロフィー、コアルーティン数、フリークエスト数、フリークエスト枠には影響しない
 
 コアルーティン「今日を残す」:
 

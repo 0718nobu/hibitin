@@ -2930,11 +2930,11 @@ h1 {
   left: 10px;
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 3px;
-  width: min(calc(100% - 20px), 560px);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  width: min(calc(100% - 20px), 600px);
   margin: 0 auto;
-  padding: 6px;
+  padding: 5px;
   border: 1px solid rgb(183 234 208 / 80%);
   border-radius: 18px;
   background: rgb(255 255 255 / 92%);
@@ -2944,7 +2944,7 @@ h1 {
 
 .bottom-tab-nav button {
   display: grid;
-  min-height: 46px;
+  min-height: 44px;
   place-items: center;
   gap: 1px;
   border: 0;
@@ -2952,12 +2952,12 @@ h1 {
   background: transparent;
   color: #65736c;
   cursor: pointer;
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 800;
 }
 
 .bottom-tab-nav button span {
-  font-size: 1.02rem;
+  font-size: 0.98rem;
   line-height: 1;
 }
 
@@ -3666,6 +3666,288 @@ h1 {
   font-size: 0.82rem;
   font-weight: 760;
   line-height: 1.5;
+}
+
+.daily-todo-card {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid rgb(206 219 190 / 82%);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgb(234 217 161 / 24%) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(180deg, #fffef6 0%, #fbfff1 100%);
+  box-shadow: 0 7px 18px rgb(86 91 50 / 6%);
+}
+
+.daily-todo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-todo-header h2 {
+  margin: 0;
+  color: #556232;
+  font-size: 0.95rem;
+  font-weight: 1000;
+}
+
+.daily-todo-header span {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgb(255 255 255 / 72%);
+  color: #8a7a45;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.daily-todo-list {
+  display: grid;
+  gap: 6px;
+}
+
+.daily-todo-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid rgb(202 214 186 / 65%);
+  border-radius: 7px;
+  padding: 5px 7px;
+  background: rgb(255 255 255 / 76%);
+}
+
+.daily-todo-row[data-empty='true'] {
+  border-style: dashed;
+  background: rgb(255 255 255 / 48%);
+}
+
+.daily-todo-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: #4c9a5c;
+}
+
+.daily-todo-row input[type='checkbox']:disabled {
+  opacity: 0.35;
+}
+
+.daily-todo-row input[type='text'] {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #30342b;
+  font: inherit;
+  font-size: 0.88rem;
+  line-height: 1.3;
+  outline: none;
+}
+
+.daily-todo-row input[type='text']::placeholder {
+  color: #aaa27f;
+}
+
+.daily-todo-row[data-completed='true'] input[type='text'] {
+  color: #8a9182;
+  text-decoration: line-through;
+}
+
+.daily-todo-delete-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #a58b67;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.daily-todo-delete-button:hover {
+  background: rgb(141 97 54 / 10%);
+  color: #805d37;
+}
+
+.records-page {
+  display: grid;
+  gap: 12px;
+}
+
+.records-month-header {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(184 220 192 / 78%);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgb(255 255 249 / 94%);
+  box-shadow: 0 10px 24px rgb(51 104 69 / 12%);
+  backdrop-filter: blur(10px);
+}
+
+.records-month-header h2 {
+  margin: 0;
+  color: #1d4635;
+  font-size: 1rem;
+  font-weight: 1000;
+  text-align: center;
+}
+
+.records-month-header button {
+  min-height: 36px;
+  border: 1px solid rgb(122 184 139 / 34%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #edf8e9);
+  color: #2c6e4a;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 1000;
+  box-shadow: 0 5px 12px rgb(54 116 67 / 9%);
+}
+
+.records-month-header .records-today-button {
+  padding-inline: 12px;
+  color: #4e7047;
+  font-size: 0.78rem;
+}
+
+.records-day-list {
+  display: grid;
+  gap: 8px;
+}
+
+.record-day-card {
+  overflow: hidden;
+  border: 1px solid rgb(211 225 199 / 82%);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fffdf5 0%, #fbfff3 100%);
+  box-shadow: 0 7px 18px rgb(75 96 57 / 7%);
+}
+
+.record-day-card[data-today='true'] {
+  border-color: rgb(41 178 113 / 42%);
+  box-shadow:
+    0 0 0 2px rgb(63 209 136 / 12%),
+    0 9px 22px rgb(34 126 80 / 12%);
+}
+
+.record-day-card[data-empty='true'][data-expanded='false'] {
+  background: rgb(255 255 250 / 78%);
+  box-shadow: none;
+}
+
+.record-day-toggle {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 10px 11px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.record-day-date {
+  min-width: 0;
+  color: #364739;
+  font-size: 0.94rem;
+  font-weight: 950;
+  line-height: 1.35;
+}
+
+.record-day-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgb(255 255 255 / 72%);
+  color: #8b876f;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.record-day-meta strong {
+  color: #0e8b58;
+}
+
+.record-day-body {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid rgb(205 222 191 / 56%);
+  padding: 0 11px 11px;
+}
+
+.record-field {
+  display: grid;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 8px;
+  background: rgb(255 255 255 / 52%);
+}
+
+.record-field label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #45643b;
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.record-field label span {
+  color: #9a8d64;
+  font-size: 0.72rem;
+}
+
+.record-entry-list,
+.record-todo-list {
+  display: grid;
+  gap: 6px;
+}
+
+.record-entry-list textarea {
+  width: 100%;
+  min-height: 36px;
+  overflow: hidden;
+  resize: none;
+  border: 1px solid rgb(211 225 199 / 86%);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: #ffffff;
+  color: #262c27;
+  font: inherit;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  outline: none;
+}
+
+.record-entry-list textarea:focus {
+  border-color: rgb(47 155 91 / 46%);
+  box-shadow: 0 0 0 3px rgb(67 184 112 / 12%);
+}
+
+.record-todo-row {
+  background: rgb(255 255 255 / 86%);
 }
 
 .history-record-card {

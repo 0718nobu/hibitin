@@ -13,7 +13,7 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'achievements' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'settings';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -1855,6 +1855,124 @@ const getDailyNudgeStreakCount = (records: DailyNudgeRecords, dateKey: string) =
 const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`;
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
 const getDailyEventStorageKey = (date: Date) => `hibitin:events:${getDateKey(date)}`;
+const getDailyTodosStorageKey = (date: Date) => `hibitin:todos:${getDateKey(date)}`;
+
+type DailyTodoItem = {
+  id: string;
+  text: string;
+  completed: boolean;
+};
+
+type DailyTodos = DailyTodoItem[];
+
+const createDailyTodoId = () =>
+  `todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createDailyTodoItem = (
+  text = '',
+  completed = false,
+  id = createDailyTodoId(),
+): DailyTodoItem => ({
+  id,
+  text,
+  completed,
+});
+
+const hasTodoText = (todo: DailyTodoItem) => todo.text.trim().length > 0;
+
+const normalizeDailyTodos = (todos: unknown): DailyTodos => {
+  if (!Array.isArray(todos)) {
+    return [createDailyTodoItem()];
+  }
+
+  const normalizedTodos = todos
+    .map((todo) => {
+      if (!todo || typeof todo !== 'object' || Array.isArray(todo)) {
+        return null;
+      }
+
+      const parsedTodo = todo as Partial<DailyTodoItem>;
+      const text = typeof parsedTodo.text === 'string' ? parsedTodo.text : '';
+
+      return createDailyTodoItem(
+        text,
+        Boolean(parsedTodo.completed) && text.trim().length > 0,
+        typeof parsedTodo.id === 'string' && parsedTodo.id.trim()
+          ? parsedTodo.id
+          : createDailyTodoId(),
+      );
+    })
+    .filter((todo): todo is DailyTodoItem => Boolean(todo))
+    .filter(hasTodoText);
+
+  normalizedTodos.push(createDailyTodoItem());
+
+  return normalizedTodos;
+};
+
+const parseDailyTodos = (rawValue: string | null): DailyTodos => {
+  if (!rawValue) {
+    return [createDailyTodoItem()];
+  }
+
+  try {
+    return normalizeDailyTodos(JSON.parse(rawValue) as unknown);
+  } catch {
+    return [createDailyTodoItem()];
+  }
+};
+
+const serializeDailyTodos = (todos: DailyTodos) =>
+  JSON.stringify(todos.filter(hasTodoText));
+
+const loadDailyTodos = (date: Date) =>
+  parseDailyTodos(localStorage.getItem(getDailyTodosStorageKey(date)));
+
+const updateDailyTodoText = (
+  todos: DailyTodos,
+  id: string,
+  text: string,
+): DailyTodos =>
+  normalizeDailyTodos(
+    todos.map((todo) =>
+      todo.id === id
+        ? {
+            ...todo,
+            text,
+            completed: todo.completed && text.trim().length > 0,
+          }
+        : todo,
+    ),
+  );
+
+const toggleDailyTodoCompleted = (
+  todos: DailyTodos,
+  id: string,
+  completed: boolean,
+): DailyTodos =>
+  normalizeDailyTodos(
+    todos.map((todo) =>
+      todo.id === id && hasTodoText(todo)
+        ? {
+            ...todo,
+            completed,
+          }
+        : todo,
+    ),
+  );
+
+const deleteDailyTodo = (todos: DailyTodos, id: string): DailyTodos =>
+  normalizeDailyTodos(todos.filter((todo) => todo.id !== id));
+
+const getDailyTodoStats = (todos: DailyTodos) => {
+  const filledTodos = todos.filter(hasTodoText);
+  const completedCount = filledTodos.filter((todo) => todo.completed).length;
+
+  return {
+    completedCount,
+    totalCount: filledTodos.length,
+  };
+};
 
 type DailyRecordEntry = {
   text: string;
@@ -1951,6 +2069,28 @@ const updateDailyRecordEntry = (
   };
 
   return normalizeDailyRecordEntries(nextEntries);
+};
+
+const updateDailyRecordEntryAsSaved = (
+  entries: DailyRecordEntries,
+  index: number,
+  value: string,
+): DailyRecordEntries => {
+  const nextEntries = [...entries];
+  const currentEntry = nextEntries[index] ?? createDailyRecordEntry();
+
+  nextEntries[index] = {
+    ...currentEntry,
+    text: value,
+    saved: hasMeaningfulText(value),
+  };
+
+  return normalizeDailyRecordEntries(
+    nextEntries.map((entry) => ({
+      ...entry,
+      saved: hasMeaningfulText(entry.text),
+    })),
+  );
 };
 
 const saveDailyRecordEntry = (
@@ -2829,6 +2969,9 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
+  const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
+  const [expandedRecordDates, setExpandedRecordDates] = useState<Record<string, boolean>>({});
+  const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
   const questDateLabel = formatQuestDateLabel(selectedDate);
   const historySelectedDateKey = historySelectedDate ? getDateKey(historySelectedDate) : '';
@@ -2867,6 +3010,7 @@ function App() {
   const dailyEventExample = getDailyEventExample(selectedDateKey);
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
+  const dailyTodoLabel = isToday ? '今日のやること' : '昨日のやること';
   const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
@@ -2930,6 +3074,8 @@ function App() {
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
+  const [dailyTodos, setDailyTodos] = useState(() => loadDailyTodos(today));
+  const [dailyTodosDateKey, setDailyTodosDateKey] = useState(() => todayKey);
   const [historyDailyEvent, setHistoryDailyEvent] = useState<DailyRecordEntries>([
     createDailyRecordEntry(),
   ]);
@@ -2938,6 +3084,12 @@ function App() {
     createDailyRecordEntry(),
   ]);
   const [historyDailyMemoDateKey, setHistoryDailyMemoDateKey] = useState('');
+  const [historyDailyTodos, setHistoryDailyTodos] = useState<DailyTodos>([
+    createDailyTodoItem(),
+  ]);
+  const [historyDailyTodosDateKey, setHistoryDailyTodosDateKey] = useState('');
+  const dailyTodoStats = getDailyTodoStats(dailyTodos);
+  const historyDailyTodoStats = getDailyTodoStats(historyDailyTodos);
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -3123,6 +3275,11 @@ function App() {
     todayKey,
   ]);
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
+  const recordMonthLabel = monthFormatter.format(recordMonth);
+  const recordMonthDates = useMemo(
+    () => getMonthDateCells(recordMonth).filter((date): date is Date => Boolean(date)),
+    [recordMonth, recordRevision],
+  );
   const completionCalendarDays = useMemo(() => (
     getMonthDateCells(calendarMonth).map((date) => {
       if (!date) {
@@ -3195,6 +3352,8 @@ function App() {
     setDailyEventDateKey(selectedDateKey);
     setDailyMemo(loadDailyMemo(selectedDate));
     setDailyMemoDateKey(selectedDateKey);
+    setDailyTodos(loadDailyTodos(selectedDate));
+    setDailyTodosDateKey(selectedDateKey);
   }, [selectedDate, selectedDateKey]);
 
   useEffect(() => {
@@ -3204,6 +3363,8 @@ function App() {
       setHistoryDailyEventDateKey('');
       setHistoryDailyMemo([createDailyRecordEntry()]);
       setHistoryDailyMemoDateKey('');
+      setHistoryDailyTodos([createDailyTodoItem()]);
+      setHistoryDailyTodosDateKey('');
       return;
     }
 
@@ -3212,6 +3373,8 @@ function App() {
     setHistoryDailyEventDateKey(historySelectedDateKey);
     setHistoryDailyMemo(loadDailyMemo(historySelectedDate));
     setHistoryDailyMemoDateKey(historySelectedDateKey);
+    setHistoryDailyTodos(loadDailyTodos(historySelectedDate));
+    setHistoryDailyTodosDateKey(historySelectedDateKey);
   }, [historySelectedDate, historySelectedDateKey]);
 
   useEffect(() => {
@@ -3414,6 +3577,14 @@ function App() {
   }, [dailyMemo, dailyMemoDateKey, memoStorageKey, selectedDateKey]);
 
   useEffect(() => {
+    if (dailyTodosDateKey !== selectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(getDailyTodosStorageKey(selectedDate), serializeDailyTodos(dailyTodos));
+  }, [dailyTodos, dailyTodosDateKey, selectedDate, selectedDateKey]);
+
+  useEffect(() => {
     if (!historySelectedDate || historyDailyEventDateKey !== historySelectedDateKey) {
       return;
     }
@@ -3441,6 +3612,22 @@ function App() {
   }, [
     historyDailyMemo,
     historyDailyMemoDateKey,
+    historySelectedDate,
+    historySelectedDateKey,
+  ]);
+
+  useEffect(() => {
+    if (!historySelectedDate || historyDailyTodosDateKey !== historySelectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(
+      getDailyTodosStorageKey(historySelectedDate),
+      serializeDailyTodos(historyDailyTodos),
+    );
+  }, [
+    historyDailyTodos,
+    historyDailyTodosDateKey,
     historySelectedDate,
     historySelectedDateKey,
   ]);
@@ -5273,6 +5460,195 @@ function App() {
     }
   };
 
+  const updateDailyTodoForSelectedDate = (id: string, text: string) => {
+    setDailyTodosDateKey(selectedDateKey);
+    setDailyTodos((currentTodos) => updateDailyTodoText(currentTodos, id, text));
+  };
+
+  const toggleDailyTodoForSelectedDate = (id: string, completed: boolean) => {
+    setDailyTodosDateKey(selectedDateKey);
+    setDailyTodos((currentTodos) => toggleDailyTodoCompleted(currentTodos, id, completed));
+  };
+
+  const deleteDailyTodoForSelectedDate = (id: string) => {
+    setDailyTodosDateKey(selectedDateKey);
+    setDailyTodos((currentTodos) => deleteDailyTodo(currentTodos, id));
+  };
+
+  const updateHistoryDailyTodo = (id: string, text: string) => {
+    setHistoryDailyTodosDateKey(historySelectedDateKey);
+    setHistoryDailyTodos((currentTodos) => {
+      const nextTodos = updateDailyTodoText(currentTodos, id, text);
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setDailyTodosDateKey(selectedDateKey);
+        setDailyTodos(nextTodos);
+      }
+
+      return nextTodos;
+    });
+  };
+
+  const toggleHistoryDailyTodo = (id: string, completed: boolean) => {
+    setHistoryDailyTodosDateKey(historySelectedDateKey);
+    setHistoryDailyTodos((currentTodos) => {
+      const nextTodos = toggleDailyTodoCompleted(currentTodos, id, completed);
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setDailyTodosDateKey(selectedDateKey);
+        setDailyTodos(nextTodos);
+      }
+
+      return nextTodos;
+    });
+  };
+
+  const deleteHistoryDailyTodo = (id: string) => {
+    setHistoryDailyTodosDateKey(historySelectedDateKey);
+    setHistoryDailyTodos((currentTodos) => {
+      const nextTodos = deleteDailyTodo(currentTodos, id);
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setDailyTodosDateKey(selectedDateKey);
+        setDailyTodos(nextTodos);
+      }
+
+      return nextTodos;
+    });
+  };
+
+  const syncRecordEntriesToActiveDates = (
+    date: Date,
+    kind: 'memo' | 'events',
+    entries: DailyRecordEntries,
+  ) => {
+    const dateKey = getDateKey(date);
+
+    if (dateKey === selectedDateKey) {
+      if (kind === 'memo') {
+        setDailyMemoDateKey(selectedDateKey);
+        setDailyMemo(entries);
+      } else {
+        setDailyEventDateKey(selectedDateKey);
+        setDailyEvent(entries);
+      }
+    }
+
+    if (dateKey === historySelectedDateKey) {
+      if (kind === 'memo') {
+        setHistoryDailyMemoDateKey(historySelectedDateKey);
+        setHistoryDailyMemo(entries);
+      } else {
+        setHistoryDailyEventDateKey(historySelectedDateKey);
+        setHistoryDailyEvent(entries);
+      }
+    }
+  };
+
+  const updateRecordMemo = (date: Date, index: number, value: string) => {
+    const dateKey = getDateKey(date);
+    const currentEntries = dateKey === selectedDateKey
+      ? dailyMemo
+      : dateKey === historySelectedDateKey
+        ? historyDailyMemo
+        : loadDailyMemo(date);
+    const nextEntries = updateDailyRecordEntryAsSaved(currentEntries, index, value);
+
+    localStorage.setItem(getDailyMemoStorageKey(date), serializeDailyRecordEntries(nextEntries));
+    syncRecordEntriesToActiveDates(date, 'memo', nextEntries);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const updateRecordEvent = (date: Date, index: number, value: string) => {
+    const dateKey = getDateKey(date);
+    const currentEntries = dateKey === selectedDateKey
+      ? dailyEvent
+      : dateKey === historySelectedDateKey
+        ? historyDailyEvent
+        : loadDailyEvent(date);
+    const nextEntries = updateDailyRecordEntryAsSaved(currentEntries, index, value);
+
+    localStorage.setItem(getDailyEventStorageKey(date), serializeDailyRecordEntries(nextEntries));
+    syncRecordEntriesToActiveDates(date, 'events', nextEntries);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const syncRecordTodosToActiveDates = (date: Date, todos: DailyTodos) => {
+    const dateKey = getDateKey(date);
+
+    if (dateKey === selectedDateKey) {
+      setDailyTodosDateKey(selectedDateKey);
+      setDailyTodos(todos);
+    }
+
+    if (dateKey === historySelectedDateKey) {
+      setHistoryDailyTodosDateKey(historySelectedDateKey);
+      setHistoryDailyTodos(todos);
+    }
+  };
+
+  const updateRecordTodo = (date: Date, id: string, text: string) => {
+    const dateKey = getDateKey(date);
+    const currentTodos = dateKey === selectedDateKey
+      ? dailyTodos
+      : dateKey === historySelectedDateKey
+        ? historyDailyTodos
+        : loadDailyTodos(date);
+    const nextTodos = updateDailyTodoText(currentTodos, id, text);
+
+    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
+    syncRecordTodosToActiveDates(date, nextTodos);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const toggleRecordTodo = (date: Date, id: string, completed: boolean) => {
+    const dateKey = getDateKey(date);
+    const currentTodos = dateKey === selectedDateKey
+      ? dailyTodos
+      : dateKey === historySelectedDateKey
+        ? historyDailyTodos
+        : loadDailyTodos(date);
+    const nextTodos = toggleDailyTodoCompleted(currentTodos, id, completed);
+
+    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
+    syncRecordTodosToActiveDates(date, nextTodos);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const deleteRecordTodo = (date: Date, id: string) => {
+    const dateKey = getDateKey(date);
+    const currentTodos = dateKey === selectedDateKey
+      ? dailyTodos
+      : dateKey === historySelectedDateKey
+        ? historyDailyTodos
+        : loadDailyTodos(date);
+    const nextTodos = deleteDailyTodo(currentTodos, id);
+
+    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
+    syncRecordTodosToActiveDates(date, nextTodos);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const toggleRecordDate = (dateKey: string) => {
+    setExpandedRecordDates((currentDates) => ({
+      ...currentDates,
+      [dateKey]: !currentDates[dateKey],
+    }));
+  };
+
+  const showRecordToday = () => {
+    setRecordMonth(getMonthStart(today));
+    setExpandedRecordDates((currentDates) => ({
+      ...currentDates,
+      [todayKey]: true,
+    }));
+  };
+
+  const moveRecordMonth = (months: number) => {
+    setRecordMonth((currentMonth) => addMonths(currentMonth, months));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const changePage = (nextPage: PageName) => {
     resetEditUiState();
     setPage(nextPage);
@@ -5623,6 +5999,7 @@ function App() {
           <h1>
             {page === 'today' && '日々のルーティンチェック帳'}
             {page === 'history' && 'スタンプ帳'}
+            {page === 'records' && '記録'}
             {page === 'achievements' && '実績'}
             {page === 'shop' && 'ショップ'}
             {page === 'settings' && '設定'}
@@ -7052,6 +7429,246 @@ function App() {
           </section>
         )}
 
+        {page === 'today' && !isEditMode && (
+          <section className="daily-todo-card" aria-label={dailyTodoLabel}>
+            <div className="daily-todo-header">
+              <h2>☑️ {dailyTodoLabel}</h2>
+              <span>
+                {dailyTodoStats.completedCount} / {dailyTodoStats.totalCount}
+              </span>
+            </div>
+            <div className="daily-todo-list">
+              {dailyTodos.map((todo, index) => {
+                const isFilledTodo = hasTodoText(todo);
+
+                return (
+                  <div
+                    className="daily-todo-row"
+                    data-completed={todo.completed ? 'true' : 'false'}
+                    data-empty={!isFilledTodo ? 'true' : 'false'}
+                    key={todo.id}
+                  >
+                    <input
+                      aria-label={`${dailyTodoLabel} ${index + 1}を完了`}
+                      checked={todo.completed}
+                      disabled={!isFilledTodo}
+                      onChange={(event) =>
+                        toggleDailyTodoForSelectedDate(todo.id, event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <input
+                      aria-label={`${dailyTodoLabel} ${index + 1}`}
+                      onChange={(event) =>
+                        updateDailyTodoForSelectedDate(todo.id, event.target.value)
+                      }
+                      placeholder="やることをメモ"
+                      type="text"
+                      value={todo.text}
+                    />
+                    {isFilledTodo && (
+                      <button
+                        aria-label={`${dailyTodoLabel} ${index + 1}を削除`}
+                        className="daily-todo-delete-button"
+                        onClick={() => deleteDailyTodoForSelectedDate(todo.id)}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {page === 'records' && (
+          <section className="records-page" aria-label="月間記録">
+            <div className="records-month-header">
+              <button
+                aria-label="前の月の記録へ"
+                onClick={() => moveRecordMonth(-1)}
+                type="button"
+              >
+                ‹
+              </button>
+              <h2>{recordMonthLabel}</h2>
+              <button
+                aria-label="次の月の記録へ"
+                onClick={() => moveRecordMonth(1)}
+                type="button"
+              >
+                ›
+              </button>
+              <button
+                className="records-today-button"
+                onClick={showRecordToday}
+                type="button"
+              >
+                今日へ
+              </button>
+            </div>
+            <div className="records-day-list">
+              {recordMonthDates.map((recordDate) => {
+                const dateKey = getDateKey(recordDate);
+                const holidayName = getHolidayName(recordDate);
+                const memoEntries = dateKey === selectedDateKey
+                  ? dailyMemo
+                  : dateKey === historySelectedDateKey
+                    ? historyDailyMemo
+                    : loadDailyMemo(recordDate);
+                const eventEntries = dateKey === selectedDateKey
+                  ? dailyEvent
+                  : dateKey === historySelectedDateKey
+                    ? historyDailyEvent
+                    : loadDailyEvent(recordDate);
+                const todoEntries = dateKey === selectedDateKey
+                  ? dailyTodos
+                  : dateKey === historySelectedDateKey
+                    ? historyDailyTodos
+                    : loadDailyTodos(recordDate);
+                const savedMemoEntries = memoEntries.filter(
+                  (entry) => entry.saved && hasMeaningfulText(entry.text),
+                );
+                const savedEventEntries = eventEntries.filter(
+                  (entry) => entry.saved && hasMeaningfulText(entry.text),
+                );
+                const filledTodos = todoEntries.filter(hasTodoText);
+                const todoStats = getDailyTodoStats(todoEntries);
+                const hasRecordContent =
+                  savedMemoEntries.length > 0 ||
+                  savedEventEntries.length > 0 ||
+                  filledTodos.length > 0;
+                const isRecordExpanded = Boolean(expandedRecordDates[dateKey]);
+                const shouldShowRecordBody = hasRecordContent || isRecordExpanded;
+                const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
+                  weekdayShortLabels[recordDate.getDay()]
+                }${holidayName ? `・${holidayName}` : ''}）`;
+
+                return (
+                  <article
+                    className="record-day-card"
+                    data-date-key={dateKey}
+                    data-empty={!hasRecordContent ? 'true' : 'false'}
+                    data-expanded={shouldShowRecordBody ? 'true' : 'false'}
+                    data-today={dateKey === todayKey ? 'true' : 'false'}
+                    key={dateKey}
+                  >
+                    <button
+                      className="record-day-toggle"
+                      onClick={() => toggleRecordDate(dateKey)}
+                      type="button"
+                    >
+                      <span className="record-day-date">
+                        📓 {dateTitle}
+                      </span>
+                      <span className="record-day-meta">
+                        {dateKey === todayKey && <strong>今日</strong>}
+                        {hasRecordContent
+                          ? `${savedMemoEntries.length + savedEventEntries.length + filledTodos.length}件`
+                          : '記録なし'}
+                      </span>
+                    </button>
+
+                    {shouldShowRecordBody && (
+                      <div className="record-day-body">
+                        <div className="record-field">
+                          <label>📝 ひとこと</label>
+                          <div className="record-entry-list">
+                            {memoEntries.map((entry, index) => (
+                              <textarea
+                                aria-label={`${dateTitle}のひとこと ${index + 1}`}
+                                key={`record-memo-${dateKey}-${index}`}
+                                onChange={(event) => {
+                                  adjustTextareaHeight(event.currentTarget);
+                                  updateRecordMemo(recordDate, index, event.target.value);
+                                }}
+                                placeholder="思ったことや今の気持ち"
+                                ref={adjustTextareaHeight}
+                                rows={1}
+                                value={entry.text}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="record-field">
+                          <label>📅 できごと</label>
+                          <div className="record-entry-list">
+                            {eventEntries.map((entry, index) => (
+                              <textarea
+                                aria-label={`${dateTitle}のできごと ${index + 1}`}
+                                key={`record-events-${dateKey}-${index}`}
+                                onChange={(event) => {
+                                  adjustTextareaHeight(event.currentTarget);
+                                  updateRecordEvent(recordDate, index, event.target.value);
+                                }}
+                                placeholder="その日にあったこと"
+                                ref={adjustTextareaHeight}
+                                rows={1}
+                                value={entry.text}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="record-field">
+                          <label>
+                            ☑️ やること
+                            <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
+                          </label>
+                          <div className="record-todo-list">
+                            {todoEntries.map((todo, index) => {
+                              const isFilledTodo = hasTodoText(todo);
+
+                              return (
+                                <div
+                                  className="daily-todo-row record-todo-row"
+                                  data-completed={todo.completed ? 'true' : 'false'}
+                                  data-empty={!isFilledTodo ? 'true' : 'false'}
+                                  key={todo.id}
+                                >
+                                  <input
+                                    aria-label={`${dateTitle}のやること ${index + 1}を完了`}
+                                    checked={todo.completed}
+                                    disabled={!isFilledTodo}
+                                    onChange={(event) =>
+                                      toggleRecordTodo(recordDate, todo.id, event.target.checked)
+                                    }
+                                    type="checkbox"
+                                  />
+                                  <input
+                                    aria-label={`${dateTitle}のやること ${index + 1}`}
+                                    onChange={(event) =>
+                                      updateRecordTodo(recordDate, todo.id, event.target.value)
+                                    }
+                                    placeholder="やることをメモ"
+                                    type="text"
+                                    value={todo.text}
+                                  />
+                                  {isFilledTodo && (
+                                    <button
+                                      aria-label={`${dateTitle}のやること ${index + 1}を削除`}
+                                      className="daily-todo-delete-button"
+                                      onClick={() => deleteRecordTodo(recordDate, todo.id)}
+                                      type="button"
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {page === 'history' && (
           <section className="completion-calendar" aria-label="今月のスタンプ帳">
             <div className="completion-calendar-header">
@@ -7299,6 +7916,57 @@ function App() {
                         );
                       })}
                     </div>
+                  </div>
+                </section>
+                <section className="daily-todo-card history-todo-card" aria-label="その日のやること">
+                  <div className="daily-todo-header">
+                    <h2>☑️ その日のやること</h2>
+                    <span>
+                      {historyDailyTodoStats.completedCount} / {historyDailyTodoStats.totalCount}
+                    </span>
+                  </div>
+                  <div className="daily-todo-list">
+                    {historyDailyTodos.map((todo, index) => {
+                      const isFilledTodo = hasTodoText(todo);
+
+                      return (
+                        <div
+                          className="daily-todo-row"
+                          data-completed={todo.completed ? 'true' : 'false'}
+                          data-empty={!isFilledTodo ? 'true' : 'false'}
+                          key={todo.id}
+                        >
+                          <input
+                            aria-label={`その日のやること ${index + 1}を完了`}
+                            checked={todo.completed}
+                            disabled={!isFilledTodo}
+                            onChange={(event) =>
+                              toggleHistoryDailyTodo(todo.id, event.target.checked)
+                            }
+                            type="checkbox"
+                          />
+                          <input
+                            aria-label={`その日のやること ${index + 1}`}
+                            onChange={(event) =>
+                              updateHistoryDailyTodo(todo.id, event.target.value)
+                            }
+                            placeholder="やることをメモ"
+                            type="text"
+                            value={todo.text}
+                          />
+                          {isFilledTodo && (
+                            <button
+                              aria-label={`その日のやること ${index + 1}を削除`}
+                              className="daily-todo-delete-button"
+                              onClick={() => deleteHistoryDailyTodo(todo.id)}
+                              type="button"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </section>
                 <div className="history-routine-list">
@@ -7936,6 +8604,7 @@ function App() {
         {([
           ['today', '🎮', '今日'],
           ['history', '📅', 'スタンプ帳'],
+          ['records', '📖', '記録'],
           ['achievements', '🏆', '実績'],
           ['shop', '🛍️', 'ショップ'],
           ['settings', '⚙️', '設定'],
