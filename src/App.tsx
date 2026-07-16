@@ -6980,15 +6980,17 @@ function App() {
                         rows={1}
                         value={entry.text}
                       />
-                      <button
-                        aria-label={`${dailyOneLineLabel} ${index + 1}をOKにする`}
-                        className="daily-record-save-button"
-                        disabled={!canSaveEntry}
-                        onClick={() => saveDailyMemoForSelectedDate(index)}
-                        type="button"
-                      >
-                        {entry.saved ? 'OK済み' : 'OK'}
-                      </button>
+                      {!entry.saved && (
+                        <button
+                          aria-label={`${dailyOneLineLabel} ${index + 1}をOKにする`}
+                          className="daily-record-save-button"
+                          disabled={!canSaveEntry}
+                          onClick={() => saveDailyMemoForSelectedDate(index)}
+                          type="button"
+                        >
+                          OK
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -7027,15 +7029,17 @@ function App() {
                         rows={1}
                         value={entry.text}
                       />
-                      <button
-                        aria-label={`${dailyEventLabel} ${index + 1}をOKにする`}
-                        className="daily-record-save-button"
-                        disabled={!canSaveEntry}
-                        onClick={() => saveDailyEventForSelectedDate(index)}
-                        type="button"
-                      >
-                        {entry.saved ? 'OK済み' : 'OK'}
-                      </button>
+                      {!entry.saved && (
+                        <button
+                          aria-label={`${dailyEventLabel} ${index + 1}をOKにする`}
+                          className="daily-record-save-button"
+                          disabled={!canSaveEntry}
+                          onClick={() => saveDailyEventForSelectedDate(index)}
+                          type="button"
+                        >
+                          OK
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -7228,15 +7232,17 @@ function App() {
                               rows={1}
                               value={entry.text}
                             />
-                            <button
-                              aria-label={`その日のひとこと ${index + 1}をOKにする`}
-                              className="daily-record-save-button"
-                              disabled={!canSaveEntry}
-                              onClick={() => saveHistoryDailyMemo(index)}
-                              type="button"
-                            >
-                              {entry.saved ? 'OK済み' : 'OK'}
-                            </button>
+                            {!entry.saved && (
+                              <button
+                                aria-label={`その日のひとこと ${index + 1}をOKにする`}
+                                className="daily-record-save-button"
+                                disabled={!canSaveEntry}
+                                onClick={() => saveHistoryDailyMemo(index)}
+                                type="button"
+                              >
+                                OK
+                              </button>
+                            )}
                           </div>
                         );
                       })}
@@ -7278,15 +7284,17 @@ function App() {
                               rows={1}
                               value={entry.text}
                             />
-                            <button
-                              aria-label={`その日のできごと ${index + 1}をOKにする`}
-                              className="daily-record-save-button"
-                              disabled={!canSaveEntry}
-                              onClick={() => saveHistoryDailyEvent(index)}
-                              type="button"
-                            >
-                              {entry.saved ? 'OK済み' : 'OK'}
-                            </button>
+                            {!entry.saved && (
+                              <button
+                                aria-label={`その日のできごと ${index + 1}をOKにする`}
+                                className="daily-record-save-button"
+                                disabled={!canSaveEntry}
+                                onClick={() => saveHistoryDailyEvent(index)}
+                                type="button"
+                              >
+                                OK
+                              </button>
+                            )}
                           </div>
                         );
                       })}
