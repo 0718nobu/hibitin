@@ -1866,6 +1866,10 @@ type DailyTodoItem = {
 
 type DailyTodos = DailyTodoItem[];
 
+type NormalizeDailyTodoOptions = {
+  preserveEmptyIds?: Iterable<string>;
+};
+
 const createDailyTodoId = () =>
   `todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -1881,11 +1885,15 @@ const createDailyTodoItem = (
 
 const hasTodoText = (todo: DailyTodoItem) => todo.text.trim().length > 0;
 
-const normalizeDailyTodos = (todos: unknown): DailyTodos => {
+const normalizeDailyTodos = (
+  todos: unknown,
+  options: NormalizeDailyTodoOptions = {},
+): DailyTodos => {
   if (!Array.isArray(todos)) {
     return [createDailyTodoItem()];
   }
 
+  const preserveEmptyIds = new Set(options.preserveEmptyIds ?? []);
   const normalizedTodos = todos
     .map((todo) => {
       if (!todo || typeof todo !== 'object' || Array.isArray(todo)) {
@@ -1904,9 +1912,11 @@ const normalizeDailyTodos = (todos: unknown): DailyTodos => {
       );
     })
     .filter((todo): todo is DailyTodoItem => Boolean(todo))
-    .filter(hasTodoText);
+    .filter((todo) => hasTodoText(todo) || preserveEmptyIds.has(todo.id));
 
-  normalizedTodos.push(createDailyTodoItem());
+  if (normalizedTodos.every(hasTodoText)) {
+    normalizedTodos.push(createDailyTodoItem());
+  }
 
   return normalizedTodos;
 };
@@ -1933,6 +1943,7 @@ const updateDailyTodoText = (
   todos: DailyTodos,
   id: string,
   text: string,
+  options: NormalizeDailyTodoOptions = {},
 ): DailyTodos =>
   normalizeDailyTodos(
     todos.map((todo) =>
@@ -1944,6 +1955,10 @@ const updateDailyTodoText = (
           }
         : todo,
     ),
+    {
+      ...options,
+      preserveEmptyIds: [...(options.preserveEmptyIds ?? []), id],
+    },
   );
 
 const toggleDailyTodoCompleted = (
@@ -2974,7 +2989,7 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
-  const [expandedRecordDates, setExpandedRecordDates] = useState<Record<string, boolean>>({});
+  const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
   const questDateLabel = formatQuestDateLabel(selectedDate);
@@ -3016,7 +3031,7 @@ function App() {
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const dailyTodoLabel = isToday ? '今日のやること' : '昨日のやること';
-  const dailyAnyMemoLabel = isToday ? '今日のなんでもメモ' : '昨日のなんでもメモ';
+  const dailyAnyMemoLabel = 'なんでもメモ';
   const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
@@ -5502,6 +5517,11 @@ function App() {
     setDailyTodos((currentTodos) => updateDailyTodoText(currentTodos, id, text));
   };
 
+  const cleanupDailyTodoForSelectedDate = () => {
+    setDailyTodosDateKey(selectedDateKey);
+    setDailyTodos((currentTodos) => normalizeDailyTodos(currentTodos));
+  };
+
   const toggleDailyTodoForSelectedDate = (id: string, completed: boolean) => {
     setDailyTodosDateKey(selectedDateKey);
     setDailyTodos((currentTodos) => toggleDailyTodoCompleted(currentTodos, id, completed));
@@ -5516,6 +5536,20 @@ function App() {
     setHistoryDailyTodosDateKey(historySelectedDateKey);
     setHistoryDailyTodos((currentTodos) => {
       const nextTodos = updateDailyTodoText(currentTodos, id, text);
+
+      if (historySelectedDateKey === selectedDateKey) {
+        setDailyTodosDateKey(selectedDateKey);
+        setDailyTodos(nextTodos);
+      }
+
+      return nextTodos;
+    });
+  };
+
+  const cleanupHistoryDailyTodo = () => {
+    setHistoryDailyTodosDateKey(historySelectedDateKey);
+    setHistoryDailyTodos((currentTodos) => {
+      const nextTodos = normalizeDailyTodos(currentTodos);
 
       if (historySelectedDateKey === selectedDateKey) {
         setDailyTodosDateKey(selectedDateKey);
@@ -5667,6 +5701,20 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
+  const cleanupRecordTodo = (date: Date) => {
+    const dateKey = getDateKey(date);
+    const currentTodos = dateKey === selectedDateKey
+      ? dailyTodos
+      : dateKey === historySelectedDateKey
+        ? historyDailyTodos
+        : loadDailyTodos(date);
+    const nextTodos = normalizeDailyTodos(currentTodos);
+
+    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
+    syncRecordTodosToActiveDates(date, nextTodos);
+    setRecordRevision((revision) => revision + 1);
+  };
+
   const toggleRecordTodo = (date: Date, id: string, completed: boolean) => {
     const dateKey = getDateKey(date);
     const currentTodos = dateKey === selectedDateKey
@@ -5701,19 +5749,9 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
-  const toggleRecordDate = (dateKey: string) => {
-    setExpandedRecordDates((currentDates) => ({
-      ...currentDates,
-      [dateKey]: !currentDates[dateKey],
-    }));
-  };
-
   const showRecordToday = () => {
     setRecordMonth(getMonthStart(today));
-    setExpandedRecordDates((currentDates) => ({
-      ...currentDates,
-      [todayKey]: true,
-    }));
+    setSelectedRecordDate(null);
   };
 
   const moveRecordMonth = (months: number) => {
@@ -7531,8 +7569,12 @@ function App() {
                     />
                     <input
                       aria-label={`${dailyTodoLabel} ${index + 1}`}
+                      onBlur={cleanupDailyTodoForSelectedDate}
                       onChange={(event) =>
                         updateDailyTodoForSelectedDate(todo.id, event.target.value)
+                      }
+                      onCompositionEnd={(event) =>
+                        updateDailyTodoForSelectedDate(todo.id, event.currentTarget.value)
                       }
                       placeholder="やることをメモ"
                       type="text"
@@ -7631,14 +7673,11 @@ function App() {
                   (entry) => entry.saved && hasMeaningfulText(entry.text),
                 );
                 const filledTodos = todoEntries.filter(hasTodoText);
-                const todoStats = getDailyTodoStats(todoEntries);
                 const hasRecordContent =
                   savedMemoEntries.length > 0 ||
                   savedEventEntries.length > 0 ||
                   filledTodos.length > 0 ||
                   anyMemoValue.trim().length > 0;
-                const isRecordExpanded = Boolean(expandedRecordDates[dateKey]);
-                const shouldShowRecordBody = hasRecordContent || isRecordExpanded;
                 const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
                   weekdayShortLabels[recordDate.getDay()]
                 }${holidayName ? `・${holidayName}` : ''}）`;
@@ -7648,13 +7687,12 @@ function App() {
                     className="record-day-card"
                     data-date-key={dateKey}
                     data-empty={!hasRecordContent ? 'true' : 'false'}
-                    data-expanded={shouldShowRecordBody ? 'true' : 'false'}
                     data-today={dateKey === todayKey ? 'true' : 'false'}
                     key={dateKey}
                   >
                     <button
                       className="record-day-toggle"
-                      onClick={() => toggleRecordDate(dateKey)}
+                      onClick={() => setSelectedRecordDate(recordDate)}
                       type="button"
                     >
                       <span className="record-day-date">
@@ -7673,115 +7711,222 @@ function App() {
                       </span>
                     </button>
 
-                    {shouldShowRecordBody && (
+                    {hasRecordContent && (
                       <div className="record-day-body">
-                        <div className="record-field">
-                          <label>📝 ひとこと</label>
-                          <div className="record-entry-list">
-                            {memoEntries.map((entry, index) => (
-                              <textarea
-                                aria-label={`${dateTitle}のひとこと ${index + 1}`}
-                                key={`record-memo-${dateKey}-${index}`}
-                                onChange={(event) => {
-                                  adjustTextareaHeight(event.currentTarget);
-                                  updateRecordMemo(recordDate, index, event.target.value);
-                                }}
-                                placeholder="思ったことや今の気持ち"
-                                ref={adjustTextareaHeight}
-                                rows={1}
-                                value={entry.text}
-                              />
-                            ))}
+                        {savedMemoEntries.length > 0 && (
+                          <div className="record-read-section">
+                            <h3>✍️ ひとこと</h3>
+                            <div className="record-read-list">
+                              {savedMemoEntries.map((entry, index) => (
+                                <p key={`record-read-memo-${dateKey}-${index}`}>
+                                  {entry.text.trim()}
+                                </p>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                        <div className="record-field">
-                          <label>📅 できごと</label>
-                          <div className="record-entry-list">
-                            {eventEntries.map((entry, index) => (
-                              <textarea
-                                aria-label={`${dateTitle}のできごと ${index + 1}`}
-                                key={`record-events-${dateKey}-${index}`}
-                                onChange={(event) => {
-                                  adjustTextareaHeight(event.currentTarget);
-                                  updateRecordEvent(recordDate, index, event.target.value);
-                                }}
-                                placeholder="その日にあったこと"
-                                ref={adjustTextareaHeight}
-                                rows={1}
-                                value={entry.text}
-                              />
-                            ))}
+                        )}
+                        {savedEventEntries.length > 0 && (
+                          <div className="record-read-section">
+                            <h3>📅 できごと</h3>
+                            <div className="record-read-list">
+                              {savedEventEntries.map((entry, index) => (
+                                <p key={`record-read-events-${dateKey}-${index}`}>
+                                  {entry.text.trim()}
+                                </p>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                        <div className="record-field">
-                          <label>
-                            ☑️ やること
-                            <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
-                          </label>
-                          <div className="record-todo-list">
-                            {todoEntries.map((todo, index) => {
-                              const isFilledTodo = hasTodoText(todo);
-
-                              return (
-                                <div
-                                  className="daily-todo-row record-todo-row"
+                        )}
+                        {filledTodos.length > 0 && (
+                          <div className="record-read-section">
+                            <h3>☑️ やること</h3>
+                            <ul className="record-read-todos">
+                              {filledTodos.map((todo) => (
+                                <li
                                   data-completed={todo.completed ? 'true' : 'false'}
-                                  data-empty={!isFilledTodo ? 'true' : 'false'}
                                   key={todo.id}
                                 >
-                                  <input
-                                    aria-label={`${dateTitle}のやること ${index + 1}を完了`}
-                                    checked={todo.completed}
-                                    disabled={!isFilledTodo}
-                                    onChange={(event) =>
-                                      toggleRecordTodo(recordDate, todo.id, event.target.checked)
-                                    }
-                                    type="checkbox"
-                                  />
-                                  <input
-                                    aria-label={`${dateTitle}のやること ${index + 1}`}
-                                    onChange={(event) =>
-                                      updateRecordTodo(recordDate, todo.id, event.target.value)
-                                    }
-                                    placeholder="やることをメモ"
-                                    type="text"
-                                    value={todo.text}
-                                  />
-                                  {isFilledTodo && (
-                                    <button
-                                      aria-label={`${dateTitle}のやること ${index + 1}を削除`}
-                                      className="daily-todo-delete-button"
-                                      onClick={() => deleteRecordTodo(recordDate, todo.id)}
-                                      type="button"
-                                    >
-                                      ×
-                                    </button>
-                                  )}
-                                </div>
-                              );
-                            })}
+                                  <span aria-hidden="true">{todo.completed ? '✓' : '・'}</span>
+                                  <span>{todo.text.trim()}</span>
+                                </li>
+                              ))}
+                            </ul>
                           </div>
-                        </div>
-                        <div className="record-field record-any-memo-field">
-                          <label>🗒️ なんでもメモ</label>
-                          <textarea
-                            aria-label={`${dateTitle}のなんでもメモ`}
-                            onChange={(event) => {
-                              adjustTextareaHeight(event.currentTarget);
-                              updateRecordAnyMemo(recordDate, event.target.value);
-                            }}
-                            placeholder="とりあえず、ここにメモ"
-                            ref={adjustTextareaHeight}
-                            rows={2}
-                            value={anyMemoValue}
-                          />
-                        </div>
+                        )}
+                        {anyMemoValue.trim().length > 0 && (
+                          <div className="record-read-section">
+                            <h3>📝 なんでもメモ</h3>
+                            <p>{anyMemoValue.trim()}</p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </article>
                 );
               })}
             </div>
+            {selectedRecordDate && (() => {
+              const recordDate = selectedRecordDate;
+              const dateKey = getDateKey(recordDate);
+              const holidayName = getHolidayName(recordDate);
+              const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
+                weekdayShortLabels[recordDate.getDay()]
+              }${holidayName ? `・${holidayName}` : ''}）`;
+              const memoEntries = dateKey === selectedDateKey
+                ? dailyMemo
+                : dateKey === historySelectedDateKey
+                  ? historyDailyMemo
+                  : loadDailyMemo(recordDate);
+              const eventEntries = dateKey === selectedDateKey
+                ? dailyEvent
+                : dateKey === historySelectedDateKey
+                  ? historyDailyEvent
+                  : loadDailyEvent(recordDate);
+              const todoEntries = dateKey === selectedDateKey
+                ? dailyTodos
+                : dateKey === historySelectedDateKey
+                  ? historyDailyTodos
+                  : loadDailyTodos(recordDate);
+              const anyMemoValue = dateKey === selectedDateKey
+                ? dailyAnyMemo
+                : dateKey === historySelectedDateKey
+                  ? historyDailyAnyMemo
+                  : loadDailyAnyMemo(recordDate);
+              const todoStats = getDailyTodoStats(todoEntries);
+
+              return (
+                <div
+                  className="record-editor-backdrop"
+                  role="presentation"
+                  onClick={() => setSelectedRecordDate(null)}
+                >
+                  <section
+                    aria-label={`${dateTitle}の記録編集`}
+                    className="record-editor-panel"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="record-editor-header">
+                      <div>
+                        <p>記録を編集</p>
+                        <h2>{dateTitle}</h2>
+                      </div>
+                      <button
+                        aria-label="記録編集を閉じる"
+                        onClick={() => setSelectedRecordDate(null)}
+                        type="button"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    <div className="record-field">
+                      <label>📝 ひとこと</label>
+                      <div className="record-entry-list">
+                        {memoEntries.map((entry, index) => (
+                          <textarea
+                            aria-label={`${dateTitle}のひとこと ${index + 1}`}
+                            key={`record-editor-memo-${dateKey}-${index}`}
+                            onChange={(event) => {
+                              adjustTextareaHeight(event.currentTarget);
+                              updateRecordMemo(recordDate, index, event.target.value);
+                            }}
+                            placeholder="思ったことや今の気持ち"
+                            ref={adjustTextareaHeight}
+                            rows={1}
+                            value={entry.text}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="record-field">
+                      <label>📅 できごと</label>
+                      <div className="record-entry-list">
+                        {eventEntries.map((entry, index) => (
+                          <textarea
+                            aria-label={`${dateTitle}のできごと ${index + 1}`}
+                            key={`record-editor-events-${dateKey}-${index}`}
+                            onChange={(event) => {
+                              adjustTextareaHeight(event.currentTarget);
+                              updateRecordEvent(recordDate, index, event.target.value);
+                            }}
+                            placeholder="その日にあったこと"
+                            ref={adjustTextareaHeight}
+                            rows={1}
+                            value={entry.text}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="record-field">
+                      <label>
+                        ☑️ やること
+                        <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
+                      </label>
+                      <div className="record-todo-list">
+                        {todoEntries.map((todo, index) => {
+                          const isFilledTodo = hasTodoText(todo);
+
+                          return (
+                            <div
+                              className="daily-todo-row record-todo-row"
+                              data-completed={todo.completed ? 'true' : 'false'}
+                              data-empty={!isFilledTodo ? 'true' : 'false'}
+                              key={todo.id}
+                            >
+                              <input
+                                aria-label={`${dateTitle}のやること ${index + 1}を完了`}
+                                checked={todo.completed}
+                                disabled={!isFilledTodo}
+                                onChange={(event) =>
+                                  toggleRecordTodo(recordDate, todo.id, event.target.checked)
+                                }
+                                type="checkbox"
+                              />
+                              <input
+                                aria-label={`${dateTitle}のやること ${index + 1}`}
+                                onBlur={() => cleanupRecordTodo(recordDate)}
+                                onChange={(event) =>
+                                  updateRecordTodo(recordDate, todo.id, event.target.value)
+                                }
+                                onCompositionEnd={(event) =>
+                                  updateRecordTodo(recordDate, todo.id, event.currentTarget.value)
+                                }
+                                placeholder="やることをメモ"
+                                type="text"
+                                value={todo.text}
+                              />
+                              {isFilledTodo && (
+                                <button
+                                  aria-label={`${dateTitle}のやること ${index + 1}を削除`}
+                                  className="daily-todo-delete-button"
+                                  onClick={() => deleteRecordTodo(recordDate, todo.id)}
+                                  type="button"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="record-field record-any-memo-field">
+                      <label>🗒️ なんでもメモ</label>
+                      <textarea
+                        aria-label={`${dateTitle}のなんでもメモ`}
+                        onChange={(event) => {
+                          adjustTextareaHeight(event.currentTarget);
+                          updateRecordAnyMemo(recordDate, event.target.value);
+                        }}
+                        placeholder="とりあえず、ここにメモ"
+                        ref={adjustTextareaHeight}
+                        rows={2}
+                        value={anyMemoValue}
+                      />
+                    </div>
+                  </section>
+                </div>
+              );
+            })()}
           </section>
         )}
 
@@ -8063,8 +8208,12 @@ function App() {
                           />
                           <input
                             aria-label={`その日のやること ${index + 1}`}
+                            onBlur={cleanupHistoryDailyTodo}
                             onChange={(event) =>
                               updateHistoryDailyTodo(todo.id, event.target.value)
+                            }
+                            onCompositionEnd={(event) =>
+                              updateHistoryDailyTodo(todo.id, event.currentTarget.value)
                             }
                             placeholder="やることをメモ"
                             type="text"
@@ -8085,12 +8234,12 @@ function App() {
                     })}
                   </div>
                 </section>
-                <section className="daily-any-memo-card history-any-memo-card" aria-label="その日のなんでもメモ">
+                <section className="daily-any-memo-card history-any-memo-card" aria-label="なんでもメモ">
                   <div className="daily-any-memo-header">
-                    <h2>🗒️ その日のなんでもメモ</h2>
+                    <h2>🗒️ なんでもメモ</h2>
                   </div>
                   <textarea
-                    aria-label="その日のなんでもメモ"
+                    aria-label="なんでもメモ"
                     onChange={(event) => {
                       adjustTextareaHeight(event.currentTarget);
                       updateHistoryDailyAnyMemo(event.target.value);

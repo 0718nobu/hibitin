@@ -36,7 +36,7 @@ export const coreRoutineDefinitions: CoreRoutineDefinition[] = [
 
 export const defaultCoreRoutinePlacements: CoreRoutinePlacements = {
   'daily-memo': {
-    sectionId: 'morning',
+    sectionId: 'noon',
     order: 9000,
   },
   'daily-events': {
