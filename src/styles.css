@@ -3777,6 +3777,58 @@ h1 {
   color: #805d37;
 }
 
+.daily-any-memo-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid rgb(216 219 201 / 82%);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 70%) 0%, rgb(255 251 238 / 78%) 100%),
+    linear-gradient(90deg, rgb(206 195 155 / 16%) 1px, transparent 1px) 0 0 / 20px 20px;
+  box-shadow: 0 6px 16px rgb(75 71 45 / 6%);
+}
+
+.daily-any-memo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-any-memo-header h2 {
+  margin: 0;
+  color: #5f6846;
+  font-size: 0.95rem;
+  font-weight: 1000;
+}
+
+.daily-any-memo-card textarea {
+  width: 100%;
+  min-height: 78px;
+  overflow: hidden;
+  resize: none;
+  border: 1px solid rgb(209 214 193 / 88%);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgb(255 255 255 / 82%);
+  color: #2e3028;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  outline: none;
+}
+
+.daily-any-memo-card textarea:focus {
+  border-color: rgb(132 160 96 / 45%);
+  box-shadow: 0 0 0 3px rgb(164 190 112 / 13%);
+}
+
+.daily-any-memo-card textarea::placeholder {
+  color: #aaa27f;
+}
+
 .records-page {
   display: grid;
   gap: 12px;
@@ -3925,7 +3977,8 @@ h1 {
   gap: 6px;
 }
 
-.record-entry-list textarea {
+.record-entry-list textarea,
+.record-any-memo-field textarea {
   width: 100%;
   min-height: 36px;
   overflow: hidden;
@@ -3941,7 +3994,12 @@ h1 {
   outline: none;
 }
 
-.record-entry-list textarea:focus {
+.record-any-memo-field textarea {
+  min-height: 64px;
+}
+
+.record-entry-list textarea:focus,
+.record-any-memo-field textarea:focus {
   border-color: rgb(47 155 91 / 46%);
   box-shadow: 0 0 0 3px rgb(67 184 112 / 12%);
 }

@@ -1856,6 +1856,7 @@ const getChecksStorageKey = (date: Date) => `hibitin:checks:${getDateKey(date)}`
 const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}`;
 const getDailyEventStorageKey = (date: Date) => `hibitin:events:${getDateKey(date)}`;
 const getDailyTodosStorageKey = (date: Date) => `hibitin:todos:${getDateKey(date)}`;
+const getDailyAnyMemoStorageKey = (date: Date) => `hibitin:anyMemo:${getDateKey(date)}`;
 
 type DailyTodoItem = {
   id: string;
@@ -2126,6 +2127,9 @@ const loadDailyMemo = (date: Date) =>
 
 const loadDailyEvent = (date: Date) =>
   parseDailyRecordEntries(localStorage.getItem(getDailyEventStorageKey(date)));
+
+const loadDailyAnyMemo = (date: Date) =>
+  localStorage.getItem(getDailyAnyMemoStorageKey(date)) ?? '';
 
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -2979,6 +2983,7 @@ function App() {
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const eventStorageKey = getDailyEventStorageKey(selectedDate);
+  const anyMemoStorageKey = getDailyAnyMemoStorageKey(selectedDate);
   const isToday = selectedDateKey === todayKey;
   const [templateSettings, setTemplateSettings] = useState<RoutineTemplateSettings>(() =>
     loadTemplateSettings(),
@@ -3011,6 +3016,7 @@ function App() {
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const dailyTodoLabel = isToday ? '今日のやること' : '昨日のやること';
+  const dailyAnyMemoLabel = isToday ? '今日のなんでもメモ' : '昨日のなんでもメモ';
   const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
@@ -3076,6 +3082,8 @@ function App() {
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
   const [dailyTodos, setDailyTodos] = useState(() => loadDailyTodos(today));
   const [dailyTodosDateKey, setDailyTodosDateKey] = useState(() => todayKey);
+  const [dailyAnyMemo, setDailyAnyMemo] = useState(() => loadDailyAnyMemo(today));
+  const [dailyAnyMemoDateKey, setDailyAnyMemoDateKey] = useState(() => todayKey);
   const [historyDailyEvent, setHistoryDailyEvent] = useState<DailyRecordEntries>([
     createDailyRecordEntry(),
   ]);
@@ -3088,6 +3096,8 @@ function App() {
     createDailyTodoItem(),
   ]);
   const [historyDailyTodosDateKey, setHistoryDailyTodosDateKey] = useState('');
+  const [historyDailyAnyMemo, setHistoryDailyAnyMemo] = useState('');
+  const [historyDailyAnyMemoDateKey, setHistoryDailyAnyMemoDateKey] = useState('');
   const dailyTodoStats = getDailyTodoStats(dailyTodos);
   const historyDailyTodoStats = getDailyTodoStats(historyDailyTodos);
   const editTarget = resolveEditTarget(editTargetKey);
@@ -3354,6 +3364,8 @@ function App() {
     setDailyMemoDateKey(selectedDateKey);
     setDailyTodos(loadDailyTodos(selectedDate));
     setDailyTodosDateKey(selectedDateKey);
+    setDailyAnyMemo(loadDailyAnyMemo(selectedDate));
+    setDailyAnyMemoDateKey(selectedDateKey);
   }, [selectedDate, selectedDateKey]);
 
   useEffect(() => {
@@ -3365,6 +3377,8 @@ function App() {
       setHistoryDailyMemoDateKey('');
       setHistoryDailyTodos([createDailyTodoItem()]);
       setHistoryDailyTodosDateKey('');
+      setHistoryDailyAnyMemo('');
+      setHistoryDailyAnyMemoDateKey('');
       return;
     }
 
@@ -3375,6 +3389,8 @@ function App() {
     setHistoryDailyMemoDateKey(historySelectedDateKey);
     setHistoryDailyTodos(loadDailyTodos(historySelectedDate));
     setHistoryDailyTodosDateKey(historySelectedDateKey);
+    setHistoryDailyAnyMemo(loadDailyAnyMemo(historySelectedDate));
+    setHistoryDailyAnyMemoDateKey(historySelectedDateKey);
   }, [historySelectedDate, historySelectedDateKey]);
 
   useEffect(() => {
@@ -3585,6 +3601,14 @@ function App() {
   }, [dailyTodos, dailyTodosDateKey, selectedDate, selectedDateKey]);
 
   useEffect(() => {
+    if (dailyAnyMemoDateKey !== selectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(anyMemoStorageKey, dailyAnyMemo);
+  }, [anyMemoStorageKey, dailyAnyMemo, dailyAnyMemoDateKey, selectedDateKey]);
+
+  useEffect(() => {
     if (!historySelectedDate || historyDailyEventDateKey !== historySelectedDateKey) {
       return;
     }
@@ -3628,6 +3652,19 @@ function App() {
   }, [
     historyDailyTodos,
     historyDailyTodosDateKey,
+    historySelectedDate,
+    historySelectedDateKey,
+  ]);
+
+  useEffect(() => {
+    if (!historySelectedDate || historyDailyAnyMemoDateKey !== historySelectedDateKey) {
+      return;
+    }
+
+    localStorage.setItem(getDailyAnyMemoStorageKey(historySelectedDate), historyDailyAnyMemo);
+  }, [
+    historyDailyAnyMemo,
+    historyDailyAnyMemoDateKey,
     historySelectedDate,
     historySelectedDateKey,
   ]);
@@ -5517,6 +5554,21 @@ function App() {
     });
   };
 
+  const updateDailyAnyMemoForSelectedDate = (value: string) => {
+    setDailyAnyMemoDateKey(selectedDateKey);
+    setDailyAnyMemo(value);
+  };
+
+  const updateHistoryDailyAnyMemo = (value: string) => {
+    setHistoryDailyAnyMemoDateKey(historySelectedDateKey);
+    setHistoryDailyAnyMemo(value);
+
+    if (historySelectedDateKey === selectedDateKey) {
+      setDailyAnyMemoDateKey(selectedDateKey);
+      setDailyAnyMemo(value);
+    }
+  };
+
   const syncRecordEntriesToActiveDates = (
     date: Date,
     kind: 'memo' | 'events',
@@ -5587,6 +5639,20 @@ function App() {
     }
   };
 
+  const syncRecordAnyMemoToActiveDates = (date: Date, value: string) => {
+    const dateKey = getDateKey(date);
+
+    if (dateKey === selectedDateKey) {
+      setDailyAnyMemoDateKey(selectedDateKey);
+      setDailyAnyMemo(value);
+    }
+
+    if (dateKey === historySelectedDateKey) {
+      setHistoryDailyAnyMemoDateKey(historySelectedDateKey);
+      setHistoryDailyAnyMemo(value);
+    }
+  };
+
   const updateRecordTodo = (date: Date, id: string, text: string) => {
     const dateKey = getDateKey(date);
     const currentTodos = dateKey === selectedDateKey
@@ -5626,6 +5692,12 @@ function App() {
 
     localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
     syncRecordTodosToActiveDates(date, nextTodos);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const updateRecordAnyMemo = (date: Date, value: string) => {
+    localStorage.setItem(getDailyAnyMemoStorageKey(date), value);
+    syncRecordAnyMemoToActiveDates(date, value);
     setRecordRevision((revision) => revision + 1);
   };
 
@@ -7483,6 +7555,25 @@ function App() {
           </section>
         )}
 
+        {page === 'today' && !isEditMode && (
+          <section className="daily-any-memo-card" aria-label={dailyAnyMemoLabel}>
+            <div className="daily-any-memo-header">
+              <h2>🗒️ {dailyAnyMemoLabel}</h2>
+            </div>
+            <textarea
+              aria-label={dailyAnyMemoLabel}
+              onChange={(event) => {
+                adjustTextareaHeight(event.currentTarget);
+                updateDailyAnyMemoForSelectedDate(event.target.value);
+              }}
+              placeholder="とりあえず、ここにメモ"
+              ref={adjustTextareaHeight}
+              rows={3}
+              value={dailyAnyMemo}
+            />
+          </section>
+        )}
+
         {page === 'records' && (
           <section className="records-page" aria-label="月間記録">
             <div className="records-month-header">
@@ -7528,6 +7619,11 @@ function App() {
                   : dateKey === historySelectedDateKey
                     ? historyDailyTodos
                     : loadDailyTodos(recordDate);
+                const anyMemoValue = dateKey === selectedDateKey
+                  ? dailyAnyMemo
+                  : dateKey === historySelectedDateKey
+                    ? historyDailyAnyMemo
+                    : loadDailyAnyMemo(recordDate);
                 const savedMemoEntries = memoEntries.filter(
                   (entry) => entry.saved && hasMeaningfulText(entry.text),
                 );
@@ -7539,7 +7635,8 @@ function App() {
                 const hasRecordContent =
                   savedMemoEntries.length > 0 ||
                   savedEventEntries.length > 0 ||
-                  filledTodos.length > 0;
+                  filledTodos.length > 0 ||
+                  anyMemoValue.trim().length > 0;
                 const isRecordExpanded = Boolean(expandedRecordDates[dateKey]);
                 const shouldShowRecordBody = hasRecordContent || isRecordExpanded;
                 const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
@@ -7566,7 +7663,12 @@ function App() {
                       <span className="record-day-meta">
                         {dateKey === todayKey && <strong>今日</strong>}
                         {hasRecordContent
-                          ? `${savedMemoEntries.length + savedEventEntries.length + filledTodos.length}件`
+                          ? `${
+                            savedMemoEntries.length +
+                            savedEventEntries.length +
+                            filledTodos.length +
+                            (anyMemoValue.trim().length > 0 ? 1 : 0)
+                          }件`
                           : '記録なし'}
                       </span>
                     </button>
@@ -7659,6 +7761,20 @@ function App() {
                               );
                             })}
                           </div>
+                        </div>
+                        <div className="record-field record-any-memo-field">
+                          <label>🗒️ なんでもメモ</label>
+                          <textarea
+                            aria-label={`${dateTitle}のなんでもメモ`}
+                            onChange={(event) => {
+                              adjustTextareaHeight(event.currentTarget);
+                              updateRecordAnyMemo(recordDate, event.target.value);
+                            }}
+                            placeholder="とりあえず、ここにメモ"
+                            ref={adjustTextareaHeight}
+                            rows={2}
+                            value={anyMemoValue}
+                          />
                         </div>
                       </div>
                     )}
@@ -7968,6 +8084,22 @@ function App() {
                       );
                     })}
                   </div>
+                </section>
+                <section className="daily-any-memo-card history-any-memo-card" aria-label="その日のなんでもメモ">
+                  <div className="daily-any-memo-header">
+                    <h2>🗒️ その日のなんでもメモ</h2>
+                  </div>
+                  <textarea
+                    aria-label="その日のなんでもメモ"
+                    onChange={(event) => {
+                      adjustTextareaHeight(event.currentTarget);
+                      updateHistoryDailyAnyMemo(event.target.value);
+                    }}
+                    placeholder="とりあえず、ここにメモ"
+                    ref={adjustTextareaHeight}
+                    rows={3}
+                    value={historyDailyAnyMemo}
+                  />
                 </section>
                 <div className="history-routine-list">
                   {historyDisplaySections.map((section) => {

@@ -33,6 +33,7 @@
 | `hibitin:events:YYYY-MM-DD` | 日付別のできごと記録 | 保存済み文字列のJSON配列。旧形式stringも保存済み1件目として読込。入力中の下書きは保存対象外 | `loadDailyEvent()` | `useEffect([dailyEvent])`, `useEffect([historyDailyEvent])`, `updateRecordEvent()` | 対象 | 現役・動的 |
 | `hibitin:memo:YYYY-MM-DD` | 日付別ひとこと（旧: 全体メモ） | 保存済み文字列のJSON配列。旧形式stringも保存済み1件目として読込。入力中の下書きは保存対象外 | `loadDailyMemo()` | `useEffect([dailyMemo])`, `useEffect([historyDailyMemo])`, `updateRecordMemo()` | 対象 | 現役・動的 |
 | `hibitin:todos:YYYY-MM-DD` | 日付別のやることメモ | `{ id: string, text: string, completed: boolean }[]`。空欄は保存せず画面上だけ自動追加 | `loadDailyTodos()` | `useEffect([dailyTodos])`, `useEffect([historyDailyTodos])`, `updateRecordTodo()`, `toggleRecordTodo()`, `deleteRecordTodo()` | 対象 | 現役・動的 |
+| `hibitin:anyMemo:YYYY-MM-DD` | 日付別のなんでもメモ | `string` | `loadDailyAnyMemo()` | `useEffect([dailyAnyMemo])`, `useEffect([historyDailyAnyMemo])`, `updateRecordAnyMemo()` | 対象 | 現役・動的 |
 | `hibitin-routines:v1` | 旧ルーティン保存 | `RoutineSection[]` | `loadLegacyRoutineSections()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:lifestyleSettings:v1` | 旧生活リズム設定 | 旧 `RhythmConfig` 相当 | `loadRhythmSettings()` | なし | 対象 | 旧仕様・読み込みのみ |
 | `hibitin:playerUnlocks:v1` | 旧時間帯別フリークエスト枠 | `{ questSlots: { morning,noon,evening,night } }` | `loadPlayerUnlocks()` | 起動後削除 | 対象だが通常は削除 | 旧仕様・移行のみ |
@@ -81,6 +82,7 @@
 - `hibitin:checks:*`
 - `hibitin:events:*`
 - `hibitin:memo:*`
+- `hibitin:anyMemo:*`
 - `hibitin:dateSnapshots:v1`
 - `hibitin:playerEconomy:v1.pointLedger`
 
