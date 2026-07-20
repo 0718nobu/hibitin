@@ -1,8 +1,5 @@
 import {
   ChangeEvent,
-  type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -25,19 +22,6 @@ type GameMode = 'player' | 'developer';
 type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'settings';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
 type ScheduleViewName = 'schedule' | 'todos';
-type CarouselSwipeState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  startedAt: number;
-  lastX: number;
-  lastTime: number;
-  velocityX: number;
-  pendingOffset: number;
-  rafId: number | null;
-  hasDragged: boolean;
-  isHorizontal: boolean;
-};
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -3137,12 +3121,6 @@ function App() {
   const alertedFinishedTimerIdRef = useRef<string | null>(null);
   const exchangeLockRef = useRef(false);
   const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
-  const mainNavSwipeStateRef = useRef<CarouselSwipeState | null>(null);
-  const lastMainNavSwipeAtRef = useRef(0);
-  const recordSwipeStateRef = useRef<CarouselSwipeState | null>(null);
-  const lastRecordSwipeAtRef = useRef(0);
-  const scheduleSwipeStateRef = useRef<CarouselSwipeState | null>(null);
-  const lastScheduleSwipeAtRef = useRef(0);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -3160,9 +3138,6 @@ function App() {
   const [scheduleView, setScheduleView] = useState<ScheduleViewName>('schedule');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
-  const [mainNavSwipeOffset, setMainNavSwipeOffset] = useState(0);
-  const [recordSwipeOffset, setRecordSwipeOffset] = useState(0);
-  const [scheduleSwipeOffset, setScheduleSwipeOffset] = useState(0);
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
@@ -6027,565 +6002,17 @@ function App() {
 
   const changePage = (nextPage: PageName) => {
     resetEditUiState();
-    setMainNavSwipeOffset(0);
     setPage(nextPage);
-  };
-
-  const updateCarouselOffset = (
-    element: HTMLElement,
-    cssVariableName: string,
-    swipeState: CarouselSwipeState,
-    offset: number,
-  ) => {
-    swipeState.pendingOffset = offset;
-
-    if (swipeState.rafId !== null) {
-      return;
-    }
-
-    swipeState.rafId = window.requestAnimationFrame(() => {
-      element.style.setProperty(cssVariableName, `${swipeState.pendingOffset}px`);
-      swipeState.rafId = null;
-    });
-  };
-
-  const resetCarouselDrag = (
-    element: HTMLElement,
-    cssVariableName: string,
-    swipeState: CarouselSwipeState,
-  ) => {
-    if (swipeState.rafId !== null) {
-      window.cancelAnimationFrame(swipeState.rafId);
-    }
-
-    element.dataset.dragging = 'false';
-    element.style.setProperty(cssVariableName, '0px');
-  };
-
-  const getCarouselDistanceThreshold = (width: number) => (
-    Math.min(42, Math.max(30, width * 0.11))
-  );
-
-  const getCarouselItemStepWidth = (
-    element: HTMLElement,
-    itemSelector: string,
-    fallbackStepWidth: number,
-  ) => {
-    const activeItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="0"]`);
-    const nextItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="1"]`);
-    const previousItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="-1"]`);
-    const activeRect = activeItem?.getBoundingClientRect();
-    const neighborRect = nextItem?.getBoundingClientRect() ?? previousItem?.getBoundingClientRect();
-
-    if (!activeRect || !neighborRect) {
-      return fallbackStepWidth;
-    }
-
-    return Math.max(1, Math.abs(
-      (neighborRect.left + neighborRect.width / 2) -
-      (activeRect.left + activeRect.width / 2),
-    ));
-  };
-
-  const getCarouselSwipeSteps = (
-    deltaX: number,
-    velocityX: number,
-    stepWidth: number,
-    maxSteps: number,
-  ) => {
-    const distanceSteps = Math.max(1, Math.round(Math.abs(deltaX) / stepWidth));
-    const flickBonus = Math.abs(velocityX) >= 1.2 ? 1 : 0;
-
-    return Math.min(maxSteps, distanceSteps + flickBonus);
-  };
-
-  const moveMainPage = (direction: 1 | -1, steps = 1) => {
-    const currentIndex = mainPageOptions.findIndex((option) => option.key === page);
-    const nextIndex = currentIndex + direction * steps;
-
-    if (nextIndex < 0 || nextIndex >= mainPageOptions.length) {
-      return;
-    }
-
-    changePage(mainPageOptions[nextIndex].key);
-  };
-
-  const handleMainNavPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    const now = performance.now();
-    mainNavSwipeStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startedAt: now,
-      lastX: event.clientX,
-      lastTime: now,
-      velocityX: 0,
-      pendingOffset: 0,
-      rafId: null,
-      hasDragged: false,
-      isHorizontal: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.currentTarget.dataset.dragging = 'true';
-    event.currentTarget.style.setProperty('--main-nav-swipe-offset', '0px');
-  };
-
-  const handleMainNavPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const swipeState = mainNavSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const now = performance.now();
-    const elapsed = Math.max(1, now - swipeState.lastTime);
-
-    swipeState.velocityX = (event.clientX - swipeState.lastX) / elapsed;
-    swipeState.lastX = event.clientX;
-    swipeState.lastTime = now;
-
-    if (!swipeState.isHorizontal) {
-      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
-        return;
-      }
-
-      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 0.7;
-    }
-
-    if (!swipeState.isHorizontal) {
-      return;
-    }
-
-    swipeState.hasDragged = true;
-
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-
-    updateCarouselOffset(
-      event.currentTarget,
-      '--main-nav-swipe-offset',
-      swipeState,
-      Math.max(-104, Math.min(104, deltaX * 0.9)),
-    );
-  };
-
-  const handleMainNavPointerEnd = (
-    event: ReactPointerEvent<HTMLElement>,
-    isCancel = false,
-  ) => {
-    const swipeState = mainNavSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const distanceThreshold = getCarouselDistanceThreshold(
-      event.currentTarget.getBoundingClientRect().width,
-    );
-    const flickVelocityThreshold = 0.38;
-    const stepWidth = getCarouselItemStepWidth(
-      event.currentTarget,
-      '.bottom-tab-item',
-      Math.min(64, Math.max(50, event.currentTarget.getBoundingClientRect().width * 0.143)),
-    );
-    const maxSteps = deltaX < 0
-      ? mainPageOptions.length - 1 - activeMainPageIndex
-      : activeMainPageIndex;
-    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
-    const shouldSwitch =
-      !isCancel &&
-      swipeState.isHorizontal &&
-      Math.abs(deltaX) > Math.abs(deltaY) * 0.7 &&
-      (
-        Math.abs(deltaX) >= distanceThreshold ||
-        (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
-      ) &&
-      ((deltaX < 0 && activeMainPageIndex < mainPageOptions.length - 1) ||
-        (deltaX > 0 && activeMainPageIndex > 0));
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    resetCarouselDrag(event.currentTarget, '--main-nav-swipe-offset', swipeState);
-    mainNavSwipeStateRef.current = null;
-
-    if (swipeState.hasDragged || shouldSwitch) {
-      lastMainNavSwipeAtRef.current = Date.now();
-    }
-
-    if (shouldSwitch) {
-      moveMainPage(deltaX < 0 ? 1 : -1, swipeSteps);
-    }
-  };
-
-  const handleMainNavBackgroundClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (Date.now() - lastMainNavSwipeAtRef.current < 260) {
-      return;
-    }
-
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeX = event.clientX - rect.left;
-    const centerStart = rect.width * 0.34;
-    const centerEnd = rect.width * 0.66;
-
-    if (relativeX < centerStart) {
-      moveMainPage(-1);
-    } else if (relativeX > centerEnd) {
-      moveMainPage(1);
-    }
-  };
-
-  const handleMainNavItemClick = (
-    event: ReactMouseEvent<HTMLButtonElement>,
-    position: number,
-  ) => {
-    event.stopPropagation();
-
-    if (Date.now() - lastMainNavSwipeAtRef.current < 260 || position === 0) {
-      return;
-    }
-
-    moveMainPage(position > 0 ? 1 : -1);
   };
 
   const selectScheduleView = (nextView: ScheduleViewName) => {
     setScheduleView(nextView);
-    setScheduleSwipeOffset(0);
     setSelectedScheduleDate(null);
-  };
-
-  const moveScheduleView = (direction: 1 | -1, steps = 1) => {
-    const currentIndex = scheduleViewOptions.findIndex((option) => option.key === scheduleView);
-    const nextIndex = currentIndex + direction * steps;
-
-    if (nextIndex < 0 || nextIndex >= scheduleViewOptions.length) {
-      return;
-    }
-
-    selectScheduleView(scheduleViewOptions[nextIndex].key);
-  };
-
-  const handleScheduleSubtabPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    const now = performance.now();
-    scheduleSwipeStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startedAt: now,
-      lastX: event.clientX,
-      lastTime: now,
-      velocityX: 0,
-      pendingOffset: 0,
-      rafId: null,
-      hasDragged: false,
-      isHorizontal: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.currentTarget.dataset.dragging = 'true';
-    event.currentTarget.style.setProperty('--record-swipe-offset', '0px');
-  };
-
-  const handleScheduleSubtabPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const swipeState = scheduleSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const now = performance.now();
-    const elapsed = Math.max(1, now - swipeState.lastTime);
-
-    swipeState.velocityX = (event.clientX - swipeState.lastX) / elapsed;
-    swipeState.lastX = event.clientX;
-    swipeState.lastTime = now;
-
-    if (!swipeState.isHorizontal) {
-      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
-        return;
-      }
-
-      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 0.7;
-    }
-
-    if (!swipeState.isHorizontal) {
-      return;
-    }
-
-    swipeState.hasDragged = true;
-
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-
-    updateCarouselOffset(
-      event.currentTarget,
-      '--record-swipe-offset',
-      swipeState,
-      Math.max(-96, Math.min(96, deltaX * 0.9)),
-    );
-  };
-
-  const handleScheduleSubtabPointerEnd = (
-    event: ReactPointerEvent<HTMLElement>,
-    isCancel = false,
-  ) => {
-    const swipeState = scheduleSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const distanceThreshold = getCarouselDistanceThreshold(
-      event.currentTarget.getBoundingClientRect().width,
-    );
-    const flickVelocityThreshold = 0.38;
-    const stepWidth = getCarouselItemStepWidth(
-      event.currentTarget,
-      '.schedule-subtab-item',
-      Math.min(68, Math.max(1, event.currentTarget.getBoundingClientRect().width * 0.18)),
-    );
-    const maxSteps = deltaX < 0
-      ? scheduleViewOptions.length - 1 - activeScheduleViewIndex
-      : activeScheduleViewIndex;
-    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
-    const shouldSwitch =
-      !isCancel &&
-      swipeState.isHorizontal &&
-      Math.abs(deltaX) > Math.abs(deltaY) * 0.7 &&
-      (
-        Math.abs(deltaX) >= distanceThreshold ||
-        (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
-      ) &&
-      ((deltaX < 0 && activeScheduleViewIndex < scheduleViewOptions.length - 1) ||
-        (deltaX > 0 && activeScheduleViewIndex > 0));
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    resetCarouselDrag(event.currentTarget, '--record-swipe-offset', swipeState);
-    scheduleSwipeStateRef.current = null;
-
-    if (swipeState.hasDragged || shouldSwitch) {
-      lastScheduleSwipeAtRef.current = Date.now();
-    }
-
-    if (shouldSwitch) {
-      moveScheduleView(deltaX < 0 ? 1 : -1, swipeSteps);
-    }
-  };
-
-  const handleScheduleSubtabBackgroundClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (Date.now() - lastScheduleSwipeAtRef.current < 260) {
-      return;
-    }
-
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeX = event.clientX - rect.left;
-    const centerStart = rect.width * 0.34;
-    const centerEnd = rect.width * 0.66;
-
-    if (relativeX < centerStart) {
-      moveScheduleView(-1);
-    } else if (relativeX > centerEnd) {
-      moveScheduleView(1);
-    }
-  };
-
-  const handleScheduleSubtabItemClick = (
-    event: ReactMouseEvent<HTMLButtonElement>,
-    position: number,
-  ) => {
-    event.stopPropagation();
-
-    if (Date.now() - lastScheduleSwipeAtRef.current < 260 || position === 0) {
-      return;
-    }
-
-    moveScheduleView(position > 0 ? 1 : -1);
   };
 
   const selectRecordView = (nextView: RecordViewName) => {
     setRecordView(nextView);
-    setRecordSwipeOffset(0);
     setSelectedRecordDate(null);
-  };
-
-  const moveRecordView = (direction: 1 | -1, steps = 1) => {
-    const currentIndex = recordViewOptions.findIndex((option) => option.key === recordView);
-    const nextIndex = currentIndex + direction * steps;
-
-    if (nextIndex < 0 || nextIndex >= recordViewOptions.length) {
-      return;
-    }
-
-    selectRecordView(recordViewOptions[nextIndex].key);
-  };
-
-  const handleRecordSubtabPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    const now = performance.now();
-    recordSwipeStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startedAt: now,
-      lastX: event.clientX,
-      lastTime: now,
-      velocityX: 0,
-      pendingOffset: 0,
-      rafId: null,
-      hasDragged: false,
-      isHorizontal: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.currentTarget.dataset.dragging = 'true';
-    event.currentTarget.style.setProperty('--record-swipe-offset', '0px');
-  };
-
-  const handleRecordSubtabPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const swipeState = recordSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const now = performance.now();
-    const elapsed = Math.max(1, now - swipeState.lastTime);
-
-    swipeState.velocityX = (event.clientX - swipeState.lastX) / elapsed;
-    swipeState.lastX = event.clientX;
-    swipeState.lastTime = now;
-
-    if (!swipeState.isHorizontal) {
-      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
-        return;
-      }
-
-      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 0.7;
-    }
-
-    if (!swipeState.isHorizontal) {
-      return;
-    }
-
-    swipeState.hasDragged = true;
-
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-
-    updateCarouselOffset(
-      event.currentTarget,
-      '--record-swipe-offset',
-      swipeState,
-      Math.max(-96, Math.min(96, deltaX * 0.9)),
-    );
-  };
-
-  const handleRecordSubtabPointerEnd = (
-    event: ReactPointerEvent<HTMLElement>,
-    isCancel = false,
-  ) => {
-    const swipeState = recordSwipeStateRef.current;
-
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const deltaX = event.clientX - swipeState.startX;
-    const deltaY = event.clientY - swipeState.startY;
-    const distanceThreshold = getCarouselDistanceThreshold(
-      event.currentTarget.getBoundingClientRect().width,
-    );
-    const flickVelocityThreshold = 0.38;
-    const stepWidth = getCarouselItemStepWidth(
-      event.currentTarget,
-      '.record-subtab-item',
-      Math.min(68, Math.max(1, event.currentTarget.getBoundingClientRect().width * 0.18)),
-    );
-    const maxSteps = deltaX < 0
-      ? recordViewOptions.length - 1 - activeRecordViewIndex
-      : activeRecordViewIndex;
-    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
-    const shouldSwitch =
-      !isCancel &&
-      swipeState.isHorizontal &&
-      Math.abs(deltaX) > Math.abs(deltaY) * 0.7 &&
-      (
-        Math.abs(deltaX) >= distanceThreshold ||
-        (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
-      ) &&
-      ((deltaX < 0 && activeRecordViewIndex < recordViewOptions.length - 1) ||
-        (deltaX > 0 && activeRecordViewIndex > 0));
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    resetCarouselDrag(event.currentTarget, '--record-swipe-offset', swipeState);
-    recordSwipeStateRef.current = null;
-
-    if (swipeState.hasDragged || shouldSwitch) {
-      lastRecordSwipeAtRef.current = Date.now();
-    }
-
-    if (shouldSwitch) {
-      moveRecordView(deltaX < 0 ? 1 : -1, swipeSteps);
-    }
-  };
-
-  const handleRecordSubtabBackgroundClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (Date.now() - lastRecordSwipeAtRef.current < 260) {
-      return;
-    }
-
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeX = event.clientX - rect.left;
-    const centerStart = rect.width * 0.34;
-    const centerEnd = rect.width * 0.66;
-
-    if (relativeX < centerStart) {
-      moveRecordView(-1);
-    } else if (relativeX > centerEnd) {
-      moveRecordView(1);
-    }
-  };
-
-  const handleRecordSubtabItemClick = (
-    event: ReactMouseEvent<HTMLButtonElement>,
-    position: number,
-  ) => {
-    event.stopPropagation();
-
-    if (Date.now() - lastRecordSwipeAtRef.current < 260 || position === 0) {
-      return;
-    }
-
-    moveRecordView(position > 0 ? 1 : -1);
   };
 
   const updateQuestSlotExchangeRule = (
@@ -6918,23 +6345,12 @@ function App() {
       : []),
     ...(bonusSection ? [bonusSection] : []),
   ];
-  const activeRecordViewIndex = Math.max(
-    0,
-    recordViewOptions.findIndex((option) => option.key === recordView),
-  );
-  const activeRecordViewOption = recordViewOptions[activeRecordViewIndex] ?? recordViewOptions[0];
+  const activeRecordViewOption =
+    recordViewOptions.find((option) => option.key === recordView) ?? recordViewOptions[0];
   const activeRecordHeading = recordViewHeadings[recordView];
-  const activeScheduleViewIndex = Math.max(
-    0,
-    scheduleViewOptions.findIndex((option) => option.key === scheduleView),
-  );
   const activeScheduleViewOption =
-    scheduleViewOptions[activeScheduleViewIndex] ?? scheduleViewOptions[0];
+    scheduleViewOptions.find((option) => option.key === scheduleView) ?? scheduleViewOptions[0];
   const activeScheduleHeading = scheduleViewHeadings[scheduleView];
-  const activeMainPageIndex = Math.max(
-    0,
-    mainPageOptions.findIndex((option) => option.key === page),
-  );
 
   return (
     <main
@@ -9935,38 +9351,20 @@ function App() {
         <nav
           className="record-subtab-nav schedule-subtab-nav"
           aria-label="スケジュールの表示切り替え"
-          onClick={handleScheduleSubtabBackgroundClick}
-          onPointerCancel={(event) => handleScheduleSubtabPointerEnd(event, true)}
-          onPointerDown={handleScheduleSubtabPointerDown}
-          onPointerMove={handleScheduleSubtabPointerMove}
-          onPointerUp={handleScheduleSubtabPointerEnd}
-          style={
-            {
-              '--record-swipe-offset': `${scheduleSwipeOffset}px`,
-            } as CSSProperties
-          }
         >
-          <span className="record-subtab-focus-frame" aria-hidden="true" />
-          {scheduleViewOptions.map((option) => {
-            const position = scheduleViewOptions.findIndex((scheduleOption) => (
-              scheduleOption.key === option.key
-            )) - activeScheduleViewIndex;
-
-            return (
-              <button
-                aria-current={scheduleView === option.key ? 'page' : undefined}
-                className="record-subtab-item schedule-subtab-item"
-                data-active={scheduleView === option.key ? 'true' : 'false'}
-                data-position={position}
-                key={option.key}
-                onClick={(event) => handleScheduleSubtabItemClick(event, position)}
-                type="button"
-              >
-                <span aria-hidden="true">{option.icon}</span>
-                {option.label}
-              </button>
-            );
-          })}
+          {scheduleViewOptions.map((option) => (
+            <button
+              aria-current={scheduleView === option.key ? 'page' : undefined}
+              className="record-subtab-item schedule-subtab-item"
+              data-active={scheduleView === option.key ? 'true' : 'false'}
+              key={option.key}
+              onClick={() => selectScheduleView(option.key)}
+              type="button"
+            >
+              <span aria-hidden="true">{option.icon}</span>
+              {option.label}
+            </button>
+          ))}
         </nav>
       )}
 
@@ -9974,39 +9372,19 @@ function App() {
         <nav
           className="record-subtab-nav"
           aria-label="記録の表示切り替え"
-          onClick={handleRecordSubtabBackgroundClick}
-          onPointerCancel={(event) => handleRecordSubtabPointerEnd(event, true)}
-          onPointerDown={handleRecordSubtabPointerDown}
-          onPointerMove={handleRecordSubtabPointerMove}
-          onPointerUp={handleRecordSubtabPointerEnd}
-          style={
-            {
-              '--record-swipe-offset': `${recordSwipeOffset}px`,
-            } as CSSProperties
-          }
         >
-          <span className="record-subtab-focus-frame" aria-hidden="true" />
           {recordViewOptions.map((option) => (
-            (() => {
-              const position = recordViewOptions.findIndex((recordOption) => (
-                recordOption.key === option.key
-              )) - activeRecordViewIndex;
-
-              return (
-                <button
-                  aria-current={recordView === option.key ? 'page' : undefined}
-                  className="record-subtab-item"
-                  data-active={recordView === option.key ? 'true' : 'false'}
-                  data-position={position}
-                  key={option.key}
-                  onClick={(event) => handleRecordSubtabItemClick(event, position)}
-                  type="button"
-                >
-                  <span aria-hidden="true">{option.icon}</span>
-                  {option.label}
-                </button>
-              );
-            })()
+            <button
+              aria-current={recordView === option.key ? 'page' : undefined}
+              className="record-subtab-item"
+              data-active={recordView === option.key ? 'true' : 'false'}
+              key={option.key}
+              onClick={() => selectRecordView(option.key)}
+              type="button"
+            >
+              <span aria-hidden="true">{option.icon}</span>
+              {option.label}
+            </button>
           ))}
         </nav>
       )}
@@ -10014,63 +9392,19 @@ function App() {
       <nav
         className="bottom-tab-nav"
         aria-label="メインナビゲーション"
-        onClick={handleMainNavBackgroundClick}
-        onPointerCancel={(event) => handleMainNavPointerEnd(event, true)}
-        onPointerDown={handleMainNavPointerDown}
-        onPointerMove={handleMainNavPointerMove}
-        onPointerUp={handleMainNavPointerEnd}
-        style={
-          {
-            '--main-nav-swipe-offset': `${mainNavSwipeOffset}px`,
-          } as CSSProperties
-        }
       >
-        <button
-          aria-label="前のメイン画面へ"
-          className="bottom-tab-arrow bottom-tab-arrow-left"
-          disabled={activeMainPageIndex === 0}
-          onClick={(event) => {
-            event.stopPropagation();
-            moveMainPage(-1);
-          }}
-          type="button"
-        >
-          ←
-        </button>
-        <span className="bottom-tab-focus-frame" aria-hidden="true" />
-        <button
-          aria-label="次のメイン画面へ"
-          className="bottom-tab-arrow bottom-tab-arrow-right"
-          disabled={activeMainPageIndex === mainPageOptions.length - 1}
-          onClick={(event) => {
-            event.stopPropagation();
-            moveMainPage(1);
-          }}
-          type="button"
-        >
-          →
-        </button>
         {mainPageOptions.map((option) => (
-          (() => {
-            const position = mainPageOptions.findIndex((pageOption) => (
-              pageOption.key === option.key
-            )) - activeMainPageIndex;
-
-            return (
-              <button
-                aria-current={page === option.key ? 'page' : undefined}
-                className="bottom-tab-item"
-                data-active={page === option.key ? 'true' : 'false'}
-                data-position={position}
-                key={option.key}
-                onClick={(event) => handleMainNavItemClick(event, position)}
-                type="button"
-              >
-                <span aria-hidden="true">{option.icon}</span>
-                {option.label}
-              </button>
-            );
-          })()
+          <button
+            aria-current={page === option.key ? 'page' : undefined}
+            className="bottom-tab-item"
+            data-active={page === option.key ? 'true' : 'false'}
+            key={option.key}
+            onClick={() => changePage(option.key)}
+            type="button"
+          >
+            <span aria-hidden="true">{option.icon}</span>
+            {option.label}
+          </button>
         ))}
       </nav>
 
