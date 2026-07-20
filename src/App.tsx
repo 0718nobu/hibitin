@@ -1,6 +1,7 @@
 import {
   ChangeEvent,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
@@ -3000,6 +3001,7 @@ function App() {
   const exchangeLockRef = useRef(false);
   const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
   const recordSwipeStateRef = useRef<RecordSwipeState | null>(null);
+  const lastRecordSwipeAtRef = useRef(0);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -5832,11 +5834,15 @@ function App() {
         return;
       }
 
-      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 0.7;
     }
 
     if (!swipeState.isHorizontal) {
       return;
+    }
+
+    if (event.cancelable) {
+      event.preventDefault();
     }
 
     setRecordSwipeOffset(Math.max(-78, Math.min(78, deltaX * 0.42)));
@@ -5855,7 +5861,7 @@ function App() {
     const velocity = Math.abs(deltaX) / elapsed;
     const shouldSwitch =
       swipeState.isHorizontal &&
-      Math.abs(deltaX) > Math.abs(deltaY) * 1.25 &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 0.7 &&
       (Math.abs(deltaX) >= 46 || velocity >= 0.42);
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -5866,8 +5872,43 @@ function App() {
     setRecordSwipeOffset(0);
 
     if (shouldSwitch) {
+      lastRecordSwipeAtRef.current = Date.now();
       moveRecordView(deltaX < 0 ? 1 : -1);
     }
+  };
+
+  const handleRecordSubtabBackgroundClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (Date.now() - lastRecordSwipeAtRef.current < 260) {
+      return;
+    }
+
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeX = event.clientX - rect.left;
+    const centerStart = rect.width * 0.34;
+    const centerEnd = rect.width * 0.66;
+
+    if (relativeX < centerStart) {
+      moveRecordView(-1);
+    } else if (relativeX > centerEnd) {
+      moveRecordView(1);
+    }
+  };
+
+  const handleRecordSubtabItemClick = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    position: number,
+  ) => {
+    event.stopPropagation();
+
+    if (Date.now() - lastRecordSwipeAtRef.current < 260 || position === 0) {
+      return;
+    }
+
+    moveRecordView(position > 0 ? 1 : -1);
   };
 
   const updateQuestSlotExchangeRule = (
@@ -8994,6 +9035,7 @@ function App() {
         <nav
           className="record-subtab-nav"
           aria-label="記録の表示切り替え"
+          onClick={handleRecordSubtabBackgroundClick}
           onPointerCancel={handleRecordSubtabPointerEnd}
           onPointerDown={handleRecordSubtabPointerDown}
           onPointerMove={handleRecordSubtabPointerMove}
@@ -9026,7 +9068,7 @@ function App() {
                   data-active={recordView === option.key ? 'true' : 'false'}
                   data-position={position}
                   key={option.key}
-                  onClick={() => selectRecordView(option.key)}
+                  onClick={(event) => handleRecordSubtabItemClick(event, position)}
                   type="button"
                 >
                   <span aria-hidden="true">{option.icon}</span>

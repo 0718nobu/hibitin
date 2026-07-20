@@ -2956,7 +2956,8 @@ h1 {
   width: min(calc(100% - 20px), 600px);
   margin: 0 auto;
   overflow: hidden;
-  touch-action: pan-y;
+  overscroll-behavior: contain;
+  touch-action: pan-x;
   user-select: none;
   border: 1px solid rgb(205 226 190 / 88%);
   border-radius: 16px;
