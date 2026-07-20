@@ -22,8 +22,9 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'records' | 'shop' | 'settings';
-type RecordViewName = 'memo' | 'events' | 'todos' | 'anyMemo' | 'achievements';
+type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'settings';
+type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
+type ScheduleViewName = 'schedule' | 'todos';
 type CarouselSwipeState = {
   pointerId: number;
   startX: number;
@@ -52,16 +53,33 @@ type EditTargetKey = TemplateKind;
 const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
   { key: 'memo', icon: '✍️', label: 'ひとこと' },
   { key: 'events', icon: '📅', label: 'できごと' },
-  { key: 'todos', icon: '☑️', label: 'やること' },
   { key: 'anyMemo', icon: '📝', label: 'メモ' },
   { key: 'achievements', icon: '🏆', label: '実績' },
 ];
 
+const scheduleViewOptions: { key: ScheduleViewName; icon: string; label: string }[] = [
+  { key: 'schedule', icon: '📅', label: '予定' },
+  { key: 'todos', icon: '☑️', label: 'やること' },
+];
+
+const recordViewHeadings: Record<RecordViewName, string> = {
+  memo: '今日のひとこと',
+  events: '今日のできごと',
+  anyMemo: 'なんでもメモ',
+  achievements: '実績',
+};
+
+const scheduleViewHeadings: Record<ScheduleViewName, string> = {
+  schedule: 'スケジュール',
+  todos: 'やること',
+};
+
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
-  { key: 'today', icon: '🎮', label: '今日' },
-  { key: 'history', icon: '📅', label: 'スタンプ帳' },
-  { key: 'records', icon: '📖', label: '記録' },
   { key: 'shop', icon: '🛍️', label: 'ショップ' },
+  { key: 'history', icon: '📅', label: 'スタンプ帳' },
+  { key: 'today', icon: '🎮', label: '今日' },
+  { key: 'schedule', icon: '🗓️', label: 'スケジュール' },
+  { key: 'records', icon: '📖', label: '記録' },
   { key: 'settings', icon: '⚙️', label: '設定' },
 ];
 
@@ -1896,6 +1914,7 @@ const getDailyMemoStorageKey = (date: Date) => `hibitin:memo:${getDateKey(date)}
 const getDailyEventStorageKey = (date: Date) => `hibitin:events:${getDateKey(date)}`;
 const getDailyTodosStorageKey = (date: Date) => `hibitin:todos:${getDateKey(date)}`;
 const getDailyAnyMemoStorageKey = (date: Date) => `hibitin:anyMemo:${getDateKey(date)}`;
+const getDailyScheduleStorageKey = (date: Date) => `hibitin:schedule:${getDateKey(date)}`;
 
 type DailyTodoItem = {
   id: string;
@@ -1905,12 +1924,24 @@ type DailyTodoItem = {
 
 type DailyTodos = DailyTodoItem[];
 
+type DailyScheduleItem = {
+  id: string;
+  time: string;
+  text: string;
+};
+
+type DailySchedule = DailyScheduleItem[];
+type DailyScheduleDrafts = Record<string, Pick<DailyScheduleItem, 'time' | 'text'>>;
+
 type NormalizeDailyTodoOptions = {
   preserveEmptyIds?: Iterable<string>;
 };
 
 const createDailyTodoId = () =>
   `todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createDailyScheduleId = () =>
+  `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const createDailyTodoItem = (
   text = '',
@@ -2028,6 +2059,98 @@ const getDailyTodoStats = (todos: DailyTodos) => {
     totalCount: filledTodos.length,
   };
 };
+
+const hasScheduleText = (scheduleItem: DailyScheduleItem) =>
+  scheduleItem.text.trim().length > 0;
+
+const createDailyScheduleItem = (
+  time = '',
+  text = '',
+  id = createDailyScheduleId(),
+): DailyScheduleItem => ({
+  id,
+  time,
+  text,
+});
+
+const sortDailySchedule = (schedule: DailySchedule) =>
+  [...schedule].sort((first, second) => {
+    const firstTime = first.time.trim();
+    const secondTime = second.time.trim();
+
+    if (firstTime && secondTime && firstTime !== secondTime) {
+      return firstTime.localeCompare(secondTime);
+    }
+
+    if (firstTime && !secondTime) {
+      return -1;
+    }
+
+    if (!firstTime && secondTime) {
+      return 1;
+    }
+
+    return first.id.localeCompare(second.id);
+  });
+
+const normalizeDailySchedule = (schedule: unknown): DailySchedule => {
+  if (!Array.isArray(schedule)) {
+    return [];
+  }
+
+  return sortDailySchedule(
+    schedule
+      .map((scheduleItem) => {
+        if (!scheduleItem || typeof scheduleItem !== 'object' || Array.isArray(scheduleItem)) {
+          return null;
+        }
+
+        const parsedScheduleItem = scheduleItem as Partial<DailyScheduleItem>;
+
+        return createDailyScheduleItem(
+          typeof parsedScheduleItem.time === 'string' ? parsedScheduleItem.time : '',
+          typeof parsedScheduleItem.text === 'string' ? parsedScheduleItem.text : '',
+          typeof parsedScheduleItem.id === 'string' && parsedScheduleItem.id.trim()
+            ? parsedScheduleItem.id
+            : createDailyScheduleId(),
+        );
+      })
+      .filter((scheduleItem): scheduleItem is DailyScheduleItem => Boolean(scheduleItem))
+      .filter(hasScheduleText),
+  );
+};
+
+const parseDailySchedule = (rawValue: string | null): DailySchedule => {
+  if (!rawValue) {
+    return [];
+  }
+
+  try {
+    return normalizeDailySchedule(JSON.parse(rawValue) as unknown);
+  } catch {
+    return [];
+  }
+};
+
+const serializeDailySchedule = (schedule: DailySchedule) =>
+  JSON.stringify(sortDailySchedule(schedule.filter(hasScheduleText)));
+
+const loadDailySchedule = (date: Date) =>
+  parseDailySchedule(localStorage.getItem(getDailyScheduleStorageKey(date)));
+
+const upsertDailyScheduleItem = (
+  schedule: DailySchedule,
+  item: DailyScheduleItem,
+): DailySchedule => {
+  const exists = schedule.some((scheduleItem) => scheduleItem.id === item.id);
+
+  return normalizeDailySchedule(exists
+    ? schedule.map((scheduleItem) => (scheduleItem.id === item.id ? item : scheduleItem))
+    : [...schedule, item]);
+};
+
+const deleteDailyScheduleItem = (schedule: DailySchedule, id: string): DailySchedule =>
+  normalizeDailySchedule(schedule.filter((scheduleItem) => scheduleItem.id !== id));
 
 type DailyRecordEntry = {
   text: string;
@@ -3018,6 +3141,8 @@ function App() {
   const lastMainNavSwipeAtRef = useRef(0);
   const recordSwipeStateRef = useRef<CarouselSwipeState | null>(null);
   const lastRecordSwipeAtRef = useRef(0);
+  const scheduleSwipeStateRef = useRef<CarouselSwipeState | null>(null);
+  const lastScheduleSwipeAtRef = useRef(0);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -3031,10 +3156,16 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
+  const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
+  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('schedule');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [mainNavSwipeOffset, setMainNavSwipeOffset] = useState(0);
   const [recordSwipeOffset, setRecordSwipeOffset] = useState(0);
+  const [scheduleSwipeOffset, setScheduleSwipeOffset] = useState(0);
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
+  const [scheduleRevision, setScheduleRevision] = useState(0);
+  const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
@@ -3346,6 +3477,11 @@ function App() {
     todayKey,
   ]);
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
+  const scheduleMonthLabel = monthFormatter.format(scheduleMonth);
+  const scheduleMonthDates = useMemo(
+    () => getMonthDateCells(scheduleMonth).filter((date): date is Date => Boolean(date)),
+    [scheduleMonth, scheduleRevision],
+  );
   const recordMonthLabel = monthFormatter.format(recordMonth);
   const recordMonthDates = useMemo(
     () => getMonthDateCells(recordMonth).filter((date): date is Date => Boolean(date)),
@@ -5795,6 +5931,90 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
+  const saveScheduleForDate = (date: Date, schedule: DailySchedule) => {
+    const normalizedSchedule = normalizeDailySchedule(schedule);
+    const storageKey = getDailyScheduleStorageKey(date);
+
+    if (normalizedSchedule.length > 0) {
+      localStorage.setItem(storageKey, serializeDailySchedule(normalizedSchedule));
+    } else {
+      localStorage.removeItem(storageKey);
+    }
+
+    setScheduleRevision((revision) => revision + 1);
+  };
+
+  const updateScheduleItem = (
+    date: Date,
+    item: DailyScheduleItem,
+    field: keyof Pick<DailyScheduleItem, 'time' | 'text'>,
+    value: string,
+  ) => {
+    const currentSchedule = loadDailySchedule(date);
+    const nextSchedule = upsertDailyScheduleItem(currentSchedule, {
+      ...item,
+      [field]: value,
+    });
+
+    saveScheduleForDate(date, nextSchedule);
+  };
+
+  const commitScheduleDraft = (
+    date: Date,
+    draft: Pick<DailyScheduleItem, 'time' | 'text'>,
+  ) => {
+    if (!draft.text.trim()) {
+      return;
+    }
+
+    const currentSchedule = loadDailySchedule(date);
+    const nextSchedule = upsertDailyScheduleItem(
+      currentSchedule,
+      createDailyScheduleItem(draft.time, draft.text),
+    );
+
+    saveScheduleForDate(date, nextSchedule);
+    setScheduleDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [getDateKey(date)]: { time: '', text: '' },
+    }));
+  };
+
+  const updateScheduleDraft = (
+    date: Date,
+    field: keyof Pick<DailyScheduleItem, 'time' | 'text'>,
+    value: string,
+  ) => {
+    const dateKey = getDateKey(date);
+    const currentDraft = scheduleDrafts[dateKey] ?? { time: '', text: '' };
+    const nextDraft = {
+      ...currentDraft,
+      [field]: value,
+    };
+
+    setScheduleDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [dateKey]: nextDraft,
+    }));
+  };
+
+  const removeScheduleItem = (date: Date, id: string) => {
+    const currentSchedule = loadDailySchedule(date);
+
+    saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
+  };
+
+  const showScheduleToday = () => {
+    setScheduleMonth(getMonthStart(today));
+    setSelectedScheduleDate(today);
+  };
+
+  const moveScheduleMonth = (months: number) => {
+    setScheduleMonth((currentMonth) => addMonths(currentMonth, months));
+    setSelectedScheduleDate(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const showRecordToday = () => {
     setRecordMonth(getMonthStart(today));
     setSelectedRecordDate(null);
@@ -5848,8 +6068,11 @@ function App() {
 
   const moveMainPage = (direction: 1 | -1) => {
     const currentIndex = mainPageOptions.findIndex((option) => option.key === page);
-    const nextIndex =
-      (currentIndex + direction + mainPageOptions.length) % mainPageOptions.length;
+    const nextIndex = currentIndex + direction;
+
+    if (nextIndex < 0 || nextIndex >= mainPageOptions.length) {
+      return;
+    }
 
     changePage(mainPageOptions[nextIndex].key);
   };
@@ -5939,7 +6162,9 @@ function App() {
       (
         Math.abs(deltaX) >= distanceThreshold ||
         (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
-      );
+      ) &&
+      ((deltaX < 0 && activeMainPageIndex < mainPageOptions.length - 1) ||
+        (deltaX > 0 && activeMainPageIndex > 0));
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -5989,6 +6214,162 @@ function App() {
     }
 
     moveMainPage(position > 0 ? 1 : -1);
+  };
+
+  const selectScheduleView = (nextView: ScheduleViewName) => {
+    setScheduleView(nextView);
+    setScheduleSwipeOffset(0);
+    setSelectedScheduleDate(null);
+  };
+
+  const moveScheduleView = (direction: 1 | -1) => {
+    const currentIndex = scheduleViewOptions.findIndex((option) => option.key === scheduleView);
+    const nextIndex = currentIndex + direction;
+
+    if (nextIndex < 0 || nextIndex >= scheduleViewOptions.length) {
+      return;
+    }
+
+    selectScheduleView(scheduleViewOptions[nextIndex].key);
+  };
+
+  const handleScheduleSubtabPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    const now = performance.now();
+    scheduleSwipeStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedAt: now,
+      lastX: event.clientX,
+      lastTime: now,
+      velocityX: 0,
+      pendingOffset: 0,
+      rafId: null,
+      hasDragged: false,
+      isHorizontal: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.dataset.dragging = 'true';
+    event.currentTarget.style.setProperty('--record-swipe-offset', '0px');
+  };
+
+  const handleScheduleSubtabPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const swipeState = scheduleSwipeStateRef.current;
+
+    if (!swipeState || swipeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipeState.startX;
+    const deltaY = event.clientY - swipeState.startY;
+    const now = performance.now();
+    const elapsed = Math.max(1, now - swipeState.lastTime);
+
+    swipeState.velocityX = (event.clientX - swipeState.lastX) / elapsed;
+    swipeState.lastX = event.clientX;
+    swipeState.lastTime = now;
+
+    if (!swipeState.isHorizontal) {
+      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
+        return;
+      }
+
+      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 0.7;
+    }
+
+    if (!swipeState.isHorizontal) {
+      return;
+    }
+
+    swipeState.hasDragged = true;
+
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+
+    updateCarouselOffset(
+      event.currentTarget,
+      '--record-swipe-offset',
+      swipeState,
+      Math.max(-96, Math.min(96, deltaX * 0.9)),
+    );
+  };
+
+  const handleScheduleSubtabPointerEnd = (
+    event: ReactPointerEvent<HTMLElement>,
+    isCancel = false,
+  ) => {
+    const swipeState = scheduleSwipeStateRef.current;
+
+    if (!swipeState || swipeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipeState.startX;
+    const deltaY = event.clientY - swipeState.startY;
+    const distanceThreshold = getCarouselDistanceThreshold(
+      event.currentTarget.getBoundingClientRect().width,
+    );
+    const flickVelocityThreshold = 0.38;
+    const shouldSwitch =
+      !isCancel &&
+      swipeState.isHorizontal &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 0.7 &&
+      (
+        Math.abs(deltaX) >= distanceThreshold ||
+        (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
+      ) &&
+      ((deltaX < 0 && activeScheduleViewIndex < scheduleViewOptions.length - 1) ||
+        (deltaX > 0 && activeScheduleViewIndex > 0));
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    resetCarouselDrag(event.currentTarget, '--record-swipe-offset', swipeState);
+    scheduleSwipeStateRef.current = null;
+
+    if (swipeState.hasDragged || shouldSwitch) {
+      lastScheduleSwipeAtRef.current = Date.now();
+    }
+
+    if (shouldSwitch) {
+      moveScheduleView(deltaX < 0 ? 1 : -1);
+    }
+  };
+
+  const handleScheduleSubtabBackgroundClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (Date.now() - lastScheduleSwipeAtRef.current < 260) {
+      return;
+    }
+
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeX = event.clientX - rect.left;
+    const centerStart = rect.width * 0.34;
+    const centerEnd = rect.width * 0.66;
+
+    if (relativeX < centerStart) {
+      moveScheduleView(-1);
+    } else if (relativeX > centerEnd) {
+      moveScheduleView(1);
+    }
+  };
+
+  const handleScheduleSubtabItemClick = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    position: number,
+  ) => {
+    event.stopPropagation();
+
+    if (Date.now() - lastScheduleSwipeAtRef.current < 260 || position === 0) {
+      return;
+    }
+
+    moveScheduleView(position > 0 ? 1 : -1);
   };
 
   const selectRecordView = (nextView: RecordViewName) => {
@@ -6476,6 +6857,15 @@ function App() {
     0,
     recordViewOptions.findIndex((option) => option.key === recordView),
   );
+  const activeRecordViewOption = recordViewOptions[activeRecordViewIndex] ?? recordViewOptions[0];
+  const activeRecordHeading = recordViewHeadings[recordView];
+  const activeScheduleViewIndex = Math.max(
+    0,
+    scheduleViewOptions.findIndex((option) => option.key === scheduleView),
+  );
+  const activeScheduleViewOption =
+    scheduleViewOptions[activeScheduleViewIndex] ?? scheduleViewOptions[0];
+  const activeScheduleHeading = scheduleViewHeadings[scheduleView];
   const activeMainPageIndex = Math.max(
     0,
     mainPageOptions.findIndex((option) => option.key === page),
@@ -6485,6 +6875,8 @@ function App() {
     <main
       className="app"
       data-page={page}
+      data-record-view={page === 'records' ? recordView : undefined}
+      data-schedule-view={page === 'schedule' ? scheduleView : undefined}
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
       <div className="app-content">
@@ -6495,10 +6887,13 @@ function App() {
           <h1>
             {page === 'today' && '日々のルーティンチェック帳'}
             {page === 'history' && 'スタンプ帳'}
-            {page === 'records' && '記録'}
+            {page === 'schedule' && `${activeScheduleViewOption.icon} ${activeScheduleHeading}`}
+            {page === 'records' && `${activeRecordViewOption.icon} ${activeRecordHeading}`}
             {page === 'shop' && 'ショップ'}
             {page === 'settings' && '設定'}
           </h1>
+          {page === 'schedule' && <p className="record-header-kicker">スケジュール</p>}
+          {page === 'records' && <p className="record-header-kicker">記録</p>}
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
@@ -8001,8 +8396,302 @@ function App() {
           </section>
         )}
 
+        {page === 'schedule' && (
+          <section
+            className="schedule-page records-page record-view-content"
+            aria-label={scheduleView === 'schedule' ? '月間スケジュール' : '月間やること'}
+            key={scheduleView}
+          >
+            <div className="records-month-header">
+              <button
+                aria-label="前の月のスケジュールへ"
+                onClick={() => moveScheduleMonth(-1)}
+                type="button"
+              >
+                ‹
+              </button>
+              <h2>{scheduleMonthLabel}</h2>
+              <button
+                aria-label="次の月のスケジュールへ"
+                onClick={() => moveScheduleMonth(1)}
+                type="button"
+              >
+                ›
+              </button>
+              <button
+                className="records-today-button"
+                onClick={showScheduleToday}
+                type="button"
+              >
+                今日へ
+              </button>
+            </div>
+            <div className="records-day-list schedule-day-list">
+              {scheduleMonthDates.map((scheduleDate) => {
+                const dateKey = getDateKey(scheduleDate);
+                const holidayName = getHolidayName(scheduleDate);
+                const scheduleItems = loadDailySchedule(scheduleDate);
+                const todoEntries = dateKey === selectedDateKey
+                  ? dailyTodos
+                  : dateKey === historySelectedDateKey
+                    ? historyDailyTodos
+                    : loadDailyTodos(scheduleDate);
+                const filledTodos = todoEntries.filter(hasTodoText);
+                const hasSchedule = scheduleItems.length > 0;
+                const hasTodos = filledTodos.length > 0;
+                const contentCount = scheduleView === 'schedule'
+                  ? scheduleItems.length
+                  : filledTodos.length;
+                const hasContent = contentCount > 0;
+                const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
+                  weekdayShortLabels[scheduleDate.getDay()]
+                }${holidayName ? `・${holidayName}` : ''}）`;
+
+                return (
+                  <article
+                    className="record-day-card schedule-day-card"
+                    data-date-key={dateKey}
+                    data-empty={!hasContent ? 'true' : 'false'}
+                    data-today={dateKey === todayKey ? 'true' : 'false'}
+                    key={dateKey}
+                  >
+                    <button
+                      className="record-day-toggle"
+                      onClick={() => setSelectedScheduleDate(scheduleDate)}
+                      type="button"
+                    >
+                      <span className="record-day-date">
+                        🗓️ {dateTitle}
+                      </span>
+                      <span className="record-day-meta">
+                        {dateKey === todayKey && <strong>今日</strong>}
+                        {scheduleView === 'schedule'
+                          ? hasSchedule ? `${scheduleItems.length}件` : '予定なし'
+                          : hasTodos ? `${filledTodos.length}件` : 'やることなし'}
+                      </span>
+                    </button>
+
+                    {scheduleView === 'schedule' && hasSchedule && (
+                      <div className="record-day-body schedule-day-body">
+                        <div className="schedule-read-list">
+                          {scheduleItems.map((scheduleItem) => (
+                            <p key={scheduleItem.id}>
+                              <time>{scheduleItem.time || '--:--'}</time>
+                              <span>{scheduleItem.text.trim()}</span>
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {scheduleView === 'todos' && hasTodos && (
+                      <div className="record-day-body schedule-day-body">
+                        <div className="record-read-section">
+                          <h3>☑️ やること</h3>
+                          <ul className="record-read-todos">
+                            {filledTodos.map((todo) => (
+                              <li
+                                data-completed={todo.completed ? 'true' : 'false'}
+                                key={todo.id}
+                              >
+                                <span aria-hidden="true">{todo.completed ? '✓' : '・'}</span>
+                                <span>{todo.text.trim()}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+            {selectedScheduleDate && (() => {
+              const scheduleDate = selectedScheduleDate;
+              const dateKey = getDateKey(scheduleDate);
+              const holidayName = getHolidayName(scheduleDate);
+              const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
+                weekdayShortLabels[scheduleDate.getDay()]
+              }${holidayName ? `・${holidayName}` : ''}）`;
+              const scheduleItems = loadDailySchedule(scheduleDate);
+              const scheduleDraft = scheduleDrafts[dateKey] ?? { time: '', text: '' };
+              const todoEntries = dateKey === selectedDateKey
+                ? dailyTodos
+                : dateKey === historySelectedDateKey
+                  ? historyDailyTodos
+                  : loadDailyTodos(scheduleDate);
+              const todoStats = getDailyTodoStats(todoEntries);
+              const editorTitle = scheduleView === 'schedule' ? 'スケジュール' : 'やること';
+              const editorIcon = scheduleView === 'schedule' ? '🗓️' : '☑️';
+
+              return (
+                <div
+                  className="record-editor-backdrop"
+                  role="presentation"
+                  onClick={() => setSelectedScheduleDate(null)}
+                >
+                  <section
+                    aria-label={`${dateTitle}の${editorTitle}編集`}
+                    className="record-editor-panel schedule-editor-panel"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="record-editor-header">
+                      <div>
+                        <p>{editorIcon} {editorTitle}を編集</p>
+                        <h2>{dateTitle}</h2>
+                      </div>
+                      <button
+                        aria-label={`${editorTitle}編集を閉じる`}
+                        onClick={() => setSelectedScheduleDate(null)}
+                        type="button"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    {scheduleView === 'schedule' && (
+                    <div className="record-field schedule-field">
+                      <label>
+                        🗓️ 予定
+                        <span>{scheduleItems.length}件</span>
+                      </label>
+                      <div className="schedule-editor-list">
+                        {scheduleItems.map((scheduleItem, index) => (
+                          <div className="schedule-editor-row" key={scheduleItem.id}>
+                            <input
+                              aria-label={`${dateTitle}の予定 ${index + 1}の時間`}
+                              onChange={(event) =>
+                                updateScheduleItem(
+                                  scheduleDate,
+                                  scheduleItem,
+                                  'time',
+                                  event.target.value,
+                                )
+                              }
+                              type="time"
+                              value={scheduleItem.time}
+                            />
+                            <input
+                              aria-label={`${dateTitle}の予定 ${index + 1}の内容`}
+                              onChange={(event) =>
+                                updateScheduleItem(
+                                  scheduleDate,
+                                  scheduleItem,
+                                  'text',
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="予定内容"
+                              type="text"
+                              value={scheduleItem.text}
+                            />
+                            <button
+                              aria-label={`${dateTitle}の予定 ${index + 1}を削除`}
+                              className="schedule-delete-button"
+                              onClick={() => removeScheduleItem(scheduleDate, scheduleItem.id)}
+                              type="button"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                        <div className="schedule-editor-row" data-new="true">
+                          <input
+                            aria-label={`${dateTitle}の新しい予定の時間`}
+                            onChange={(event) =>
+                              updateScheduleDraft(scheduleDate, 'time', event.target.value)
+                            }
+                            type="time"
+                            value={scheduleDraft.time}
+                          />
+                          <input
+                            aria-label={`${dateTitle}の新しい予定内容`}
+                            onChange={(event) =>
+                              updateScheduleDraft(scheduleDate, 'text', event.target.value)
+                            }
+                            placeholder="予定を追加"
+                            type="text"
+                            value={scheduleDraft.text}
+                          />
+                          <button
+                            aria-label={`${dateTitle}へ予定を追加`}
+                            className="schedule-new-mark"
+                            disabled={!scheduleDraft.text.trim()}
+                            onClick={() => commitScheduleDraft(scheduleDate, scheduleDraft)}
+                            type="button"
+                          >
+                            ＋
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    )}
+                    {scheduleView === 'todos' && (
+                    <div className="record-field">
+                      <label>
+                        ☑️ やること
+                        <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
+                      </label>
+                      <div className="record-todo-list">
+                        {todoEntries.map((todo, index) => {
+                          const isFilledTodo = hasTodoText(todo);
+
+                          return (
+                            <div
+                              className="daily-todo-row record-todo-row"
+                              data-completed={todo.completed ? 'true' : 'false'}
+                              data-empty={!isFilledTodo ? 'true' : 'false'}
+                              key={todo.id}
+                            >
+                              <input
+                                aria-label={`${dateTitle}のやること ${index + 1}を完了`}
+                                checked={todo.completed}
+                                disabled={!isFilledTodo}
+                                onChange={(event) =>
+                                  toggleRecordTodo(scheduleDate, todo.id, event.target.checked)
+                                }
+                                type="checkbox"
+                              />
+                              <input
+                                aria-label={`${dateTitle}のやること ${index + 1}`}
+                                onBlur={() => cleanupRecordTodo(scheduleDate)}
+                                onChange={(event) =>
+                                  updateRecordTodo(scheduleDate, todo.id, event.target.value)
+                                }
+                                onCompositionEnd={(event) =>
+                                  updateRecordTodo(scheduleDate, todo.id, event.currentTarget.value)
+                                }
+                                placeholder="やることをメモ"
+                                type="text"
+                                value={todo.text}
+                              />
+                              {isFilledTodo && (
+                                <button
+                                  aria-label={`${dateTitle}のやること ${index + 1}を削除`}
+                                  className="daily-todo-delete-button"
+                                  onClick={() => deleteRecordTodo(scheduleDate, todo.id)}
+                                  type="button"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    )}
+                  </section>
+                </div>
+              );
+            })()}
+          </section>
+        )}
+
         {page === 'records' && recordView !== 'achievements' && (
-          <section className="records-page" aria-label="月間記録">
+          <section
+            className="records-page record-view-content"
+            aria-label="月間記録"
+            key={recordView}
+          >
             <div className="records-month-header">
               <button
                 aria-label="前の月の記録へ"
@@ -8041,11 +8730,6 @@ function App() {
                   : dateKey === historySelectedDateKey
                     ? historyDailyEvent
                     : loadDailyEvent(recordDate);
-                const todoEntries = dateKey === selectedDateKey
-                  ? dailyTodos
-                  : dateKey === historySelectedDateKey
-                    ? historyDailyTodos
-                    : loadDailyTodos(recordDate);
                 const anyMemoValue = dateKey === selectedDateKey
                   ? dailyAnyMemo
                   : dateKey === historySelectedDateKey
@@ -8057,18 +8741,15 @@ function App() {
                 const savedEventEntries = eventEntries.filter(
                   (entry) => entry.saved && hasMeaningfulText(entry.text),
                 );
-                const filledTodos = todoEntries.filter(hasTodoText);
                 const anyMemoText = anyMemoValue.trim();
                 const recordContentCount =
                   recordView === 'memo'
                     ? savedMemoEntries.length
                     : recordView === 'events'
                       ? savedEventEntries.length
-                      : recordView === 'todos'
-                        ? filledTodos.length
-                        : anyMemoText.length > 0
-                          ? 1
-                          : 0;
+                      : anyMemoText.length > 0
+                        ? 1
+                        : 0;
                 const hasRecordContent = recordContentCount > 0;
                 const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
                   weekdayShortLabels[recordDate.getDay()]
@@ -8122,22 +8803,6 @@ function App() {
                             </div>
                           </div>
                         )}
-                        {recordView === 'todos' && filledTodos.length > 0 && (
-                          <div className="record-read-section">
-                            <h3>☑️ やること</h3>
-                            <ul className="record-read-todos">
-                              {filledTodos.map((todo) => (
-                                <li
-                                  data-completed={todo.completed ? 'true' : 'false'}
-                                  key={todo.id}
-                                >
-                                  <span aria-hidden="true">{todo.completed ? '✓' : '・'}</span>
-                                  <span>{todo.text.trim()}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
                         {recordView === 'anyMemo' && anyMemoText.length > 0 && (
                           <div className="record-read-section">
                             <h3>📝 なんでもメモ</h3>
@@ -8167,17 +8832,17 @@ function App() {
                 : dateKey === historySelectedDateKey
                   ? historyDailyEvent
                   : loadDailyEvent(recordDate);
-              const todoEntries = dateKey === selectedDateKey
-                ? dailyTodos
-                : dateKey === historySelectedDateKey
-                  ? historyDailyTodos
-                  : loadDailyTodos(recordDate);
               const anyMemoValue = dateKey === selectedDateKey
                 ? dailyAnyMemo
                 : dateKey === historySelectedDateKey
                   ? historyDailyAnyMemo
                   : loadDailyAnyMemo(recordDate);
-              const todoStats = getDailyTodoStats(todoEntries);
+              const editorViewOption = recordViewOptions.find((option) => option.key === recordView);
+              const editorTitle =
+                recordView === 'anyMemo'
+                  ? 'なんでもメモ'
+                  : editorViewOption?.label ?? '記録';
+              const editorIcon = editorViewOption?.icon ?? '📓';
 
               return (
                 <div
@@ -8192,7 +8857,7 @@ function App() {
                   >
                     <div className="record-editor-header">
                       <div>
-                        <p>記録を編集</p>
+                        <p>{editorIcon} {editorTitle}を編集</p>
                         <h2>{dateTitle}</h2>
                       </div>
                       <button
@@ -8203,8 +8868,9 @@ function App() {
                         閉じる
                       </button>
                     </div>
+                    {recordView === 'memo' && (
                     <div className="record-field">
-                      <label>📝 ひとこと</label>
+                      <label>✍️ 今日のひとこと</label>
                       <div className="record-entry-list">
                         {memoEntries.map((entry, index) => (
                           <textarea
@@ -8222,8 +8888,10 @@ function App() {
                         ))}
                       </div>
                     </div>
+                    )}
+                    {recordView === 'events' && (
                     <div className="record-field">
-                      <label>📅 できごと</label>
+                      <label>📅 今日のできごと</label>
                       <div className="record-entry-list">
                         {eventEntries.map((entry, index) => (
                           <textarea
@@ -8241,59 +8909,8 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <div className="record-field">
-                      <label>
-                        ☑️ やること
-                        <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
-                      </label>
-                      <div className="record-todo-list">
-                        {todoEntries.map((todo, index) => {
-                          const isFilledTodo = hasTodoText(todo);
-
-                          return (
-                            <div
-                              className="daily-todo-row record-todo-row"
-                              data-completed={todo.completed ? 'true' : 'false'}
-                              data-empty={!isFilledTodo ? 'true' : 'false'}
-                              key={todo.id}
-                            >
-                              <input
-                                aria-label={`${dateTitle}のやること ${index + 1}を完了`}
-                                checked={todo.completed}
-                                disabled={!isFilledTodo}
-                                onChange={(event) =>
-                                  toggleRecordTodo(recordDate, todo.id, event.target.checked)
-                                }
-                                type="checkbox"
-                              />
-                              <input
-                                aria-label={`${dateTitle}のやること ${index + 1}`}
-                                onBlur={() => cleanupRecordTodo(recordDate)}
-                                onChange={(event) =>
-                                  updateRecordTodo(recordDate, todo.id, event.target.value)
-                                }
-                                onCompositionEnd={(event) =>
-                                  updateRecordTodo(recordDate, todo.id, event.currentTarget.value)
-                                }
-                                placeholder="やることをメモ"
-                                type="text"
-                                value={todo.text}
-                              />
-                              {isFilledTodo && (
-                                <button
-                                  aria-label={`${dateTitle}のやること ${index + 1}を削除`}
-                                  className="daily-todo-delete-button"
-                                  onClick={() => deleteRecordTodo(recordDate, todo.id)}
-                                  type="button"
-                                >
-                                  ×
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    )}
+                    {recordView === 'anyMemo' && (
                     <div className="record-field record-any-memo-field">
                       <label>🗒️ なんでもメモ</label>
                       <textarea
@@ -8308,6 +8925,7 @@ function App() {
                         value={anyMemoValue}
                       />
                     </div>
+                    )}
                   </section>
                 </div>
               );
@@ -8930,7 +9548,7 @@ function App() {
         )}
 
         {page === 'records' && recordView === 'achievements' && (
-          <section className="achievements-panel">
+          <section className="achievements-panel record-view-content" key={recordView}>
             <div className="achievements-header">
               <span aria-hidden="true">🏆</span>
               <div>
@@ -9266,6 +9884,45 @@ function App() {
 
       </div>
 
+      {page === 'schedule' && (
+        <nav
+          className="record-subtab-nav schedule-subtab-nav"
+          aria-label="スケジュールの表示切り替え"
+          onClick={handleScheduleSubtabBackgroundClick}
+          onPointerCancel={(event) => handleScheduleSubtabPointerEnd(event, true)}
+          onPointerDown={handleScheduleSubtabPointerDown}
+          onPointerMove={handleScheduleSubtabPointerMove}
+          onPointerUp={handleScheduleSubtabPointerEnd}
+          style={
+            {
+              '--record-swipe-offset': `${scheduleSwipeOffset}px`,
+            } as CSSProperties
+          }
+        >
+          <span className="record-subtab-focus-frame" aria-hidden="true" />
+          {scheduleViewOptions.map((option) => {
+            const position = scheduleViewOptions.findIndex((scheduleOption) => (
+              scheduleOption.key === option.key
+            )) - activeScheduleViewIndex;
+
+            return (
+              <button
+                aria-current={scheduleView === option.key ? 'page' : undefined}
+                className="record-subtab-item schedule-subtab-item"
+                data-active={scheduleView === option.key ? 'true' : 'false'}
+                data-position={position}
+                key={option.key}
+                onClick={(event) => handleScheduleSubtabItemClick(event, position)}
+                type="button"
+              >
+                <span aria-hidden="true">{option.icon}</span>
+                {option.label}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       {page === 'records' && (
         <nav
           className="record-subtab-nav"
@@ -9329,20 +9986,36 @@ function App() {
           } as CSSProperties
         }
       >
+        <button
+          aria-label="前のメイン画面へ"
+          className="bottom-tab-arrow bottom-tab-arrow-left"
+          disabled={activeMainPageIndex === 0}
+          onClick={(event) => {
+            event.stopPropagation();
+            moveMainPage(-1);
+          }}
+          type="button"
+        >
+          ←
+        </button>
         <span className="bottom-tab-focus-frame" aria-hidden="true" />
+        <button
+          aria-label="次のメイン画面へ"
+          className="bottom-tab-arrow bottom-tab-arrow-right"
+          disabled={activeMainPageIndex === mainPageOptions.length - 1}
+          onClick={(event) => {
+            event.stopPropagation();
+            moveMainPage(1);
+          }}
+          type="button"
+        >
+          →
+        </button>
         {mainPageOptions.map((option) => (
           (() => {
-            let position = mainPageOptions.findIndex((pageOption) => (
+            const position = mainPageOptions.findIndex((pageOption) => (
               pageOption.key === option.key
             )) - activeMainPageIndex;
-
-            if (position > Math.floor(mainPageOptions.length / 2)) {
-              position -= mainPageOptions.length;
-            }
-
-            if (position < -Math.floor(mainPageOptions.length / 2)) {
-              position += mainPageOptions.length;
-            }
 
             return (
               <button
