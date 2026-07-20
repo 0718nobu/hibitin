@@ -1797,6 +1797,24 @@ const getJapaneseNationalHolidayMap = (year: number) => {
 const getHolidayName = (date: Date) =>
   getJapaneseNationalHolidayMap(date.getFullYear()).get(getDateKey(date)) ?? '';
 
+type DateDisplayKind = 'weekday' | 'saturday' | 'sunday' | 'holiday';
+
+const getDateDisplayKind = (date: Date): DateDisplayKind => {
+  if (getHolidayName(date)) {
+    return 'holiday';
+  }
+
+  if (date.getDay() === 6) {
+    return 'saturday';
+  }
+
+  if (date.getDay() === 0) {
+    return 'sunday';
+  }
+
+  return 'weekday';
+};
+
 const formatQuestDateLabel = (date: Date) => {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
@@ -3121,6 +3139,8 @@ function App() {
   const alertedFinishedTimerIdRef = useRef<string | null>(null);
   const exchangeLockRef = useRef(false);
   const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
+  const scheduleTodayScrollMonthRef = useRef<string | null>(null);
+  const recordTodayScrollMonthRef = useRef<string | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -3462,6 +3482,42 @@ function App() {
     () => getMonthDateCells(recordMonth).filter((date): date is Date => Boolean(date)),
     [recordMonth, recordRevision],
   );
+  useEffect(() => {
+    if (page !== 'schedule' || getDateKey(scheduleMonth) !== getDateKey(getMonthStart(today))) {
+      return;
+    }
+
+    const scrollKey = `${page}:${getDateKey(scheduleMonth)}`;
+
+    if (scheduleTodayScrollMonthRef.current === scrollKey) {
+      return;
+    }
+
+    scheduleTodayScrollMonthRef.current = scrollKey;
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${todayKey}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, [page, scheduleMonth, today, todayKey]);
+  useEffect(() => {
+    if (page !== 'records' || getDateKey(recordMonth) !== getDateKey(getMonthStart(today))) {
+      return;
+    }
+
+    const scrollKey = `${page}:${getDateKey(recordMonth)}`;
+
+    if (recordTodayScrollMonthRef.current === scrollKey) {
+      return;
+    }
+
+    recordTodayScrollMonthRef.current = scrollKey;
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`.records-day-list [data-date-key="${todayKey}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, [page, recordMonth, today, todayKey]);
   const completionCalendarDays = useMemo(() => (
     getMonthDateCells(calendarMonth).map((date) => {
       if (!date) {
@@ -3501,6 +3557,7 @@ function App() {
         date,
         dateKey,
         day: date.getDate(),
+        dayKind: getDateDisplayKind(date),
         rate: stats.rate,
         rankIcon: calendarRank.icon,
         rankLabel: calendarRank.label.replace(/!+$/, ''),
@@ -7916,6 +7973,7 @@ function App() {
               {scheduleMonthDates.map((scheduleDate) => {
                 const dateKey = getDateKey(scheduleDate);
                 const holidayName = getHolidayName(scheduleDate);
+                const dayKind = getDateDisplayKind(scheduleDate);
                 const scheduleItems = loadDailySchedule(scheduleDate);
                 const todoEntries = dateKey === selectedDateKey
                   ? dailyTodos
@@ -7942,6 +8000,7 @@ function App() {
                   <article
                     className="record-day-card schedule-day-card"
                     data-date-key={dateKey}
+                    data-day-kind={dayKind}
                     data-empty={!hasContent ? 'true' : 'false'}
                     data-today={dateKey === todayKey ? 'true' : 'false'}
                     key={dateKey}
@@ -8183,6 +8242,7 @@ function App() {
               {recordMonthDates.map((recordDate) => {
                 const dateKey = getDateKey(recordDate);
                 const holidayName = getHolidayName(recordDate);
+                const dayKind = getDateDisplayKind(recordDate);
                 const memoEntries = dateKey === selectedDateKey
                   ? dailyMemo
                   : dateKey === historySelectedDateKey
@@ -8222,6 +8282,7 @@ function App() {
                   <article
                     className="record-day-card"
                     data-date-key={dateKey}
+                    data-day-kind={dayKind}
                     data-empty={!hasRecordContent ? 'true' : 'false'}
                     data-today={dateKey === todayKey ? 'true' : 'false'}
                     key={dateKey}
@@ -8444,6 +8505,7 @@ function App() {
                     aria-label={`${day.dateKey}のチェック表を表示`}
                     className="calendar-day"
                     data-rate-level={day.rankLevel}
+                    data-day-kind={day.dayKind}
                     data-routine-kind={day.routineKind}
                     data-selected={day.isSelected ? 'true' : 'false'}
                     data-today={day.isToday ? 'true' : 'false'}

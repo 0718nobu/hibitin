@@ -1876,6 +1876,11 @@ h1 {
   background: rgb(255 235 238 / 80%);
 }
 
+.calendar-day[data-day-kind='holiday'] {
+  border-color: #e7b25f;
+  background: linear-gradient(180deg, rgb(255 247 224 / 88%), rgb(255 235 218 / 78%));
+}
+
 .calendar-day[data-routine-kind='custom'] {
   border-color: #e0b55a;
   background: rgb(255 246 214 / 86%);
@@ -1891,6 +1896,11 @@ h1 {
 .calendar-day[data-rate-level='ready'][data-routine-kind='holiday'] {
   border-color: #efc0c0;
   background: rgb(255 240 242 / 70%);
+}
+
+.calendar-day[data-rate-level='ready'][data-day-kind='holiday'] {
+  border-color: #e7b25f;
+  background: linear-gradient(180deg, rgb(255 248 226 / 78%), rgb(255 238 224 / 72%));
 }
 
 .calendar-day[data-rate-level='ready'][data-routine-kind='custom'] {
@@ -2113,6 +2123,13 @@ h1 {
   font-size: 0.62rem;
   font-weight: 900;
   line-height: 1;
+}
+
+.calendar-day[data-day-kind='holiday']::before {
+  border-color: rgb(200 133 38 / 26%);
+  background: rgb(255 249 229 / 92%);
+  color: #b36b00;
+  content: "祝";
 }
 
 .calendar-day[data-selected='true'] {
@@ -4238,6 +4255,43 @@ h1 {
 .record-day-card[data-empty='true'] {
   background: rgb(255 255 250 / 78%);
   box-shadow: none;
+}
+
+.record-day-card[data-day-kind='saturday'] {
+  border-color: rgb(148 194 224 / 72%);
+  background: linear-gradient(180deg, #f7fcff 0%, #eef8ff 100%);
+}
+
+.record-day-card[data-day-kind='sunday'] {
+  border-color: rgb(230 173 184 / 72%);
+  background: linear-gradient(180deg, #fffafb 0%, #fff0f3 100%);
+}
+
+.record-day-card[data-day-kind='holiday'] {
+  border-color: rgb(224 181 98 / 78%);
+  background: linear-gradient(180deg, #fff9e8 0%, #fff0df 100%);
+}
+
+.record-day-card[data-empty='true'][data-day-kind='saturday'] {
+  background: rgb(241 249 255 / 82%);
+}
+
+.record-day-card[data-empty='true'][data-day-kind='sunday'] {
+  background: rgb(255 244 247 / 82%);
+}
+
+.record-day-card[data-empty='true'][data-day-kind='holiday'] {
+  background: rgb(255 246 225 / 84%);
+}
+
+.record-day-card[data-today='true'] {
+  border-color: rgb(13 139 84 / 72%);
+  background:
+    linear-gradient(180deg, rgb(235 255 244 / 74%), rgb(255 253 239 / 92%)),
+    linear-gradient(180deg, #fffdf5 0%, #fbfff3 100%);
+  box-shadow:
+    0 0 0 2px rgb(13 139 84 / 22%),
+    0 10px 24px rgb(34 126 80 / 14%);
 }
 
 .record-day-toggle {
