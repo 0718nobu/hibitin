@@ -3123,6 +3123,19 @@ h1 {
   scrollbar-width: none;
 }
 
+.bottom-tab-nav::after,
+.record-subtab-nav::after {
+  content: '';
+  position: sticky;
+  right: -8px;
+  z-index: 2;
+  flex: 0 0 18px;
+  align-self: stretch;
+  margin-left: -18px;
+  background: linear-gradient(90deg, rgb(235 255 244 / 0%) 0%, rgb(244 255 248 / 94%) 76%);
+  pointer-events: none;
+}
+
 .bottom-tab-nav::-webkit-scrollbar {
   display: none;
 }
@@ -3154,6 +3167,13 @@ h1 {
   scrollbar-width: none;
 }
 
+.record-subtab-nav::after {
+  right: -6px;
+  flex-basis: 14px;
+  margin-left: -14px;
+  background: linear-gradient(90deg, rgb(255 255 249 / 0%) 0%, rgb(255 255 249 / 90%) 76%);
+}
+
 .record-subtab-nav::-webkit-scrollbar {
   display: none;
 }
@@ -3177,6 +3197,7 @@ h1 {
   opacity: 0.82;
   padding: 6px 10px;
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -3200,10 +3221,33 @@ h1 {
     0 5px 11px rgb(42 112 55 / 10%);
 }
 
+.record-subtab-item:focus:not(:focus-visible),
+.bottom-tab-item:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.record-subtab-item:active,
+.bottom-tab-item:active {
+  outline: none;
+  box-shadow: none;
+}
+
+.record-subtab-item:focus-visible,
+.bottom-tab-item:focus-visible {
+  outline: 3px solid #9bd7b6;
+  outline-offset: 2px;
+}
+
+.record-subtab-item[data-active='true']:active {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 68%),
+    0 5px 11px rgb(42 112 55 / 10%);
+}
+
 .bottom-tab-item {
   flex: 0 0 auto;
   display: grid;
-  min-width: 88px;
+  width: clamp(62px, 15.6vw, 88px);
   min-height: 54px;
   place-items: center;
   gap: 2px;
@@ -3213,11 +3257,12 @@ h1 {
   color: #5c6f65;
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: clamp(0.58rem, 2.35vw, 0.72rem);
   font-weight: 900;
   opacity: 0.82;
-  padding: 6px 10px;
+  padding: 6px 4px;
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -3227,7 +3272,7 @@ h1 {
 }
 
 .bottom-tab-item span {
-  font-size: 1.08rem;
+  font-size: clamp(0.98rem, 3.6vw, 1.08rem);
   line-height: 1;
 }
 
@@ -3241,6 +3286,13 @@ h1 {
     inset 0 -10px 18px rgb(0 87 57 / 20%);
   opacity: 1;
   text-shadow: 0 1px 4px rgb(0 76 48 / 32%);
+}
+
+.bottom-tab-item[data-active='true']:active {
+  box-shadow:
+    0 10px 22px rgb(0 120 77 / 28%),
+    inset 0 1px 0 rgb(255 255 255 / 44%),
+    inset 0 -10px 18px rgb(0 87 57 / 20%);
 }
 
 .main-actions[data-editing='false'] {
