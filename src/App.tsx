@@ -75,11 +75,11 @@ const scheduleViewHeadings: Record<ScheduleViewName, string> = {
 };
 
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
-  { key: 'shop', icon: '🛍️', label: 'ショップ' },
-  { key: 'history', icon: '📅', label: 'スタンプ帳' },
   { key: 'today', icon: '🎮', label: '今日' },
+  { key: 'history', icon: '📅', label: 'スタンプ帳' },
   { key: 'schedule', icon: '🗓️', label: 'スケジュール' },
   { key: 'records', icon: '📖', label: '記録' },
+  { key: 'shop', icon: '🎁', label: 'ショップ' },
   { key: 'settings', icon: '⚙️', label: '設定' },
 ];
 
@@ -6066,9 +6066,42 @@ function App() {
     Math.min(42, Math.max(30, width * 0.11))
   );
 
-  const moveMainPage = (direction: 1 | -1) => {
+  const getCarouselItemStepWidth = (
+    element: HTMLElement,
+    itemSelector: string,
+    fallbackStepWidth: number,
+  ) => {
+    const activeItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="0"]`);
+    const nextItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="1"]`);
+    const previousItem = element.querySelector<HTMLElement>(`${itemSelector}[data-position="-1"]`);
+    const activeRect = activeItem?.getBoundingClientRect();
+    const neighborRect = nextItem?.getBoundingClientRect() ?? previousItem?.getBoundingClientRect();
+
+    if (!activeRect || !neighborRect) {
+      return fallbackStepWidth;
+    }
+
+    return Math.max(1, Math.abs(
+      (neighborRect.left + neighborRect.width / 2) -
+      (activeRect.left + activeRect.width / 2),
+    ));
+  };
+
+  const getCarouselSwipeSteps = (
+    deltaX: number,
+    velocityX: number,
+    stepWidth: number,
+    maxSteps: number,
+  ) => {
+    const distanceSteps = Math.max(1, Math.round(Math.abs(deltaX) / stepWidth));
+    const flickBonus = Math.abs(velocityX) >= 1.2 ? 1 : 0;
+
+    return Math.min(maxSteps, distanceSteps + flickBonus);
+  };
+
+  const moveMainPage = (direction: 1 | -1, steps = 1) => {
     const currentIndex = mainPageOptions.findIndex((option) => option.key === page);
-    const nextIndex = currentIndex + direction;
+    const nextIndex = currentIndex + direction * steps;
 
     if (nextIndex < 0 || nextIndex >= mainPageOptions.length) {
       return;
@@ -6155,6 +6188,15 @@ function App() {
       event.currentTarget.getBoundingClientRect().width,
     );
     const flickVelocityThreshold = 0.38;
+    const stepWidth = getCarouselItemStepWidth(
+      event.currentTarget,
+      '.bottom-tab-item',
+      Math.min(64, Math.max(50, event.currentTarget.getBoundingClientRect().width * 0.143)),
+    );
+    const maxSteps = deltaX < 0
+      ? mainPageOptions.length - 1 - activeMainPageIndex
+      : activeMainPageIndex;
+    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
     const shouldSwitch =
       !isCancel &&
       swipeState.isHorizontal &&
@@ -6178,7 +6220,7 @@ function App() {
     }
 
     if (shouldSwitch) {
-      moveMainPage(deltaX < 0 ? 1 : -1);
+      moveMainPage(deltaX < 0 ? 1 : -1, swipeSteps);
     }
   };
 
@@ -6222,9 +6264,9 @@ function App() {
     setSelectedScheduleDate(null);
   };
 
-  const moveScheduleView = (direction: 1 | -1) => {
+  const moveScheduleView = (direction: 1 | -1, steps = 1) => {
     const currentIndex = scheduleViewOptions.findIndex((option) => option.key === scheduleView);
-    const nextIndex = currentIndex + direction;
+    const nextIndex = currentIndex + direction * steps;
 
     if (nextIndex < 0 || nextIndex >= scheduleViewOptions.length) {
       return;
@@ -6311,6 +6353,15 @@ function App() {
       event.currentTarget.getBoundingClientRect().width,
     );
     const flickVelocityThreshold = 0.38;
+    const stepWidth = getCarouselItemStepWidth(
+      event.currentTarget,
+      '.schedule-subtab-item',
+      Math.min(68, Math.max(1, event.currentTarget.getBoundingClientRect().width * 0.18)),
+    );
+    const maxSteps = deltaX < 0
+      ? scheduleViewOptions.length - 1 - activeScheduleViewIndex
+      : activeScheduleViewIndex;
+    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
     const shouldSwitch =
       !isCancel &&
       swipeState.isHorizontal &&
@@ -6334,7 +6385,7 @@ function App() {
     }
 
     if (shouldSwitch) {
-      moveScheduleView(deltaX < 0 ? 1 : -1);
+      moveScheduleView(deltaX < 0 ? 1 : -1, swipeSteps);
     }
   };
 
@@ -6378,10 +6429,13 @@ function App() {
     setSelectedRecordDate(null);
   };
 
-  const moveRecordView = (direction: 1 | -1) => {
+  const moveRecordView = (direction: 1 | -1, steps = 1) => {
     const currentIndex = recordViewOptions.findIndex((option) => option.key === recordView);
-    const nextIndex =
-      (currentIndex + direction + recordViewOptions.length) % recordViewOptions.length;
+    const nextIndex = currentIndex + direction * steps;
+
+    if (nextIndex < 0 || nextIndex >= recordViewOptions.length) {
+      return;
+    }
 
     selectRecordView(recordViewOptions[nextIndex].key);
   };
@@ -6464,6 +6518,15 @@ function App() {
       event.currentTarget.getBoundingClientRect().width,
     );
     const flickVelocityThreshold = 0.38;
+    const stepWidth = getCarouselItemStepWidth(
+      event.currentTarget,
+      '.record-subtab-item',
+      Math.min(68, Math.max(1, event.currentTarget.getBoundingClientRect().width * 0.18)),
+    );
+    const maxSteps = deltaX < 0
+      ? recordViewOptions.length - 1 - activeRecordViewIndex
+      : activeRecordViewIndex;
+    const swipeSteps = getCarouselSwipeSteps(deltaX, swipeState.velocityX, stepWidth, maxSteps);
     const shouldSwitch =
       !isCancel &&
       swipeState.isHorizontal &&
@@ -6471,7 +6534,9 @@ function App() {
       (
         Math.abs(deltaX) >= distanceThreshold ||
         (Math.abs(deltaX) >= 26 && Math.abs(swipeState.velocityX) >= flickVelocityThreshold)
-      );
+      ) &&
+      ((deltaX < 0 && activeRecordViewIndex < recordViewOptions.length - 1) ||
+        (deltaX > 0 && activeRecordViewIndex > 0));
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -6485,7 +6550,7 @@ function App() {
     }
 
     if (shouldSwitch) {
-      moveRecordView(deltaX < 0 ? 1 : -1);
+      moveRecordView(deltaX < 0 ? 1 : -1, swipeSteps);
     }
   };
 
@@ -9941,17 +10006,9 @@ function App() {
           <span className="record-subtab-focus-frame" aria-hidden="true" />
           {recordViewOptions.map((option) => (
             (() => {
-              let position = recordViewOptions.findIndex((recordOption) => (
+              const position = recordViewOptions.findIndex((recordOption) => (
                 recordOption.key === option.key
               )) - activeRecordViewIndex;
-
-              if (position > Math.floor(recordViewOptions.length / 2)) {
-                position -= recordViewOptions.length;
-              }
-
-              if (position < -Math.floor(recordViewOptions.length / 2)) {
-                position += recordViewOptions.length;
-              }
 
               return (
                 <button
