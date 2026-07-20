@@ -32,14 +32,14 @@ select {
 
 .app {
   min-height: 100vh;
-  padding: 12px 10px calc(116px + env(safe-area-inset-bottom));
+  padding: 12px 10px calc(132px + env(safe-area-inset-bottom));
   background:
     linear-gradient(180deg, #e8fff4 0%, #f7fbf4 38%),
     #f6f7f4;
 }
 
 .app[data-page='records'] {
-  padding-bottom: calc(178px + env(safe-area-inset-bottom));
+  padding-bottom: calc(198px + env(safe-area-inset-bottom));
 }
 
 .app-content {
@@ -2930,26 +2930,30 @@ h1 {
 .bottom-tab-nav {
   position: fixed;
   right: 10px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: calc(10px + env(safe-area-inset-bottom));
   left: 10px;
   z-index: 20;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 2px;
+  height: 72px;
   width: min(calc(100% - 20px), 600px);
   margin: 0 auto;
-  padding: 5px;
-  border: 1px solid rgb(183 234 208 / 80%);
-  border-radius: 18px;
-  background: rgb(255 255 255 / 92%);
-  box-shadow: 0 14px 34px rgb(0 65 42 / 20%);
-  backdrop-filter: blur(14px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  border: 1px solid rgb(143 216 181 / 90%);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 96%) 0%, rgb(235 255 244 / 94%) 100%);
+  box-shadow:
+    0 18px 42px rgb(0 65 42 / 26%),
+    inset 0 1px 0 rgb(255 255 255 / 88%);
+  backdrop-filter: blur(16px);
 }
 
 .record-subtab-nav {
   position: fixed;
   right: 10px;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  bottom: calc(90px + env(safe-area-inset-bottom));
   left: 10px;
   z-index: 19;
   height: 58px;
@@ -2957,13 +2961,32 @@ h1 {
   margin: 0 auto;
   overflow: hidden;
   overscroll-behavior: contain;
-  touch-action: pan-x;
+  touch-action: none;
   user-select: none;
   border: 1px solid rgb(205 226 190 / 88%);
   border-radius: 16px;
   background: rgb(255 255 249 / 94%);
   box-shadow: 0 12px 28px rgb(53 93 48 / 16%);
   backdrop-filter: blur(14px);
+}
+
+.bottom-tab-focus-frame {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  z-index: 0;
+  width: min(36%, 148px);
+  height: calc(100% - 14px);
+  border: 2px solid rgb(14 137 83 / 88%);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #20c983 0%, #008e60 100%);
+  box-shadow:
+    0 10px 22px rgb(0 120 77 / 28%),
+    inset 0 1px 0 rgb(255 255 255 / 44%),
+    inset 0 -10px 18px rgb(0 87 57 / 20%);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .record-subtab-focus-frame {
@@ -2989,7 +3012,7 @@ h1 {
   left: 50%;
   z-index: 1;
   display: grid;
-  width: min(34%, 128px);
+  width: min(28%, 108px);
   height: calc(100% - 12px);
   place-items: center;
   gap: 1px;
@@ -3003,10 +3026,10 @@ h1 {
   font-weight: 900;
   opacity: 0.56;
   transform:
-    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
-    scale(0.86);
+    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(0.85);
   transition:
-    transform 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 160ms ease,
     color 160ms ease;
   will-change: transform;
@@ -3019,10 +3042,10 @@ h1 {
 
 .record-subtab-item[data-position='-2'] {
   --record-position: -2;
-  opacity: 0.34;
+  opacity: 0.38;
   transform:
-    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
-    scale(0.74);
+    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(0.7);
 }
 
 .record-subtab-item[data-position='-1'] {
@@ -3039,43 +3062,94 @@ h1 {
 
 .record-subtab-item[data-position='2'] {
   --record-position: 2;
-  opacity: 0.34;
+  opacity: 0.38;
   transform:
-    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
-    scale(0.74);
+    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(0.7);
 }
 
 .record-subtab-item[data-active='true'] {
   color: #23633f;
   opacity: 1;
   transform:
-    translateX(calc(-50% + var(--record-swipe-offset, 0px)))
-    scale(1.06);
+    translate3d(calc(-50% + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(1);
 }
 
-.bottom-tab-nav button {
+.bottom-tab-item {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  z-index: 1;
   display: grid;
-  min-height: 44px;
+  width: min(30%, 116px);
+  height: calc(100% - 14px);
   place-items: center;
-  gap: 1px;
+  gap: 2px;
   border: 0;
-  border-radius: 13px;
+  border-radius: 16px;
   background: transparent;
-  color: #65736c;
+  color: #5c6f65;
   cursor: pointer;
-  font-size: 0.62rem;
-  font-weight: 800;
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 900;
+  opacity: 0.58;
+  transform:
+    translate3d(calc(-50% + (var(--main-nav-position) * min(19vw, 72px)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
+    scale(0.85);
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease,
+    color 160ms ease;
+  will-change: transform;
 }
 
-.bottom-tab-nav button span {
-  font-size: 0.98rem;
+.bottom-tab-item span {
+  font-size: 1.08rem;
   line-height: 1;
 }
 
-.bottom-tab-nav button[data-active='true'] {
-  background: linear-gradient(180deg, #20c983 0%, #00a86b 100%);
+.bottom-tab-item[data-position='-2'] {
+  --main-nav-position: -2;
+  opacity: 0.38;
+  transform:
+    translate3d(calc(-50% + (var(--main-nav-position) * min(19vw, 72px)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
+    scale(0.7);
+}
+
+.bottom-tab-item[data-position='-1'] {
+  --main-nav-position: -1;
+}
+
+.bottom-tab-item[data-position='0'] {
+  --main-nav-position: 0;
+}
+
+.bottom-tab-item[data-position='1'] {
+  --main-nav-position: 1;
+}
+
+.bottom-tab-item[data-position='2'] {
+  --main-nav-position: 2;
+  opacity: 0.38;
+  transform:
+    translate3d(calc(-50% + (var(--main-nav-position) * min(19vw, 72px)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
+    scale(0.7);
+}
+
+.bottom-tab-item[data-active='true'] {
   color: #ffffff;
-  box-shadow: 0 8px 18px rgb(0 128 82 / 22%);
+  opacity: 1;
+  text-shadow: 0 1px 4px rgb(0 76 48 / 32%);
+  transform:
+    translate3d(calc(-50% + var(--main-nav-swipe-offset, 0px)), 0, 0)
+    scale(1);
+}
+
+.bottom-tab-nav[data-dragging='true'] .bottom-tab-item,
+.record-subtab-nav[data-dragging='true'] .record-subtab-item {
+  transition: none;
 }
 
 .main-actions[data-editing='false'] {
@@ -5312,11 +5386,11 @@ h1 {
 
 @media (max-width: 640px) {
   .app {
-    padding: 10px 8px calc(116px + env(safe-area-inset-bottom));
+    padding: 10px 8px calc(132px + env(safe-area-inset-bottom));
   }
 
   .app[data-page='records'] {
-    padding-bottom: calc(178px + env(safe-area-inset-bottom));
+    padding-bottom: calc(198px + env(safe-area-inset-bottom));
   }
 
   .app-header {
