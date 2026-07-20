@@ -1,4 +1,12 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   defaultCoreRoutinePlacements,
   coreRoutineDefinitions,
@@ -13,7 +21,15 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'records' | 'shop' | 'settings';
+type RecordViewName = 'memo' | 'events' | 'todos' | 'anyMemo' | 'achievements';
+type RecordSwipeState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startedAt: number;
+  isHorizontal: boolean;
+};
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -25,6 +41,14 @@ type WeekdayKey =
   | 'saturday'
   | 'sunday';
 type EditTargetKey = TemplateKind;
+
+const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
+  { key: 'memo', icon: '✍️', label: 'ひとこと' },
+  { key: 'events', icon: '📅', label: 'できごと' },
+  { key: 'todos', icon: '☑️', label: 'やること' },
+  { key: 'anyMemo', icon: '📝', label: 'メモ' },
+  { key: 'achievements', icon: '🏆', label: '実績' },
+];
 
 type RoutineItem = {
   id: string;
@@ -2975,6 +2999,7 @@ function App() {
   const alertedFinishedTimerIdRef = useRef<string | null>(null);
   const exchangeLockRef = useRef(false);
   const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
+  const recordSwipeStateRef = useRef<RecordSwipeState | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -2989,6 +3014,8 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
+  const [recordView, setRecordView] = useState<RecordViewName>('memo');
+  const [recordSwipeOffset, setRecordSwipeOffset] = useState(0);
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
@@ -5764,6 +5791,85 @@ function App() {
     setPage(nextPage);
   };
 
+  const selectRecordView = (nextView: RecordViewName) => {
+    setRecordView(nextView);
+    setRecordSwipeOffset(0);
+    setSelectedRecordDate(null);
+  };
+
+  const moveRecordView = (direction: 1 | -1) => {
+    const currentIndex = recordViewOptions.findIndex((option) => option.key === recordView);
+    const nextIndex =
+      (currentIndex + direction + recordViewOptions.length) % recordViewOptions.length;
+
+    selectRecordView(recordViewOptions[nextIndex].key);
+  };
+
+  const handleRecordSubtabPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    recordSwipeStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedAt: performance.now(),
+      isHorizontal: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setRecordSwipeOffset(0);
+  };
+
+  const handleRecordSubtabPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const swipeState = recordSwipeStateRef.current;
+
+    if (!swipeState || swipeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipeState.startX;
+    const deltaY = event.clientY - swipeState.startY;
+
+    if (!swipeState.isHorizontal) {
+      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
+        return;
+      }
+
+      swipeState.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+    }
+
+    if (!swipeState.isHorizontal) {
+      return;
+    }
+
+    setRecordSwipeOffset(Math.max(-78, Math.min(78, deltaX * 0.42)));
+  };
+
+  const handleRecordSubtabPointerEnd = (event: ReactPointerEvent<HTMLElement>) => {
+    const swipeState = recordSwipeStateRef.current;
+
+    if (!swipeState || swipeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipeState.startX;
+    const deltaY = event.clientY - swipeState.startY;
+    const elapsed = Math.max(1, performance.now() - swipeState.startedAt);
+    const velocity = Math.abs(deltaX) / elapsed;
+    const shouldSwitch =
+      swipeState.isHorizontal &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 1.25 &&
+      (Math.abs(deltaX) >= 46 || velocity >= 0.42);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    recordSwipeStateRef.current = null;
+    setRecordSwipeOffset(0);
+
+    if (shouldSwitch) {
+      moveRecordView(deltaX < 0 ? 1 : -1);
+    }
+  };
+
   const updateQuestSlotExchangeRule = (
     field: keyof QuestSlotExchangeRule,
     value: number | boolean,
@@ -6094,6 +6200,10 @@ function App() {
       : []),
     ...(bonusSection ? [bonusSection] : []),
   ];
+  const activeRecordViewIndex = Math.max(
+    0,
+    recordViewOptions.findIndex((option) => option.key === recordView),
+  );
 
   return (
     <main
@@ -6110,7 +6220,6 @@ function App() {
             {page === 'today' && '日々のルーティンチェック帳'}
             {page === 'history' && 'スタンプ帳'}
             {page === 'records' && '記録'}
-            {page === 'achievements' && '実績'}
             {page === 'shop' && 'ショップ'}
             {page === 'settings' && '設定'}
           </h1>
@@ -7616,7 +7725,7 @@ function App() {
           </section>
         )}
 
-        {page === 'records' && (
+        {page === 'records' && recordView !== 'achievements' && (
           <section className="records-page" aria-label="月間記録">
             <div className="records-month-header">
               <button
@@ -7673,11 +7782,18 @@ function App() {
                   (entry) => entry.saved && hasMeaningfulText(entry.text),
                 );
                 const filledTodos = todoEntries.filter(hasTodoText);
-                const hasRecordContent =
-                  savedMemoEntries.length > 0 ||
-                  savedEventEntries.length > 0 ||
-                  filledTodos.length > 0 ||
-                  anyMemoValue.trim().length > 0;
+                const anyMemoText = anyMemoValue.trim();
+                const recordContentCount =
+                  recordView === 'memo'
+                    ? savedMemoEntries.length
+                    : recordView === 'events'
+                      ? savedEventEntries.length
+                      : recordView === 'todos'
+                        ? filledTodos.length
+                        : anyMemoText.length > 0
+                          ? 1
+                          : 0;
+                const hasRecordContent = recordContentCount > 0;
                 const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
                   weekdayShortLabels[recordDate.getDay()]
                 }${holidayName ? `・${holidayName}` : ''}）`;
@@ -7700,20 +7816,13 @@ function App() {
                       </span>
                       <span className="record-day-meta">
                         {dateKey === todayKey && <strong>今日</strong>}
-                        {hasRecordContent
-                          ? `${
-                            savedMemoEntries.length +
-                            savedEventEntries.length +
-                            filledTodos.length +
-                            (anyMemoValue.trim().length > 0 ? 1 : 0)
-                          }件`
-                          : '記録なし'}
+                        {hasRecordContent ? `${recordContentCount}件` : '記録なし'}
                       </span>
                     </button>
 
                     {hasRecordContent && (
                       <div className="record-day-body">
-                        {savedMemoEntries.length > 0 && (
+                        {recordView === 'memo' && savedMemoEntries.length > 0 && (
                           <div className="record-read-section">
                             <h3>✍️ ひとこと</h3>
                             <div className="record-read-list">
@@ -7725,7 +7834,7 @@ function App() {
                             </div>
                           </div>
                         )}
-                        {savedEventEntries.length > 0 && (
+                        {recordView === 'events' && savedEventEntries.length > 0 && (
                           <div className="record-read-section">
                             <h3>📅 できごと</h3>
                             <div className="record-read-list">
@@ -7737,7 +7846,7 @@ function App() {
                             </div>
                           </div>
                         )}
-                        {filledTodos.length > 0 && (
+                        {recordView === 'todos' && filledTodos.length > 0 && (
                           <div className="record-read-section">
                             <h3>☑️ やること</h3>
                             <ul className="record-read-todos">
@@ -7753,10 +7862,10 @@ function App() {
                             </ul>
                           </div>
                         )}
-                        {anyMemoValue.trim().length > 0 && (
+                        {recordView === 'anyMemo' && anyMemoText.length > 0 && (
                           <div className="record-read-section">
                             <h3>📝 なんでもメモ</h3>
-                            <p>{anyMemoValue.trim()}</p>
+                            <p>{anyMemoText}</p>
                           </div>
                         )}
                       </div>
@@ -8544,7 +8653,7 @@ function App() {
           </section>
         )}
 
-        {page === 'achievements' && (
+        {page === 'records' && recordView === 'achievements' && (
           <section className="achievements-panel">
             <div className="achievements-header">
               <span aria-hidden="true">🏆</span>
@@ -8881,12 +8990,59 @@ function App() {
 
       </div>
 
+      {page === 'records' && (
+        <nav
+          className="record-subtab-nav"
+          aria-label="記録の表示切り替え"
+          onPointerCancel={handleRecordSubtabPointerEnd}
+          onPointerDown={handleRecordSubtabPointerDown}
+          onPointerMove={handleRecordSubtabPointerMove}
+          onPointerUp={handleRecordSubtabPointerEnd}
+          style={
+            {
+              '--record-swipe-offset': `${recordSwipeOffset}px`,
+            } as CSSProperties
+          }
+        >
+          <span className="record-subtab-focus-frame" aria-hidden="true" />
+          {recordViewOptions.map((option) => (
+            (() => {
+              let position = recordViewOptions.findIndex((recordOption) => (
+                recordOption.key === option.key
+              )) - activeRecordViewIndex;
+
+              if (position > Math.floor(recordViewOptions.length / 2)) {
+                position -= recordViewOptions.length;
+              }
+
+              if (position < -Math.floor(recordViewOptions.length / 2)) {
+                position += recordViewOptions.length;
+              }
+
+              return (
+                <button
+                  aria-current={recordView === option.key ? 'page' : undefined}
+                  className="record-subtab-item"
+                  data-active={recordView === option.key ? 'true' : 'false'}
+                  data-position={position}
+                  key={option.key}
+                  onClick={() => selectRecordView(option.key)}
+                  type="button"
+                >
+                  <span aria-hidden="true">{option.icon}</span>
+                  {option.label}
+                </button>
+              );
+            })()
+          ))}
+        </nav>
+      )}
+
       <nav className="bottom-tab-nav" aria-label="メインナビゲーション">
         {([
           ['today', '🎮', '今日'],
           ['history', '📅', 'スタンプ帳'],
           ['records', '📖', '記録'],
-          ['achievements', '🏆', '実績'],
           ['shop', '🛍️', 'ショップ'],
           ['settings', '⚙️', '設定'],
         ] as [PageName, string, string][]).map(([tabPage, icon, label]) => (

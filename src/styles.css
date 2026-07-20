@@ -38,6 +38,10 @@ select {
     #f6f7f4;
 }
 
+.app[data-page='records'] {
+  padding-bottom: calc(178px + env(safe-area-inset-bottom));
+}
+
 .app-content {
   width: min(100%, 520px);
   margin: 0 auto;
@@ -2930,7 +2934,7 @@ h1 {
   left: 10px;
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
   width: min(calc(100% - 20px), 600px);
   margin: 0 auto;
@@ -2940,6 +2944,106 @@ h1 {
   background: rgb(255 255 255 / 92%);
   box-shadow: 0 14px 34px rgb(0 65 42 / 20%);
   backdrop-filter: blur(14px);
+}
+
+.record-subtab-nav {
+  position: fixed;
+  right: 10px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  left: 10px;
+  z-index: 19;
+  height: 58px;
+  width: min(calc(100% - 20px), 600px);
+  margin: 0 auto;
+  overflow: hidden;
+  touch-action: pan-y;
+  user-select: none;
+  border: 1px solid rgb(205 226 190 / 88%);
+  border-radius: 16px;
+  background: rgb(255 255 249 / 94%);
+  box-shadow: 0 12px 28px rgb(53 93 48 / 16%);
+  backdrop-filter: blur(14px);
+}
+
+.record-subtab-focus-frame {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  z-index: 0;
+  width: min(34%, 132px);
+  height: calc(100% - 12px);
+  border: 2px solid rgb(22 151 92 / 82%);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f4fff5 0%, #dff8d1 100%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 76%),
+    0 7px 16px rgb(42 112 55 / 16%);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.record-subtab-item {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  width: min(32%, 124px);
+  height: calc(100% - 12px);
+  place-items: center;
+  gap: 1px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #65715d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 900;
+  opacity: 0.56;
+  transform:
+    translateX(calc(-50% + (var(--record-position) * min(30vw, 132px)) + var(--record-swipe-offset, 0px)))
+    scale(0.86);
+  transition:
+    transform 180ms ease,
+    opacity 160ms ease,
+    color 160ms ease;
+  will-change: transform;
+}
+
+.record-subtab-item span {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.record-subtab-item[data-position='-2'] {
+  --record-position: -2;
+  opacity: 0.18;
+}
+
+.record-subtab-item[data-position='-1'] {
+  --record-position: -1;
+}
+
+.record-subtab-item[data-position='0'] {
+  --record-position: 0;
+}
+
+.record-subtab-item[data-position='1'] {
+  --record-position: 1;
+}
+
+.record-subtab-item[data-position='2'] {
+  --record-position: 2;
+  opacity: 0.18;
+}
+
+.record-subtab-item[data-active='true'] {
+  color: #23633f;
+  opacity: 1;
+  transform:
+    translateX(calc(-50% + var(--record-swipe-offset, 0px)))
+    scale(1.06);
 }
 
 .bottom-tab-nav button {
@@ -5202,6 +5306,10 @@ h1 {
 @media (max-width: 640px) {
   .app {
     padding: 10px 8px calc(116px + env(safe-area-inset-bottom));
+  }
+
+  .app[data-page='records'] {
+    padding-bottom: calc(178px + env(safe-area-inset-bottom));
   }
 
   .app-header {

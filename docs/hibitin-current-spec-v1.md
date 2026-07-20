@@ -16,7 +16,7 @@
 - ビルド方法: `npm run build`
 - Node条件: `package.json` の `engines.node` は `>=24`
 - 2026-07-11時点のビルド結果: `npm run build` 成功
-- 主要画面: 今日、スタンプ帳、記録、実績、ショップ、設定
+- 主要画面: 今日、スタンプ帳、記録、ショップ、設定
 
 PWA構成は `vite.config.ts` の `VitePWA` で定義されています。`registerType: 'autoUpdate'`、`display: 'standalone'`、manifest名は `日々のルーティンチェック帳`、short_name は `日々ティン` です。Service Workerは vite-plugin-pwa の `generateSW` 方式でビルド時に `dist/sw.js` と Workboxファイルが生成されます。
 
@@ -25,15 +25,14 @@ PWA構成は `vite.config.ts` の `VitePWA` で定義されています。`regis
 画面管理は `src/App.tsx` の `PageName` です。
 
 ```ts
-type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'records' | 'shop' | 'settings';
 ```
 
-下部タブは6つです。
+下部メインタブは5つです。
 
 - `today`: 🎮 今日
 - `history`: 📅 スタンプ帳
 - `records`: 📖 記録
-- `achievements`: 🏆 実績
 - `shop`: 🛍️ ショップ
 - `settings`: ⚙️ 設定
 
@@ -96,16 +95,16 @@ type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'set
 表示内容:
 
 - 月移動: 前月 / 今日へ / 翌月
+- 画面下部固定の記録サブタブ: ひとこと / できごと / やること / メモ / 実績
 - 1日から月末までの日付カード縦一覧
 - 日付、曜日、祝日名、今日マーカー
-- その日のひとこと
-- その日のできごと
-- その日のやること
-- なんでもメモ
+- 選択中のサブタブに対応する保存済み内容
+- 実績サブタブでは従来の実績画面内容
 
 主なstate:
 
 - `recordMonth`
+- `recordView`
 - `selectedRecordDate`
 - `recordRevision`
 
@@ -119,10 +118,11 @@ type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'set
 連動:
 
 - Today画面と同じ保存キーを読み書きし、二重管理しません。
-- 月一覧は閲覧中心で、保存済みの本文・Todo・なんでもメモだけを表示します。
+- 月一覧は閲覧中心で、選択中サブタブの保存済み本文・Todo・なんでもメモだけを表示します。
 - 未記入項目、入力欄、プレースホルダー、OKボタン、やること追加欄は月一覧には表示しません。
 - 内容がない日はコンパクトな日付カードとして表示し、`記録なし` と表示します。
 - 日付カードをタップすると編集パネルを開き、その日のひとこと、できごと、やること、なんでもメモを編集できます。
+- 実績は独立したメインタブではなく、記録画面内の `実績` サブタブとして表示します。
 - 未来日にもひとこと、できごと、やること、なんでもメモを入力できます。
 - 記録タブでの編集自体はPT、達成率、FIRST、スタンプ、Rank、スター、トロフィー、フリークエスト枠へ影響しません。
 - 記録タブは `applyPointChangeForCoreRoutine()` を呼ばず、未来日入力でもコアルーティン報酬や演出を発火させません。
@@ -158,7 +158,7 @@ type PageName = 'today' | 'history' | 'records' | 'achievements' | 'shop' | 'set
 - 選択日が今日タブの `selectedDate` と同じ場合は `checkedItems` も同期します。
 - 日付詳細の編集はその日付専用の `dateOverrides` に保存されます。
 
-### 実績
+### 記録内の実績サブタブ
 
 表示内容:
 
@@ -619,7 +619,7 @@ type RoutineSection = {
 
 - 今日タブ上部に Rank、所持PT、倍率
 - タップで詳細パネル
-- 実績タブの「プレイヤー成長」
+- 記録画面内の実績サブタブの「プレイヤー成長」
 
 詳細パネル:
 
