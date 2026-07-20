@@ -534,11 +534,11 @@ const timerMinuteOptions = Array.from({ length: 60 }, (_, index) => index);
 const timerSecondOptions = Array.from({ length: 60 }, (_, index) => index);
 
 const dailyMessages = [
-  '🌅 今日もゲームスタート。',
-  '🎲 さて、今日はどんな一日になる？',
-  '🌱 昨日より1%前へ。',
-  '☀️ 今日のクエストを始めよう。',
-  '🎯 完璧じゃなくて、前進。',
+  '📖 今日も、自分のページを一枚。',
+  '🌿 ゆるっと、今日を遊ぼう。',
+  '🌱 今日も、ゆるく一歩。',
+  '☀️ 今日はどんな物語になるかな。',
+  '✨ 一歩だけでも、それで十分。',
   '🧭 迷ったら、今できる一個から。',
 ];
 
@@ -2330,11 +2330,11 @@ const getDailyMessage = (dateKey: string, displayName = '') => {
   const safeDisplayName = displayName.trim();
 
   if (safeDisplayName && messageIndex === 0) {
-    return `🌅 ${safeDisplayName}、今日もゲームスタート。`;
+    return `📖 ${safeDisplayName}、今日も自分のページを一枚。`;
   }
 
   if (safeDisplayName && messageIndex === 1) {
-    return `🎲 さて、${safeDisplayName}。今日はどんな一日になる？`;
+    return `🌿 ${safeDisplayName}、ゆるっと今日を遊ぼう。`;
   }
 
   return dailyMessages[messageIndex];
@@ -6945,12 +6945,17 @@ function App() {
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
       <div className="app-content">
-        <header className="app-header">
+        <header className={`app-header${page === 'today' ? ' today-title-header' : ''}`}>
           <div className="top-bar">
             <p className="project-name">hibitin</p>
           </div>
           <h1>
-            {page === 'today' && '日々のルーティンチェック帳'}
+            {page === 'today' && (
+              <>
+                <span>ぼくらの</span>
+                <span>ゆるい日々ティン帳</span>
+              </>
+            )}
             {page === 'history' && 'スタンプ帳'}
             {page === 'schedule' && `${activeScheduleViewOption.icon} ${activeScheduleHeading}`}
             {page === 'records' && `${activeRecordViewOption.icon} ${activeRecordHeading}`}
@@ -8502,12 +8507,17 @@ function App() {
                     ? historyDailyTodos
                     : loadDailyTodos(scheduleDate);
                 const filledTodos = todoEntries.filter(hasTodoText);
+                const scheduleTodoStats = getDailyTodoStats(todoEntries);
                 const hasSchedule = scheduleItems.length > 0;
                 const hasTodos = filledTodos.length > 0;
                 const contentCount = scheduleView === 'schedule'
                   ? scheduleItems.length
                   : filledTodos.length;
                 const hasContent = contentCount > 0;
+                const isSelectedTodoDate =
+                  scheduleView === 'todos' &&
+                  selectedScheduleDate !== null &&
+                  getDateKey(selectedScheduleDate) === dateKey;
                 const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
                   weekdayShortLabels[scheduleDate.getDay()]
                 }${holidayName ? `・${holidayName}` : ''}）`;
@@ -8532,7 +8542,11 @@ function App() {
                         {dateKey === todayKey && <strong>今日</strong>}
                         {scheduleView === 'schedule'
                           ? hasSchedule ? `${scheduleItems.length}件` : '予定なし'
-                          : hasTodos ? `${filledTodos.length}件` : 'やることなし'}
+                          : hasTodos
+                            ? `${scheduleTodoStats.completedCount} / ${scheduleTodoStats.totalCount}`
+                            : isSelectedTodoDate
+                              ? '追加中'
+                              : 'やることなし'}
                       </span>
                     </button>
 
@@ -8548,21 +8562,54 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {scheduleView === 'todos' && hasTodos && (
-                      <div className="record-day-body schedule-day-body">
-                        <div className="record-read-section">
-                          <h3>☑️ やること</h3>
-                          <ul className="record-read-todos">
-                            {filledTodos.map((todo) => (
-                              <li
+                    {scheduleView === 'todos' && (hasTodos || isSelectedTodoDate) && (
+                      <div className="record-day-body schedule-day-body schedule-todo-manager">
+                        <div className="daily-todo-list">
+                          {todoEntries.map((todo, index) => {
+                            const isFilledTodo = hasTodoText(todo);
+
+                            return (
+                              <div
+                                className="daily-todo-row record-todo-row"
                                 data-completed={todo.completed ? 'true' : 'false'}
+                                data-empty={!isFilledTodo ? 'true' : 'false'}
                                 key={todo.id}
                               >
-                                <span aria-hidden="true">{todo.completed ? '✓' : '・'}</span>
-                                <span>{todo.text.trim()}</span>
-                              </li>
-                            ))}
-                          </ul>
+                                <input
+                                  aria-label={`${dateTitle}のやること ${index + 1}を完了`}
+                                  checked={todo.completed}
+                                  disabled={!isFilledTodo}
+                                  onChange={(event) =>
+                                    toggleRecordTodo(scheduleDate, todo.id, event.target.checked)
+                                  }
+                                  type="checkbox"
+                                />
+                                <input
+                                  aria-label={`${dateTitle}のやること ${index + 1}`}
+                                  onBlur={() => cleanupRecordTodo(scheduleDate)}
+                                  onChange={(event) =>
+                                    updateRecordTodo(scheduleDate, todo.id, event.target.value)
+                                  }
+                                  onCompositionEnd={(event) =>
+                                    updateRecordTodo(scheduleDate, todo.id, event.currentTarget.value)
+                                  }
+                                  placeholder="やることを追加"
+                                  type="text"
+                                  value={todo.text}
+                                />
+                                {isFilledTodo && (
+                                  <button
+                                    aria-label={`${dateTitle}のやること ${index + 1}を削除`}
+                                    className="daily-todo-delete-button"
+                                    onClick={() => deleteRecordTodo(scheduleDate, todo.id)}
+                                    type="button"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -8570,7 +8617,7 @@ function App() {
                 );
               })}
             </div>
-            {selectedScheduleDate && (() => {
+            {selectedScheduleDate && scheduleView === 'schedule' && (() => {
               const scheduleDate = selectedScheduleDate;
               const dateKey = getDateKey(scheduleDate);
               const holidayName = getHolidayName(scheduleDate);
@@ -8579,14 +8626,6 @@ function App() {
               }${holidayName ? `・${holidayName}` : ''}）`;
               const scheduleItems = loadDailySchedule(scheduleDate);
               const scheduleDraft = scheduleDrafts[dateKey] ?? { time: '', text: '' };
-              const todoEntries = dateKey === selectedDateKey
-                ? dailyTodos
-                : dateKey === historySelectedDateKey
-                  ? historyDailyTodos
-                  : loadDailyTodos(scheduleDate);
-              const todoStats = getDailyTodoStats(todoEntries);
-              const editorTitle = scheduleView === 'schedule' ? 'スケジュール' : 'やること';
-              const editorIcon = scheduleView === 'schedule' ? '🗓️' : '☑️';
 
               return (
                 <div
@@ -8595,24 +8634,23 @@ function App() {
                   onClick={() => setSelectedScheduleDate(null)}
                 >
                   <section
-                    aria-label={`${dateTitle}の${editorTitle}編集`}
+                    aria-label={`${dateTitle}のスケジュール編集`}
                     className="record-editor-panel schedule-editor-panel"
                     onClick={(event) => event.stopPropagation()}
                   >
                     <div className="record-editor-header">
                       <div>
-                        <p>{editorIcon} {editorTitle}を編集</p>
+                        <p>🗓️ スケジュールを編集</p>
                         <h2>{dateTitle}</h2>
                       </div>
                       <button
-                        aria-label={`${editorTitle}編集を閉じる`}
+                        aria-label="スケジュール編集を閉じる"
                         onClick={() => setSelectedScheduleDate(null)}
                         type="button"
                       >
                         閉じる
                       </button>
                     </div>
-                    {scheduleView === 'schedule' && (
                     <div className="record-field schedule-field">
                       <label>
                         🗓️ 予定
@@ -8688,62 +8726,6 @@ function App() {
                         </div>
                       </div>
                     </div>
-                    )}
-                    {scheduleView === 'todos' && (
-                    <div className="record-field">
-                      <label>
-                        ☑️ やること
-                        <span>{todoStats.completedCount} / {todoStats.totalCount}</span>
-                      </label>
-                      <div className="record-todo-list">
-                        {todoEntries.map((todo, index) => {
-                          const isFilledTodo = hasTodoText(todo);
-
-                          return (
-                            <div
-                              className="daily-todo-row record-todo-row"
-                              data-completed={todo.completed ? 'true' : 'false'}
-                              data-empty={!isFilledTodo ? 'true' : 'false'}
-                              key={todo.id}
-                            >
-                              <input
-                                aria-label={`${dateTitle}のやること ${index + 1}を完了`}
-                                checked={todo.completed}
-                                disabled={!isFilledTodo}
-                                onChange={(event) =>
-                                  toggleRecordTodo(scheduleDate, todo.id, event.target.checked)
-                                }
-                                type="checkbox"
-                              />
-                              <input
-                                aria-label={`${dateTitle}のやること ${index + 1}`}
-                                onBlur={() => cleanupRecordTodo(scheduleDate)}
-                                onChange={(event) =>
-                                  updateRecordTodo(scheduleDate, todo.id, event.target.value)
-                                }
-                                onCompositionEnd={(event) =>
-                                  updateRecordTodo(scheduleDate, todo.id, event.currentTarget.value)
-                                }
-                                placeholder="やることをメモ"
-                                type="text"
-                                value={todo.text}
-                              />
-                              {isFilledTodo && (
-                                <button
-                                  aria-label={`${dateTitle}のやること ${index + 1}を削除`}
-                                  className="daily-todo-delete-button"
-                                  onClick={() => deleteRecordTodo(scheduleDate, todo.id)}
-                                  type="button"
-                                >
-                                  ×
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    )}
                   </section>
                 </div>
               );

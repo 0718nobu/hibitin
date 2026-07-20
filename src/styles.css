@@ -56,6 +56,52 @@ select {
   padding: 8px 2px 14px;
 }
 
+.today-title-header {
+  position: relative;
+  overflow: hidden;
+  margin: 2px 0 14px;
+  border: 1px solid rgb(159 215 178 / 58%);
+  border-radius: 22px;
+  padding: 20px 18px 22px;
+  background:
+    radial-gradient(circle at 18% 10%, rgb(255 255 255 / 90%), transparent 30%),
+    radial-gradient(circle at 86% 26%, rgb(218 247 224 / 70%), transparent 28%),
+    linear-gradient(180deg, rgb(255 253 239 / 96%) 0%, rgb(240 255 245 / 86%) 100%);
+  box-shadow:
+    0 14px 32px rgb(35 107 73 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 88%),
+    inset 0 -10px 22px rgb(201 233 207 / 20%);
+}
+
+.today-title-header::before,
+.today-title-header::after {
+  position: absolute;
+  z-index: 0;
+  color: rgb(31 122 90 / 24%);
+  font-size: 1.1rem;
+  pointer-events: none;
+}
+
+.today-title-header::before {
+  top: 16px;
+  right: 20px;
+  content: "🍀";
+  transform: rotate(8deg);
+}
+
+.today-title-header::after {
+  right: 40px;
+  bottom: 15px;
+  content: "📑";
+  font-size: 1rem;
+  transform: rotate(-7deg);
+}
+
+.today-title-header > * {
+  position: relative;
+  z-index: 1;
+}
+
 .app[data-page='records'] .app-header,
 .app[data-page='schedule'] .app-header {
   position: relative;
@@ -122,9 +168,9 @@ select {
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .project-name {
@@ -132,6 +178,26 @@ select {
   color: #1f7a5a;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.today-title-header .project-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgb(122 190 151 / 28%);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgb(255 255 255 / 52%);
+  color: #267050;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+.today-title-header .project-name::before {
+  font-size: 0.8rem;
+  content: "📖";
 }
 
 .settings-button {
@@ -153,11 +219,47 @@ h1 {
   line-height: 1.1;
 }
 
+.today-title-header h1 {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: #174634;
+  font-size: clamp(1.74rem, 8.4vw, 2.3rem);
+  line-height: 1.06;
+  letter-spacing: 0;
+}
+
+.today-title-header h1 span:first-child {
+  color: #3d8a68;
+  font-size: 0.68em;
+  font-weight: 900;
+}
+
+.today-title-header h1 span:last-child {
+  text-shadow:
+    0 2px 0 rgb(255 255 255 / 78%),
+    0 8px 18px rgb(35 107 73 / 10%);
+}
+
 .daily-message {
   margin: 10px 0 0;
   color: #2d6b54;
   font-size: 0.92rem;
   font-weight: 800;
+}
+
+.today-title-header .daily-message {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 15px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgb(255 255 255 / 60%);
+  color: #2d6b54;
+  font-size: 0.9rem;
+  box-shadow:
+    inset 0 0 0 1px rgb(133 194 158 / 20%),
+    0 6px 16px rgb(35 107 73 / 8%);
 }
 
 .quest-date-switch {
@@ -2997,7 +3099,7 @@ h1 {
   bottom: calc(10px + env(safe-area-inset-bottom));
   left: 10px;
   z-index: 20;
-  --main-nav-step: clamp(50px, 14.3vw, 64px);
+  --main-nav-step: clamp(66px, 18.3vw, 82px);
   --main-nav-item-width: clamp(52px, 15.5vw, 68px);
   height: 72px;
   width: min(calc(100% - 20px), 600px);
@@ -3019,21 +3121,21 @@ h1 {
 .record-subtab-nav {
   position: fixed;
   right: 10px;
-  bottom: calc(90px + env(safe-area-inset-bottom));
+  bottom: calc(86px + env(safe-area-inset-bottom));
   left: 10px;
   z-index: 19;
-  height: 58px;
-  width: min(calc(100% - 20px), 600px);
+  height: 48px;
+  width: min(calc(100% - 28px), 560px);
   margin: 0 auto;
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
   user-select: none;
-  border: 1px solid rgb(205 226 190 / 88%);
-  border-radius: 16px;
-  background: rgb(255 255 249 / 94%);
-  box-shadow: 0 12px 28px rgb(53 93 48 / 16%);
-  backdrop-filter: blur(14px);
+  border: 1px solid rgb(205 226 190 / 68%);
+  border-radius: 14px;
+  background: rgb(255 255 249 / 88%);
+  box-shadow: 0 8px 18px rgb(53 93 48 / 10%);
+  backdrop-filter: blur(10px);
 }
 
 .bottom-tab-focus-frame {
@@ -3041,7 +3143,7 @@ h1 {
   top: 7px;
   left: 50%;
   z-index: 0;
-  width: clamp(82px, 25%, 108px);
+  width: clamp(74px, 21%, 96px);
   height: calc(100% - 14px);
   border: 2px solid rgb(14 137 83 / 88%);
   border-radius: 18px;
@@ -3057,17 +3159,17 @@ h1 {
 
 .record-subtab-focus-frame {
   position: absolute;
-  top: 6px;
+  top: 5px;
   left: 50%;
   z-index: 0;
-  width: min(35%, 132px);
-  height: calc(100% - 12px);
-  border: 2px solid rgb(22 151 92 / 82%);
-  border-radius: 14px;
+  width: min(20%, 72px);
+  height: calc(100% - 10px);
+  border: 1px solid rgb(22 151 92 / 68%);
+  border-radius: 12px;
   background: linear-gradient(180deg, #f4fff5 0%, #dff8d1 100%);
   box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 76%),
-    0 7px 16px rgb(42 112 55 / 16%);
+    inset 0 0 0 1px rgb(255 255 255 / 68%),
+    0 5px 11px rgb(42 112 55 / 10%);
   transform: translateX(-50%);
   pointer-events: none;
 }
@@ -3109,26 +3211,26 @@ h1 {
 
 .record-subtab-item {
   position: absolute;
-  top: 6px;
+  top: 5px;
   left: 50%;
   z-index: 1;
   display: grid;
-  width: min(28%, 108px);
-  height: calc(100% - 12px);
+  width: min(22%, 78px);
+  height: calc(100% - 10px);
   place-items: center;
   gap: 1px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: #65715d;
   cursor: pointer;
   font: inherit;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 900;
   opacity: 0.56;
   transform:
-    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
-    scale(0.85);
+    translate3d(calc(-50% + (var(--record-position) * min(21vw, 78px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(1);
   transition:
     transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 160ms ease,
@@ -3137,7 +3239,7 @@ h1 {
 }
 
 .record-subtab-item span {
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   line-height: 1;
 }
 
@@ -3145,8 +3247,8 @@ h1 {
   --record-position: -2;
   opacity: 0.38;
   transform:
-    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
-    scale(0.7);
+    translate3d(calc(-50% + (var(--record-position) * min(21vw, 78px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(1);
 }
 
 .record-subtab-item[data-position='-3'] {
@@ -3171,8 +3273,8 @@ h1 {
   --record-position: 2;
   opacity: 0.38;
   transform:
-    translate3d(calc(-50% + (var(--record-position) * min(18vw, 68px)) + var(--record-swipe-offset, 0px)), 0, 0)
-    scale(0.7);
+    translate3d(calc(-50% + (var(--record-position) * min(21vw, 78px)) + var(--record-swipe-offset, 0px)), 0, 0)
+    scale(1);
 }
 
 .record-subtab-item[data-position='3'] {
@@ -3210,7 +3312,7 @@ h1 {
   opacity: 0.58;
   transform:
     translate3d(calc(-50% + (var(--main-nav-position) * var(--main-nav-step)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
-    scale(0.82);
+    scale(1);
   transition:
     transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 160ms ease,
@@ -3228,7 +3330,7 @@ h1 {
   opacity: 0.36;
   transform:
     translate3d(calc(-50% + (var(--main-nav-position) * var(--main-nav-step)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
-    scale(0.68);
+    scale(1);
 }
 
 .bottom-tab-item[data-position='-5'],
@@ -3250,7 +3352,7 @@ h1 {
   opacity: 0.22;
   transform:
     translate3d(calc(-50% + (var(--main-nav-position) * var(--main-nav-step)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
-    scale(0.58);
+    scale(1);
 }
 
 .bottom-tab-item[data-position='-1'] {
@@ -3270,7 +3372,7 @@ h1 {
   opacity: 0.36;
   transform:
     translate3d(calc(-50% + (var(--main-nav-position) * var(--main-nav-step)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
-    scale(0.68);
+    scale(1);
 }
 
 .bottom-tab-item[data-position='4'],
@@ -3284,7 +3386,7 @@ h1 {
   opacity: 0.22;
   transform:
     translate3d(calc(-50% + (var(--main-nav-position) * var(--main-nav-step)) + var(--main-nav-swipe-offset, 0px)), 0, 0)
-    scale(0.58);
+    scale(1);
 }
 
 .bottom-tab-item[data-position='4'] {
@@ -4373,6 +4475,23 @@ h1 {
 
 .schedule-day-body {
   padding-top: 9px;
+}
+
+.schedule-todo-manager {
+  display: grid;
+  gap: 7px;
+}
+
+.schedule-todo-manager .daily-todo-list {
+  gap: 7px;
+}
+
+.schedule-todo-manager .daily-todo-row {
+  background: rgb(255 255 255 / 84%);
+}
+
+.schedule-todo-manager .daily-todo-row[data-empty='true'] {
+  background: rgb(250 255 241 / 64%);
 }
 
 .schedule-read-list {
