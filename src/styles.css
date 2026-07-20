@@ -3100,7 +3100,7 @@ h1 {
   left: 10px;
   z-index: 20;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: stretch;
   min-height: 72px;
   width: min(calc(100% - 20px), 600px);
@@ -3121,6 +3121,27 @@ h1 {
   backdrop-filter: blur(16px);
   padding: 8px;
   scrollbar-width: none;
+}
+
+.bottom-tab-nav::after {
+  content: '›';
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  z-index: 2;
+  display: grid;
+  width: 16px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgb(34 128 82 / 16%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 72%);
+  color: rgb(20 119 75 / 72%);
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .bottom-tab-nav::-webkit-scrollbar {
@@ -3223,7 +3244,7 @@ h1 {
 .bottom-tab-item {
   flex: 0 0 auto;
   display: grid;
-  width: clamp(62px, 15.6vw, 88px);
+  width: clamp(63px, 15.85vw, 88px);
   min-height: 54px;
   place-items: center;
   gap: 2px;
@@ -5892,5 +5913,11 @@ h1 {
 
   .dialog-actions {
     grid-template-columns: 1fr;
+  }
+
+  .app input:not([type='checkbox']):not([type='radio']),
+  .app textarea,
+  .app select {
+    font-size: 16px;
   }
 }
