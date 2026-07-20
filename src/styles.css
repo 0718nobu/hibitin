@@ -2971,7 +2971,7 @@ h1 {
   top: 6px;
   left: 50%;
   z-index: 0;
-  width: min(34%, 132px);
+  width: min(35%, 132px);
   height: calc(100% - 12px);
   border: 2px solid rgb(22 151 92 / 82%);
   border-radius: 14px;
@@ -2989,7 +2989,7 @@ h1 {
   left: 50%;
   z-index: 1;
   display: grid;
-  width: min(32%, 124px);
+  width: min(34%, 128px);
   height: calc(100% - 12px);
   place-items: center;
   gap: 1px;
@@ -3003,7 +3003,7 @@ h1 {
   font-weight: 900;
   opacity: 0.56;
   transform:
-    translateX(calc(-50% + (var(--record-position) * min(30vw, 132px)) + var(--record-swipe-offset, 0px)))
+    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
     scale(0.86);
   transition:
     transform 180ms ease,
@@ -3019,7 +3019,10 @@ h1 {
 
 .record-subtab-item[data-position='-2'] {
   --record-position: -2;
-  opacity: 0.18;
+  opacity: 0.34;
+  transform:
+    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
+    scale(0.74);
 }
 
 .record-subtab-item[data-position='-1'] {
@@ -3036,7 +3039,10 @@ h1 {
 
 .record-subtab-item[data-position='2'] {
   --record-position: 2;
-  opacity: 0.18;
+  opacity: 0.34;
+  transform:
+    translateX(calc(-50% + (var(--record-position) * min(25vw, 104px)) + var(--record-swipe-offset, 0px)))
+    scale(0.74);
 }
 
 .record-subtab-item[data-active='true'] {
