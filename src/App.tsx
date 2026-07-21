@@ -2192,7 +2192,10 @@ type DailyScheduleItem = {
 };
 
 type DailySchedule = DailyScheduleItem[];
-type DailyScheduleDrafts = Record<string, DailyScheduleItem[]>;
+type DailyScheduleDraftItem = DailyScheduleItem & {
+  touched: boolean;
+};
+type DailyScheduleDrafts = Record<string, DailyScheduleDraftItem[]>;
 
 type NormalizeDailyTodoOptions = {
   preserveEmptyIds?: Iterable<string>;
@@ -2302,6 +2305,28 @@ const updateDailyTodoText = (
     },
   );
 
+const upsertDailyTodoText = (
+  todos: DailyTodos,
+  id: string,
+  text: string,
+  options: NormalizeDailyTodoOptions = {},
+): DailyTodos => {
+  const hasTargetTodo = todos.some((todo) => todo.id === id);
+
+  if (hasTargetTodo) {
+    return updateDailyTodoText(todos, id, text, options);
+  }
+
+  if (!text.trim()) {
+    return normalizeDailyTodos(todos, options);
+  }
+
+  return normalizeDailyTodos(
+    [...todos, createDailyTodoItem(text, false, id)],
+    options,
+  );
+};
+
 const toggleDailyTodoCompleted = (
   todos: DailyTodos,
   id: string,
@@ -2344,8 +2369,16 @@ const createDailyScheduleItem = (
   text,
 });
 
-const createDailyScheduleDraftItem = () =>
-  createDailyScheduleItem(getRoundedCurrentHourTime());
+const createDailyScheduleDraftItem = (): DailyScheduleDraftItem => ({
+  ...createDailyScheduleItem(getRoundedCurrentHourTime()),
+  touched: false,
+});
+
+const hasScheduleDraftValue = (scheduleDraft: DailyScheduleDraftItem) =>
+  scheduleDraft.touched && hasScheduleValue(scheduleDraft);
+
+const hasPendingScheduleDraft = (scheduleDraft: DailyScheduleDraftItem) =>
+  !hasScheduleDraftValue(scheduleDraft);
 
 const sortDailySchedule = (schedule: DailySchedule) =>
   [...schedule].sort((first, second) => {
@@ -6504,7 +6537,7 @@ function App() {
       : dateKey === historySelectedDateKey
         ? historyDailyTodos
         : loadDailyTodos(date);
-    const nextTodos = updateDailyTodoText(currentTodos, id, text);
+    const nextTodos = upsertDailyTodoText(currentTodos, id, text);
 
     localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
     syncRecordTodosToActiveDates(date, nextTodos);
@@ -6605,7 +6638,7 @@ function App() {
     setScheduleDrafts((currentDrafts) => {
       const currentRows = currentDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
 
-      if (currentRows.some((draft) => !hasScheduleValue(draft))) {
+      if (currentRows.some(hasPendingScheduleDraft)) {
         return currentDrafts;
       }
 
@@ -6618,7 +6651,7 @@ function App() {
 
   const updateScheduleDraft = (
     date: Date,
-    draft: DailyScheduleItem,
+    draft: DailyScheduleDraftItem,
     field: keyof Pick<DailyScheduleItem, 'time' | 'text'>,
     value: string,
   ) => {
@@ -6627,17 +6660,16 @@ function App() {
     const nextDraft = {
       ...draft,
       [field]: value,
+      touched: true,
     };
     const isComposing = composingScheduleIdsRef.current.has(draft.id);
     const preserveOptions = isComposing ? { preserveEmptyIds: [draft.id] } : {};
     const nextRows = currentRows
       .map((currentDraft) => (currentDraft.id === draft.id ? nextDraft : currentDraft))
-      .filter((currentDraft) =>
-        currentDraft.id === draft.id || hasScheduleValue(currentDraft));
-    const hasEmptyRow = nextRows.some((currentDraft) => !hasScheduleValue(currentDraft));
-    const normalizedRows = hasEmptyRow
+      .filter((currentDraft) => currentDraft.id === draft.id || hasScheduleDraftValue(currentDraft));
+    const normalizedRows = nextRows.length > 0
       ? nextRows
-      : [...nextRows, createDailyScheduleDraftItem()];
+      : [createDailyScheduleDraftItem()];
 
     const currentSchedule = loadDailySchedule(date);
     const nextSchedule = hasScheduleValue(nextDraft) || isComposing
@@ -6661,7 +6693,7 @@ function App() {
     updateScheduleItem(date, item, 'text', value);
   };
 
-  const endScheduleDraftComposition = (date: Date, draft: DailyScheduleItem, value: string) => {
+  const endScheduleDraftComposition = (date: Date, draft: DailyScheduleDraftItem, value: string) => {
     composingScheduleIdsRef.current.delete(draft.id);
     updateScheduleDraft(date, draft, 'text', value);
   };
@@ -6670,6 +6702,23 @@ function App() {
     const currentSchedule = loadDailySchedule(date);
 
     saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
+  };
+
+  const removeScheduleDraft = (date: Date, id: string) => {
+    const dateKey = getDateKey(date);
+    const currentSchedule = loadDailySchedule(date);
+
+    composingScheduleIdsRef.current.delete(id);
+    saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
+    setScheduleDrafts((currentDrafts) => {
+      const currentRows = currentDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
+      const nextRows = currentRows.filter((scheduleDraft) => scheduleDraft.id !== id);
+
+      return {
+        ...currentDrafts,
+        [dateKey]: nextRows.length > 0 ? nextRows : [createDailyScheduleDraftItem()],
+      };
+    });
   };
 
   const showScheduleToday = () => {
@@ -8912,7 +8961,11 @@ function App() {
                           </div>
                         ))}
                         {scheduleDraftRows.map((scheduleDraft, index) => (
-                          <div className="schedule-editor-row" data-new="true" key={scheduleDraft.id}>
+                          <div
+                            className="schedule-editor-row"
+                            data-new={hasScheduleDraftValue(scheduleDraft) ? 'false' : 'true'}
+                            key={scheduleDraft.id}
+                          >
                             <input
                               aria-label={`${dateTitle}の新しい予定 ${index + 1}の時間`}
                               onChange={(event) =>
@@ -8956,17 +9009,29 @@ function App() {
                               type="text"
                               value={scheduleDraft.text}
                             />
-                            <button
-                              aria-label={`${dateTitle}へ新しい予定欄を追加`}
-                              className="schedule-new-mark"
-                              disabled={scheduleDraftRows.some((draft) => !hasScheduleValue(draft))}
-                              onClick={() => addScheduleDraftRow(scheduleDate)}
-                              type="button"
-                            >
-                              ＋
-                            </button>
+                            {hasScheduleDraftValue(scheduleDraft) ? (
+                              <button
+                                aria-label={`${dateTitle}の新しい予定 ${index + 1}を削除`}
+                                className="schedule-delete-button"
+                                onClick={() => removeScheduleDraft(scheduleDate, scheduleDraft.id)}
+                                type="button"
+                              >
+                                ×
+                              </button>
+                            ) : (
+                              <span className="schedule-row-spacer" aria-hidden="true" />
+                            )}
                           </div>
                         ))}
+                        {!scheduleDraftRows.some(hasPendingScheduleDraft) && (
+                          <button
+                            className="schedule-add-row-button"
+                            onClick={() => addScheduleDraftRow(scheduleDate)}
+                            type="button"
+                          >
+                            ＋ 予定を追加
+                          </button>
+                        )}
                       </div>
                     </div>
                   </section>

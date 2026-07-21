@@ -4796,6 +4796,23 @@ h1 {
   cursor: pointer;
 }
 
+.schedule-row-spacer {
+  width: 30px;
+  height: 30px;
+}
+
+.schedule-add-row-button {
+  justify-self: start;
+  min-height: 34px;
+  border: 1px dashed rgb(57 142 84 / 38%);
+  border-radius: 999px;
+  padding: 0 14px;
+  background: rgb(249 255 245 / 82%);
+  color: #2f734c;
+  cursor: pointer;
+  font-weight: 900;
+}
+
 .schedule-new-mark {
   border: 1px solid rgb(122 184 139 / 34%);
   background: #effbe8;
