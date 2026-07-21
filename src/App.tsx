@@ -16,7 +16,12 @@ import {
   type CoreRoutineKind,
   type CoreRoutinePlacements,
 } from './coreRoutines';
-import { isSupabaseConfigured, supabase } from './lib/supabase';
+import {
+  isSupabaseConfigured,
+  supabase,
+  supabasePublishableKey,
+  supabaseUrl,
+} from './lib/supabase';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
@@ -25,6 +30,8 @@ type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'setting
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
 type ScheduleViewName = 'schedule' | 'todos';
 type AuthMode = 'login' | 'signup';
+type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
+type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'failed';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -57,6 +64,20 @@ const getAuthErrorMessage = (message: string) => {
   }
 
   return 'しばらくしてから再度お試しください。';
+};
+
+const supabaseConnectionLabels: Record<SupabaseConnectionStatus, string> = {
+  unconfigured: '未設定',
+  checking: '確認中',
+  connected: '接続成功',
+  failed: '接続失敗',
+};
+
+const cloudBackupStatusLabels: Record<CloudBackupStatus, string> = {
+  idle: '未保存',
+  saving: '保存中',
+  success: '保存成功',
+  failed: '保存失敗',
 };
 
 const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
@@ -703,13 +724,17 @@ const pruneAutoBackupRecords = async () => {
   return loadAutoBackupRecords();
 };
 
-const saveAutoBackupFromCurrentStorage = async () => {
+const saveAutoBackupFromCurrentStorage = async (
+  options: {
+    force?: boolean;
+  } = {},
+) => {
   const backup = createBackupFromCurrentStorage();
   const contentHash = getBackupContentHash(backup);
   const records = await loadAutoBackupRecords();
   const latestRecord = records[0];
 
-  if (latestRecord?.contentHash === contentHash) {
+  if (!options.force && latestRecord?.contentHash === contentHash) {
     return {
       created: false,
       records,
@@ -3593,6 +3618,11 @@ function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [supabaseConnectionStatus, setSupabaseConnectionStatus] =
+    useState<SupabaseConnectionStatus>(isSupabaseConfigured ? 'checking' : 'unconfigured');
+  const [cloudBackupStatus, setCloudBackupStatus] = useState<CloudBackupStatus>('idle');
+  const [cloudBackupMessage, setCloudBackupMessage] = useState('');
+  const [lastCloudBackupAt, setLastCloudBackupAt] = useState<string | null>(null);
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -5861,6 +5891,64 @@ function App() {
     }
   };
 
+  const saveCloudBackup = async () => {
+    if (!supabase) {
+      setCloudBackupStatus('failed');
+      setCloudBackupMessage('Supabase接続が設定されていません。');
+      return;
+    }
+
+    if (!authUser) {
+      setCloudBackupStatus('idle');
+      setCloudBackupMessage('クラウド保存にはログインが必要です。');
+      return;
+    }
+
+    setCloudBackupStatus('saving');
+    setCloudBackupMessage('端末内バックアップを作成しています。');
+
+    try {
+      await saveAutoBackupFromCurrentStorage({ force: true });
+    } catch (error) {
+      console.warn('Cloud backup safety auto backup failed:', error);
+      setCloudBackupStatus('failed');
+      setCloudBackupMessage('端末内バックアップを作成できなかったため、クラウド保存を中止しました。');
+      return;
+    }
+
+    try {
+      const backup = createBackupFromCurrentStorage();
+      const updatedAt = new Date().toISOString();
+      const dataCount = Object.keys(backup.data.storage).length;
+      const { error } = await supabase
+        .from('hibitin_backups')
+        .upsert(
+          {
+            user_id: authUser.id,
+            backup_data: backup,
+            backup_version: backup.backupVersion,
+            data_count: dataCount,
+            updated_at: updatedAt,
+          },
+          {
+            onConflict: 'user_id',
+          },
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      setLastCloudBackupAt(updatedAt);
+      setCloudBackupStatus('success');
+      setCloudBackupMessage('クラウドへバックアップしました。');
+    } catch (error) {
+      console.warn('Cloud backup failed:', error);
+      setCloudBackupStatus('failed');
+      setCloudBackupMessage('クラウド保存に失敗しました。端末データはそのまま残っています。');
+    }
+  };
+
   const restoreStorageFromBackup = (backup: BackupFile) => {
     Array.from({ length: window.localStorage.length }, (_, index) =>
       window.localStorage.key(index),
@@ -5999,7 +6087,7 @@ function App() {
     let isMounted = true;
 
     void supabase.auth.getUser().then(({ data, error }) => {
-      if (error) {
+      if (error && error.message !== 'Auth session missing!') {
         console.warn('Supabase user restore failed:', error.message);
       }
 
@@ -6017,6 +6105,39 @@ function App() {
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setSupabaseConnectionStatus('unconfigured');
+      return;
+    }
+
+    const controller = new AbortController();
+
+    setSupabaseConnectionStatus('checking');
+
+    void fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/health`, {
+      headers: {
+        apikey: supabasePublishableKey,
+      },
+      signal: controller.signal,
+    })
+      .then((response) => {
+        setSupabaseConnectionStatus(response.ok ? 'connected' : 'failed');
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        console.warn('Supabase connection check failed:', error);
+        setSupabaseConnectionStatus('failed');
+      });
+
+    return () => {
+      controller.abort();
     };
   }, []);
 
@@ -7372,6 +7493,13 @@ function App() {
                 <h2>アカウント</h2>
                 <p>ログインするとアカウント状態を保持できます。クラウド同期はまだ行いません。</p>
               </div>
+            </div>
+            <div
+              className="supabase-connection-status"
+              data-status={supabaseConnectionStatus}
+            >
+              <span>Supabase接続状態</span>
+              <strong>{supabaseConnectionLabels[supabaseConnectionStatus]}</strong>
             </div>
             {!isSupabaseConfigured && (
               <p className="account-notice">
@@ -10226,6 +10354,47 @@ function App() {
               <p className="backup-warning">
                 読み込み時は、復元前に現在データの自動バックアップを書き出してから上書きします。
               </p>
+              <div className="cloud-backup-panel">
+                <div className="cloud-backup-header">
+                  <div>
+                    <h3>クラウドバックアップ</h3>
+                    <p>ログイン中のアカウントへ、今のhibitinデータを手動で保存します。</p>
+                  </div>
+                  <span data-status={cloudBackupStatus}>
+                    {cloudBackupStatusLabels[cloudBackupStatus]}
+                  </span>
+                </div>
+                <dl className="cloud-backup-summary">
+                  <div>
+                    <dt>最終クラウド保存</dt>
+                    <dd>
+                      {lastCloudBackupAt
+                        ? backupDateTimeFormatter.format(new Date(lastCloudBackupAt))
+                        : 'まだありません'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>保存状態</dt>
+                    <dd>{cloudBackupStatusLabels[cloudBackupStatus]}</dd>
+                  </div>
+                </dl>
+                {!authUser && (
+                  <p className="cloud-backup-login-note">
+                    クラウド保存にはログインが必要です。
+                  </p>
+                )}
+                <button
+                  className="cloud-backup-button"
+                  disabled={!authUser || cloudBackupStatus === 'saving'}
+                  onClick={() => void saveCloudBackup()}
+                  type="button"
+                >
+                  クラウドへバックアップ
+                </button>
+                {cloudBackupMessage && (
+                  <p className="backup-message">{cloudBackupMessage}</p>
+                )}
+              </div>
               <div className="auto-backup-panel">
                 <div className="auto-backup-header">
                   <div>

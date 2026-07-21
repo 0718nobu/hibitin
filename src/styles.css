@@ -1199,6 +1199,52 @@ h1 {
   background: linear-gradient(180deg, #fbfffa, #ffffff);
 }
 
+.supabase-connection-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #dbe7df;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.supabase-connection-status span {
+  color: #52645a;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.supabase-connection-status strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.74rem;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.supabase-connection-status[data-status='unconfigured'] strong {
+  background: #fff3d1;
+  color: #8a6a1f;
+}
+
+.supabase-connection-status[data-status='checking'] strong {
+  background: #eef7ff;
+  color: #376987;
+}
+
+.supabase-connection-status[data-status='connected'] strong {
+  background: #e3f7ec;
+  color: #23764e;
+}
+
+.supabase-connection-status[data-status='failed'] strong {
+  background: #fff0ef;
+  color: #9c453c;
+}
+
 .account-notice,
 .account-message {
   margin: 0;
@@ -1877,6 +1923,115 @@ h1 {
   color: #6c6253;
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.cloud-backup-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgb(190 215 223 / 86%);
+  border-radius: 8px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgb(247 253 255 / 88%), rgb(244 250 255 / 78%));
+}
+
+.cloud-backup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cloud-backup-header h3 {
+  margin: 0;
+  color: #2f6476;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.cloud-backup-header p {
+  margin: 3px 0 0;
+  color: #65777c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.cloud-backup-header > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.cloud-backup-header > span[data-status='idle'] {
+  background: #f3f0e7;
+  color: #75684d;
+}
+
+.cloud-backup-header > span[data-status='saving'] {
+  background: #eef7ff;
+  color: #376987;
+}
+
+.cloud-backup-header > span[data-status='success'] {
+  background: #e3f7ec;
+  color: #23764e;
+}
+
+.cloud-backup-header > span[data-status='failed'] {
+  background: #fff0ef;
+  color: #9c453c;
+}
+
+.cloud-backup-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.cloud-backup-summary div {
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgb(255 255 255 / 68%);
+}
+
+.cloud-backup-summary dt {
+  color: #6d7a72;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.cloud-backup-summary dd {
+  margin: 2px 0 0;
+  color: #2e5e45;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.cloud-backup-login-note {
+  margin: 0;
+  color: #796235;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.cloud-backup-button {
+  min-height: 36px;
+  border: 1px solid #8fc7d8;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f5fcff, #e8f7fb);
+  color: #2d6375;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.cloud-backup-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .auto-backup-panel {
