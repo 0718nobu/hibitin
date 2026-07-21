@@ -44,6 +44,19 @@ type WeekdayKey =
   | 'sunday';
 type EditTargetKey = TemplateKind;
 
+type CloudBackupInfo = {
+  updatedAt: string;
+  dataCount: number;
+  backupVersion: number;
+};
+
+type CloudBackupRow = {
+  backup_data: unknown;
+  backup_version: number | null;
+  data_count: number | null;
+  updated_at: string | null;
+};
+
 const getAuthErrorMessage = (message: string) => {
   const normalizedMessage = message.toLowerCase();
 
@@ -482,6 +495,10 @@ const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
 
+const isAllowedBackupStorageKey = (key: string) =>
+  isHibitinStorageKey(key) &&
+  !/supabase|auth|password|secret|service_role|vite_/i.test(key);
+
 const isDailyTextStorageKey = (key: string) =>
   /^hibitin:(memo|events|anyMemo):\d{4}-\d{2}-\d{2}$/.test(key);
 
@@ -565,7 +582,7 @@ const isBackupFile = (value: unknown): value is BackupFile => {
   ];
 
   return (
-    Object.keys(storage).every(isHibitinStorageKey) &&
+    Object.keys(storage).every(isAllowedBackupStorageKey) &&
     requiredKeys.every(
       (key) =>
         key in storage &&
@@ -3623,6 +3640,10 @@ function App() {
   const [cloudBackupStatus, setCloudBackupStatus] = useState<CloudBackupStatus>('idle');
   const [cloudBackupMessage, setCloudBackupMessage] = useState('');
   const [lastCloudBackupAt, setLastCloudBackupAt] = useState<string | null>(null);
+  const [cloudBackupInfo, setCloudBackupInfo] = useState<CloudBackupInfo | null>(null);
+  const [isCloudBackupChecking, setIsCloudBackupChecking] = useState(false);
+  const [isCloudRestoreConfirmOpen, setIsCloudRestoreConfirmOpen] = useState(false);
+  const [isCloudRestoreBusy, setIsCloudRestoreBusy] = useState(false);
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -5891,6 +5912,64 @@ function App() {
     }
   };
 
+  const refreshCloudBackupInfo = async (userId = authUser?.id) => {
+    if (!supabase || !userId) {
+      setCloudBackupInfo(null);
+      return null;
+    }
+
+    setIsCloudBackupChecking(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('hibitin_backups')
+        .select('backup_version, data_count, updated_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        setCloudBackupInfo(null);
+        setCloudBackupMessage('クラウドバックアップはまだありません。');
+        return null;
+      }
+
+      const row = data as Pick<CloudBackupRow, 'backup_version' | 'data_count' | 'updated_at'>;
+
+      if (
+        typeof row.updated_at !== 'string' ||
+        typeof row.data_count !== 'number' ||
+        typeof row.backup_version !== 'number'
+      ) {
+        throw new Error('Invalid cloud backup metadata.');
+      }
+
+      const backupInfo = {
+        updatedAt: row.updated_at,
+        dataCount: row.data_count,
+        backupVersion: row.backup_version,
+      };
+
+      setCloudBackupInfo(backupInfo);
+
+      if (cloudBackupMessage === 'クラウドバックアップはまだありません。') {
+        setCloudBackupMessage('');
+      }
+
+      return backupInfo;
+    } catch (error) {
+      console.warn('Cloud backup metadata fetch failed:', error);
+      setCloudBackupInfo(null);
+      setCloudBackupMessage('クラウドバックアップの確認に失敗しました。');
+      return null;
+    } finally {
+      setIsCloudBackupChecking(false);
+    }
+  };
+
   const saveCloudBackup = async () => {
     if (!supabase) {
       setCloudBackupStatus('failed');
@@ -5940,12 +6019,99 @@ function App() {
       }
 
       setLastCloudBackupAt(updatedAt);
+      setCloudBackupInfo({
+        updatedAt,
+        dataCount,
+        backupVersion: backup.backupVersion,
+      });
       setCloudBackupStatus('success');
       setCloudBackupMessage('クラウドへバックアップしました。');
     } catch (error) {
       console.warn('Cloud backup failed:', error);
       setCloudBackupStatus('failed');
       setCloudBackupMessage('クラウド保存に失敗しました。端末データはそのまま残っています。');
+    }
+  };
+
+  const openCloudRestoreConfirm = async () => {
+    if (!authUser) {
+      setCloudBackupMessage('クラウドバックアップからの復元にはログインが必要です。');
+      return;
+    }
+
+    const backupInfo = await refreshCloudBackupInfo(authUser.id);
+
+    if (!backupInfo) {
+      return;
+    }
+
+    setIsCloudRestoreConfirmOpen(true);
+  };
+
+  const restoreCloudBackup = async () => {
+    if (!supabase || !authUser) {
+      setCloudBackupMessage('クラウドバックアップからの復元にはログインが必要です。');
+      return;
+    }
+
+    setIsCloudRestoreBusy(true);
+    setCloudBackupMessage('クラウドバックアップを確認中…');
+
+    try {
+      const { data, error } = await supabase
+        .from('hibitin_backups')
+        .select('backup_data, backup_version, data_count, updated_at')
+        .eq('user_id', authUser.id)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        setCloudBackupMessage('クラウドバックアップはまだありません。');
+        return;
+      }
+
+      const row = data as CloudBackupRow;
+
+      if (!isBackupFile(row.backup_data)) {
+        throw new Error('Invalid cloud backup data.');
+      }
+
+      const safetyBackup = createBackupFile();
+
+      if (!safetyBackup) {
+        setCloudBackupMessage('復元前バックアップを作成できなかったため、復元を中止しました。');
+        return;
+      }
+
+      downloadBackupFile(
+        safetyBackup,
+        '復元前に現在データをJSONファイルとして書き出しました。復元後に画面を再読み込みします。',
+      );
+
+      await saveAutoBackupFromCurrentStorage({ force: true });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 100);
+      });
+
+      try {
+        restoreStorageFromBackup(row.backup_data);
+      } catch (restoreError) {
+        console.warn('Cloud backup restore failed after safety backup:', restoreError);
+        restoreStorageFromBackup(safetyBackup);
+        throw restoreError;
+      }
+
+      setCloudBackupMessage('クラウドバックアップから復元しました。');
+      window.location.reload();
+    } catch (error) {
+      console.warn('Cloud backup restore failed:', error);
+      setCloudBackupMessage('クラウドバックアップの復元に失敗しました。端末データは変更されていません。');
+    } finally {
+      setIsCloudRestoreBusy(false);
+      setIsCloudRestoreConfirmOpen(false);
     }
   };
 
@@ -6107,6 +6273,16 @@ function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setCloudBackupInfo(null);
+      setLastCloudBackupAt(null);
+      return;
+    }
+
+    void refreshCloudBackupInfo(authUser.id);
+  }, [authUser]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -10368,8 +10544,8 @@ function App() {
                   <div>
                     <dt>最終クラウド保存</dt>
                     <dd>
-                      {lastCloudBackupAt
-                        ? backupDateTimeFormatter.format(new Date(lastCloudBackupAt))
+                      {(cloudBackupInfo?.updatedAt ?? lastCloudBackupAt)
+                        ? backupDateTimeFormatter.format(new Date(cloudBackupInfo?.updatedAt ?? lastCloudBackupAt ?? ''))
                         : 'まだありません'}
                     </dd>
                   </div>
@@ -10377,10 +10553,33 @@ function App() {
                     <dt>保存状態</dt>
                     <dd>{cloudBackupStatusLabels[cloudBackupStatus]}</dd>
                   </div>
+                  <div>
+                    <dt>クラウドバックアップ日時</dt>
+                    <dd>
+                      {isCloudBackupChecking
+                        ? '確認中…'
+                        : cloudBackupInfo
+                          ? backupDateTimeFormatter.format(new Date(cloudBackupInfo.updatedAt))
+                          : 'まだありません'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>データ件数</dt>
+                    <dd>{cloudBackupInfo ? `${cloudBackupInfo.dataCount}件` : '-'}</dd>
+                  </div>
+                  <div>
+                    <dt>バックアップバージョン</dt>
+                    <dd>{cloudBackupInfo ? `v${cloudBackupInfo.backupVersion}` : '-'}</dd>
+                  </div>
                 </dl>
                 {!authUser && (
                   <p className="cloud-backup-login-note">
                     クラウド保存にはログインが必要です。
+                  </p>
+                )}
+                {authUser && isCloudBackupChecking && (
+                  <p className="cloud-backup-login-note">
+                    クラウドバックアップを確認中…
                   </p>
                 )}
                 <button
@@ -10390,6 +10589,14 @@ function App() {
                   type="button"
                 >
                   クラウドへバックアップ
+                </button>
+                <button
+                  className="cloud-backup-button"
+                  disabled={!authUser || isCloudBackupChecking || isCloudRestoreBusy || !cloudBackupInfo}
+                  onClick={() => void openCloudRestoreConfirm()}
+                  type="button"
+                >
+                  クラウドから復元
                 </button>
                 {cloudBackupMessage && (
                   <p className="backup-message">{cloudBackupMessage}</p>
@@ -10593,6 +10800,51 @@ function App() {
               </button>
               <button onClick={() => setPendingDelete(null)} type="button">
                 キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isCloudRestoreConfirmOpen && cloudBackupInfo && (
+        <div className="dialog-backdrop" role="presentation">
+          <div
+            aria-labelledby="cloud-restore-dialog-title"
+            aria-modal="true"
+            className="delete-dialog cloud-restore-dialog"
+            role="dialog"
+          >
+            <h2 id="cloud-restore-dialog-title">クラウドから復元しますか？</h2>
+            <p>
+              クラウドバックアップから復元しますか？ 現在の端末データは先にJSONファイルとして書き出され、その後クラウドデータで置き換えられます。
+            </p>
+            <dl className="cloud-restore-summary">
+              <div>
+                <dt>クラウド保存日時</dt>
+                <dd>{backupDateTimeFormatter.format(new Date(cloudBackupInfo.updatedAt))}</dd>
+              </div>
+              <div>
+                <dt>データ件数</dt>
+                <dd>{cloudBackupInfo.dataCount}件</dd>
+              </div>
+            </dl>
+            <p className="cloud-restore-warning">
+              現在の端末データは置き換わります。復元前に現在データを書き出します。
+            </p>
+            <div className="dialog-actions">
+              <button
+                disabled={isCloudRestoreBusy}
+                onClick={() => setIsCloudRestoreConfirmOpen(false)}
+                type="button"
+              >
+                キャンセル
+              </button>
+              <button
+                disabled={isCloudRestoreBusy}
+                onClick={() => void restoreCloudBackup()}
+                type="button"
+              >
+                復元する
               </button>
             </div>
           </div>

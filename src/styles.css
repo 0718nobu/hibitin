@@ -2034,6 +2034,48 @@ h1 {
   opacity: 0.58;
 }
 
+.cloud-restore-dialog {
+  gap: 12px;
+}
+
+.cloud-restore-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.cloud-restore-summary div {
+  border-radius: 8px;
+  padding: 8px;
+  background: rgb(248 253 255 / 78%);
+}
+
+.cloud-restore-summary dt {
+  color: #68776f;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.cloud-restore-summary dd {
+  margin: 2px 0 0;
+  color: #244a39;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.cloud-restore-warning {
+  margin: 0;
+  border: 1px solid #ead9b5;
+  border-radius: 8px;
+  padding: 9px;
+  background: #fff9ea;
+  color: #745c27;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
 .auto-backup-panel {
   display: grid;
   gap: 10px;
