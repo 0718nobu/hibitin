@@ -1170,6 +1170,7 @@ h1 {
 
 .game-mode-settings,
 .player-profile-settings,
+.account-settings,
 .admin-balance-settings,
 .daily-nudge-admin-settings,
 .template-settings {
@@ -1191,6 +1192,141 @@ h1 {
 .player-profile-settings {
   border-color: #d9eadf;
   background: linear-gradient(180deg, #fbfffd, #ffffff);
+}
+
+.account-settings {
+  border-color: #d8e8df;
+  background: linear-gradient(180deg, #fbfffa, #ffffff);
+}
+
+.account-notice,
+.account-message {
+  margin: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.account-notice {
+  border: 1px solid #e5ddbd;
+  background: #fffbed;
+  color: #776534;
+}
+
+.account-message {
+  border: 1px solid #c9e4d4;
+  background: #f1fbf4;
+  color: #2c6648;
+}
+
+.account-auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.account-auth-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.account-auth-form label span {
+  color: #53615a;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.account-auth-form input {
+  min-height: 40px;
+  border: 1px solid #cfe3d8;
+  border-radius: 9px;
+  padding: 0 11px;
+  background: #ffffff;
+  color: #26362f;
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.account-auth-form input:disabled {
+  background: #f4f7f4;
+  color: #8b988f;
+}
+
+.account-auth-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.account-auth-actions button,
+.account-reset-button,
+.account-status-card button {
+  min-height: 38px;
+  border: 1px solid #b9dbc8;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #f8fff9, #eef9f0);
+  color: #2f5e47;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.account-auth-actions button:first-child {
+  border-color: #1f9f6a;
+  background: linear-gradient(180deg, #27b879, #15875d);
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgb(31 128 85 / 18%);
+}
+
+.account-auth-actions button:disabled,
+.account-reset-button:disabled,
+.account-status-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.account-reset-button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #4c6c5c;
+}
+
+.account-status-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d9eadf;
+  border-radius: 8px;
+  padding: 12px;
+  background: rgb(255 255 255 / 74%);
+}
+
+.account-status-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.account-status-card div {
+  display: grid;
+  gap: 2px;
+}
+
+.account-status-card dt {
+  color: #68776f;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.account-status-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #244a39;
+  font-size: 0.88rem;
+  font-weight: 900;
 }
 
 .player-name-field {
@@ -1677,16 +1813,16 @@ h1 {
   color: #53615a;
 }
 
-.data-management summary {
-  min-height: 38px;
-  padding: 9px 12px;
-  cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 700;
+.data-management-heading {
+  border-bottom: 1px solid #e3e9e4;
+  padding: 10px 12px 8px;
 }
 
-.data-management[open] summary {
-  border-bottom: 1px solid #e3e9e4;
+.data-management-heading h2 {
+  margin: 0;
+  color: #375948;
+  font-size: 0.92rem;
+  font-weight: 900;
 }
 
 .data-management-content {
@@ -1741,6 +1877,149 @@ h1 {
   color: #6c6253;
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.auto-backup-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgb(194 220 202 / 86%);
+  border-radius: 8px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgb(250 255 249 / 82%), rgb(245 252 242 / 76%));
+}
+
+.auto-backup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.auto-backup-header h3 {
+  margin: 0;
+  color: #2c6d4d;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.auto-backup-header p {
+  margin: 3px 0 0;
+  color: #68786f;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.auto-backup-header > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgb(225 246 233 / 88%);
+  color: #22674a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.auto-backup-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.auto-backup-summary div {
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgb(255 255 255 / 68%);
+}
+
+.auto-backup-summary dt {
+  color: #6d7a72;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.auto-backup-summary dd {
+  margin: 2px 0 0;
+  color: #2e5e45;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.auto-backup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.auto-backup-actions button,
+.auto-backup-item-actions button {
+  min-height: 34px;
+  border: 1px solid #c9ded0;
+  border-radius: 8px;
+  background: #f7fcf7;
+  color: #365849;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.auto-backup-list {
+  display: grid;
+  gap: 6px;
+}
+
+.auto-backup-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(214 226 216 / 88%);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.auto-backup-item strong,
+.auto-backup-item span {
+  display: block;
+}
+
+.auto-backup-item strong {
+  color: #344d40;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.auto-backup-item span {
+  margin-top: 2px;
+  color: #738076;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.auto-backup-item-actions {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.auto-backup-item-actions button {
+  min-height: 30px;
+  padding-inline: 9px;
+}
+
+.auto-backup-item-actions button:last-child {
+  border-color: #efcece;
+  background: #fff8f8;
+  color: #9a4646;
+}
+
+.auto-backup-empty {
+  margin: 0;
+  color: #7a867d;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .reset-actions {

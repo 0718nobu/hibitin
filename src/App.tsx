@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { User } from '@supabase/supabase-js';
 import {
   defaultCoreRoutinePlacements,
   coreRoutineDefinitions,
@@ -15,6 +16,7 @@ import {
   type CoreRoutineKind,
   type CoreRoutinePlacements,
 } from './coreRoutines';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
@@ -22,6 +24,7 @@ type GameMode = 'player' | 'developer';
 type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'settings';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
 type ScheduleViewName = 'schedule' | 'todos';
+type AuthMode = 'login' | 'signup';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -33,6 +36,28 @@ type WeekdayKey =
   | 'saturday'
   | 'sunday';
 type EditTargetKey = TemplateKind;
+
+const getAuthErrorMessage = (message: string) => {
+  const normalizedMessage = message.toLowerCase();
+
+  if (normalizedMessage.includes('invalid login credentials')) {
+    return 'パスワードが違うか、アカウントが存在しません。';
+  }
+
+  if (normalizedMessage.includes('email') || normalizedMessage.includes('invalid')) {
+    return 'メールアドレスを確認してください。';
+  }
+
+  if (normalizedMessage.includes('password')) {
+    return 'パスワードを確認してください。';
+  }
+
+  if (normalizedMessage.includes('network') || normalizedMessage.includes('fetch')) {
+    return '通信できませんでした。しばらくしてから再度お試しください。';
+  }
+
+  return 'しばらくしてから再度お試しください。';
+};
 
 const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
   { key: 'memo', icon: '✍️', label: 'ひとこと' },
@@ -282,6 +307,14 @@ type BackupDownload = {
   fileName: string;
 };
 
+type AutoBackupRecord = BackupFile & {
+  autoBackupVersion: 1;
+  id: string;
+  createdAt: string;
+  dataCount: number;
+  contentHash: string;
+};
+
 type ItemNotes = Record<string, Record<string, string>>;
 
 type DailyNudgeCandidate = {
@@ -401,6 +434,11 @@ type MasteryProgressState = {
 };
 
 const BACKUP_VERSION = 1;
+const AUTO_BACKUP_VERSION = 1;
+const AUTO_BACKUP_DB_NAME = 'hibitin:autoBackups';
+const AUTO_BACKUP_STORE_NAME = 'autoBackups';
+const AUTO_BACKUP_DELAY_MS = 30000;
+const AUTO_BACKUP_MAX_GENERATIONS = 10;
 const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
 const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
 const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
@@ -424,7 +462,7 @@ const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
 
 const isDailyTextStorageKey = (key: string) =>
-  /^hibitin:(memo|events):\d{4}-\d{2}-\d{2}$/.test(key);
+  /^hibitin:(memo|events|anyMemo):\d{4}-\d{2}-\d{2}$/.test(key);
 
 const serializeRestoredStorageValue = (key: string, value: unknown) => {
   if (isDailyTextStorageKey(key) && typeof value === 'string') {
@@ -432,6 +470,48 @@ const serializeRestoredStorageValue = (key: string, value: unknown) => {
   }
 
   return JSON.stringify(value);
+};
+
+const collectHibitinStorage = () => {
+  const storage: Record<string, unknown> = {};
+  const hibitinKeys = Array.from({ length: window.localStorage.length }, (_, index) =>
+    window.localStorage.key(index),
+  )
+    .filter((key): key is string => key !== null && isHibitinStorageKey(key))
+    .sort();
+
+  hibitinKeys.forEach((key) => {
+    const savedValue = window.localStorage.getItem(key);
+
+    if (savedValue !== null) {
+      storage[key] = isDailyTextStorageKey(key)
+        ? savedValue
+        : JSON.parse(savedValue) as unknown;
+    }
+  });
+
+  return storage;
+};
+
+const createBackupFromCurrentStorage = (): BackupFile => ({
+  backupVersion: BACKUP_VERSION,
+  exportedAt: new Date().toISOString(),
+  appName: 'hibitin',
+  data: {
+    storage: collectHibitinStorage(),
+  },
+});
+
+const getBackupContentHash = (backup: BackupFile) => {
+  const content = JSON.stringify(backup.data.storage);
+  let hash = 0;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash = Math.imul(31, hash) + content.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return `${content.length}:${(hash >>> 0).toString(36)}`;
 };
 
 const isBackupFile = (value: unknown): value is BackupFile => {
@@ -473,6 +553,177 @@ const isBackupFile = (value: unknown): value is BackupFile => {
         !Array.isArray(storage[key]),
     )
   );
+};
+
+const isAutoBackupRecord = (value: unknown): value is AutoBackupRecord => {
+  if (!isBackupFile(value)) {
+    return false;
+  }
+
+  const record = value as Partial<AutoBackupRecord>;
+
+  return (
+    record.autoBackupVersion === AUTO_BACKUP_VERSION &&
+    typeof record.id === 'string' &&
+    record.id.trim().length > 0 &&
+    typeof record.createdAt === 'string' &&
+    !Number.isNaN(Date.parse(record.createdAt)) &&
+    typeof record.dataCount === 'number' &&
+    Number.isFinite(record.dataCount) &&
+    typeof record.contentHash === 'string'
+  );
+};
+
+const openAutoBackupDb = () =>
+  new Promise<IDBDatabase>((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      reject(new Error('IndexedDB is not supported.'));
+      return;
+    }
+
+    const request = window.indexedDB.open(AUTO_BACKUP_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (!db.objectStoreNames.contains(AUTO_BACKUP_STORE_NAME)) {
+        db.createObjectStore(AUTO_BACKUP_STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed.'));
+  });
+
+const runAutoBackupStore = async <Result,>(
+  mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest<Result>,
+) => {
+  const db = await openAutoBackupDb();
+
+  try {
+    return await new Promise<Result>((resolve, reject) => {
+      const transaction = db.transaction(AUTO_BACKUP_STORE_NAME, mode);
+      const store = transaction.objectStore(AUTO_BACKUP_STORE_NAME);
+      const request = action(store);
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
+      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
+    });
+  } finally {
+    db.close();
+  }
+};
+
+const loadAutoBackupRecords = async () => {
+  const records = await runAutoBackupStore<unknown[]>('readonly', (store) => store.getAll());
+
+  return records
+    .filter(isAutoBackupRecord)
+    .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt));
+};
+
+const putAutoBackupRecord = (record: AutoBackupRecord) =>
+  runAutoBackupStore<IDBValidKey>('readwrite', (store) => store.put(record));
+
+const deleteAutoBackupRecord = (id: string) =>
+  runAutoBackupStore<undefined>('readwrite', (store) => store.delete(id));
+
+const createAutoBackupRecord = (backup: BackupFile): AutoBackupRecord => {
+  const createdAt = new Date().toISOString();
+
+  return {
+    ...backup,
+    autoBackupVersion: AUTO_BACKUP_VERSION,
+    id: `auto-backup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt,
+    exportedAt: createdAt,
+    dataCount: Object.keys(backup.data.storage).length,
+    contentHash: getBackupContentHash(backup),
+  };
+};
+
+const getClosestAutoBackupId = (
+  records: AutoBackupRecord[],
+  targetTime: number,
+) =>
+  records.reduce<AutoBackupRecord | null>((closestRecord, record) => {
+    if (!closestRecord) {
+      return record;
+    }
+
+    return Math.abs(Date.parse(record.createdAt) - targetTime) <
+      Math.abs(Date.parse(closestRecord.createdAt) - targetTime)
+      ? record
+      : closestRecord;
+  }, null)?.id;
+
+const getAutoBackupIdsToKeep = (records: AutoBackupRecord[]) => {
+  const sortedRecords = [...records].sort(
+    (first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt),
+  );
+  const keepIds = new Set<string>();
+  const now = Date.now();
+  const targetOffsets = [
+    0,
+    24 * 60 * 60 * 1000,
+    3 * 24 * 60 * 60 * 1000,
+    7 * 24 * 60 * 60 * 1000,
+  ];
+
+  targetOffsets.forEach((offset) => {
+    const keepId = getClosestAutoBackupId(sortedRecords, now - offset);
+
+    if (keepId) {
+      keepIds.add(keepId);
+    }
+  });
+
+  sortedRecords.forEach((record) => {
+    if (keepIds.size < AUTO_BACKUP_MAX_GENERATIONS) {
+      keepIds.add(record.id);
+    }
+  });
+
+  return keepIds;
+};
+
+const pruneAutoBackupRecords = async () => {
+  const records = await loadAutoBackupRecords();
+
+  if (records.length <= AUTO_BACKUP_MAX_GENERATIONS) {
+    return records;
+  }
+
+  const keepIds = getAutoBackupIdsToKeep(records);
+  const deletingRecords = records.filter((record) => !keepIds.has(record.id));
+
+  await Promise.all(deletingRecords.map((record) => deleteAutoBackupRecord(record.id)));
+
+  return loadAutoBackupRecords();
+};
+
+const saveAutoBackupFromCurrentStorage = async () => {
+  const backup = createBackupFromCurrentStorage();
+  const contentHash = getBackupContentHash(backup);
+  const records = await loadAutoBackupRecords();
+  const latestRecord = records[0];
+
+  if (latestRecord?.contentHash === contentHash) {
+    return {
+      created: false,
+      records,
+    };
+  }
+
+  const record = createAutoBackupRecord(backup);
+
+  await putAutoBackupRecord(record);
+
+  return {
+    created: true,
+    records: await pruneAutoBackupRecords(),
+  };
 };
 
 type RhythmConfig = {
@@ -728,6 +979,14 @@ const questDateFormatter = new Intl.DateTimeFormat('ja-JP', {
   month: 'long',
   day: 'numeric',
   weekday: 'long',
+});
+
+const backupDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
 });
 
 const copySections = (sections: RoutineSection[]) =>
@@ -1933,9 +2192,13 @@ type DailyScheduleItem = {
 };
 
 type DailySchedule = DailyScheduleItem[];
-type DailyScheduleDrafts = Record<string, Pick<DailyScheduleItem, 'time' | 'text'>>;
+type DailyScheduleDrafts = Record<string, DailyScheduleItem[]>;
 
 type NormalizeDailyTodoOptions = {
+  preserveEmptyIds?: Iterable<string>;
+};
+
+type NormalizeDailyScheduleOptions = {
   preserveEmptyIds?: Iterable<string>;
 };
 
@@ -1944,6 +2207,12 @@ const createDailyTodoId = () =>
 
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const getRoundedCurrentHourTime = (date = new Date()) => {
+  const roundedHour = (date.getHours() + (date.getMinutes() >= 30 ? 1 : 0)) % 24;
+
+  return `${String(roundedHour).padStart(2, '0')}:00`;
+};
 
 const createDailyTodoItem = (
   text = '',
@@ -2062,8 +2331,8 @@ const getDailyTodoStats = (todos: DailyTodos) => {
   };
 };
 
-const hasScheduleText = (scheduleItem: DailyScheduleItem) =>
-  scheduleItem.text.trim().length > 0;
+const hasScheduleValue = (scheduleItem: DailyScheduleItem) =>
+  scheduleItem.time.trim().length > 0 || scheduleItem.text.trim().length > 0;
 
 const createDailyScheduleItem = (
   time = '',
@@ -2074,6 +2343,9 @@ const createDailyScheduleItem = (
   time,
   text,
 });
+
+const createDailyScheduleDraftItem = () =>
+  createDailyScheduleItem(getRoundedCurrentHourTime());
 
 const sortDailySchedule = (schedule: DailySchedule) =>
   [...schedule].sort((first, second) => {
@@ -2095,10 +2367,15 @@ const sortDailySchedule = (schedule: DailySchedule) =>
     return first.id.localeCompare(second.id);
   });
 
-const normalizeDailySchedule = (schedule: unknown): DailySchedule => {
+const normalizeDailySchedule = (
+  schedule: unknown,
+  options: NormalizeDailyScheduleOptions = {},
+): DailySchedule => {
   if (!Array.isArray(schedule)) {
     return [];
   }
+
+  const preserveEmptyIds = new Set(options.preserveEmptyIds ?? []);
 
   return sortDailySchedule(
     schedule
@@ -2118,7 +2395,7 @@ const normalizeDailySchedule = (schedule: unknown): DailySchedule => {
         );
       })
       .filter((scheduleItem): scheduleItem is DailyScheduleItem => Boolean(scheduleItem))
-      .filter(hasScheduleText),
+      .filter((scheduleItem) => hasScheduleValue(scheduleItem) || preserveEmptyIds.has(scheduleItem.id)),
   );
 };
 
@@ -2134,8 +2411,17 @@ const parseDailySchedule = (rawValue: string | null): DailySchedule => {
   }
 };
 
-const serializeDailySchedule = (schedule: DailySchedule) =>
-  JSON.stringify(sortDailySchedule(schedule.filter(hasScheduleText)));
+const serializeDailySchedule = (
+  schedule: DailySchedule,
+  options: NormalizeDailyScheduleOptions = {},
+) => {
+  const preserveEmptyIds = new Set(options.preserveEmptyIds ?? []);
+
+  return JSON.stringify(sortDailySchedule(
+    schedule.filter((scheduleItem) =>
+      hasScheduleValue(scheduleItem) || preserveEmptyIds.has(scheduleItem.id)),
+  ));
+};
 
 const loadDailySchedule = (date: Date) =>
   parseDailySchedule(localStorage.getItem(getDailyScheduleStorageKey(date)));
@@ -2143,12 +2429,13 @@ const loadDailySchedule = (date: Date) =>
 const upsertDailyScheduleItem = (
   schedule: DailySchedule,
   item: DailyScheduleItem,
+  options: NormalizeDailyScheduleOptions = {},
 ): DailySchedule => {
   const exists = schedule.some((scheduleItem) => scheduleItem.id === item.id);
 
   return normalizeDailySchedule(exists
     ? schedule.map((scheduleItem) => (scheduleItem.id === item.id ? item : scheduleItem))
-    : [...schedule, item]);
+    : [...schedule, item], options);
 };
 
 const deleteDailyScheduleItem = (schedule: DailySchedule, id: string): DailySchedule =>
@@ -3141,6 +3428,7 @@ function App() {
   const questEmoteTimeoutsRef = useRef<Record<string, number>>({});
   const scheduleTodayScrollMonthRef = useRef<string | null>(null);
   const recordTodayScrollMonthRef = useRef<string | null>(null);
+  const composingScheduleIdsRef = useRef<Set<string>>(new Set());
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -3263,6 +3551,15 @@ function App() {
   const [historyCheckedItems, setHistoryCheckedItems] = useState<Record<string, boolean>>({});
   const [backupMessage, setBackupMessage] = useState('');
   const [backupDownload, setBackupDownload] = useState<BackupDownload | null>(null);
+  const [autoBackups, setAutoBackups] = useState<AutoBackupRecord[]>([]);
+  const [autoBackupMessage, setAutoBackupMessage] = useState('');
+  const [isAutoBackupListOpen, setIsAutoBackupListOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -5465,36 +5762,17 @@ function App() {
     }
   };
 
-  const exportBackup = () => {
-    const storage: Record<string, unknown> = {};
-    const hibitinKeys = Array.from({ length: window.localStorage.length }, (_, index) =>
-      window.localStorage.key(index),
-    )
-      .filter((key): key is string => key !== null && isHibitinStorageKey(key))
-      .sort();
-
+  const createBackupFile = (): BackupFile | null => {
     try {
-      hibitinKeys.forEach((key) => {
-        const savedValue = window.localStorage.getItem(key);
-
-        if (savedValue !== null) {
-          storage[key] = isDailyTextStorageKey(key)
-            ? savedValue
-            : JSON.parse(savedValue) as unknown;
-        }
-      });
+      return createBackupFromCurrentStorage();
     } catch {
       setBackupMessage('');
       window.alert('保存データの一部を読み取れなかったため、バックアップを作成できませんでした。');
-      return;
+      return null;
     }
+  };
 
-    const backup: BackupFile = {
-      backupVersion: BACKUP_VERSION,
-      exportedAt: new Date().toISOString(),
-      appName: 'hibitin',
-      data: { storage },
-    };
+  const downloadBackupFile = (backup: BackupFile, message?: string) => {
     const fileName = `hibitin-backup-${getDateKey(new Date())}.json`;
     const backupJson = JSON.stringify(backup, null, 2);
     const blob = new Blob([backupJson], {
@@ -5518,7 +5796,320 @@ function App() {
     window.setTimeout(() => {
       downloadLink.remove();
     }, 0);
-    setBackupMessage('バックアップを書き出しました。ダウンロードが始まらない場合は下のリンクを押してください。');
+    setBackupMessage(message ?? 'バックアップを書き出しました。ダウンロードが始まらない場合は下のリンクを押してください。');
+  };
+
+  const exportBackup = () => {
+    const backup = createBackupFile();
+
+    if (!backup) {
+      return;
+    }
+
+    downloadBackupFile(backup);
+  };
+
+  const refreshAutoBackupList = async () => {
+    try {
+      setAutoBackups(await loadAutoBackupRecords());
+    } catch {
+      setAutoBackupMessage('自動バックアップ一覧を読み込めませんでした。');
+    }
+  };
+
+  const createAutoBackupNow = async (message = '自動バックアップを作成しました。') => {
+    try {
+      const result = await saveAutoBackupFromCurrentStorage();
+
+      setAutoBackups(result.records);
+      setAutoBackupMessage(result.created ? message : '前回と同じ内容のため、新しい自動バックアップは作成しませんでした。');
+    } catch {
+      setAutoBackupMessage('自動バックアップを保存できませんでした。端末の空き容量やブラウザ設定を確認してください。');
+    }
+  };
+
+  const restoreStorageFromBackup = (backup: BackupFile) => {
+    Array.from({ length: window.localStorage.length }, (_, index) =>
+      window.localStorage.key(index),
+    )
+      .filter((key): key is string => key !== null && isHibitinStorageKey(key))
+      .forEach((key) => window.localStorage.removeItem(key));
+
+    Object.entries(backup.data.storage).forEach(([key, value]) => {
+      window.localStorage.setItem(key, serializeRestoredStorageValue(key, value));
+    });
+  };
+
+  const restoreAutoBackup = async (record: AutoBackupRecord) => {
+    if (!isAutoBackupRecord(record)) {
+      window.alert('壊れた自動バックアップのため、復元しませんでした。');
+      return;
+    }
+
+    const shouldRestore = window.confirm(
+      'このバックアップへ復元しますか？ 現在のデータは先に書き出されます。',
+    );
+
+    if (!shouldRestore) {
+      return;
+    }
+
+    const safetyBackup = createBackupFile();
+
+    if (!safetyBackup) {
+      window.alert('現在データの自動バックアップを作成できなかったため、復元を中止しました。');
+      return;
+    }
+
+    downloadBackupFile(
+      safetyBackup,
+      '復元前に現在データを書き出しました。復元後に画面を再読み込みします。',
+    );
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 100);
+    });
+
+    restoreStorageFromBackup(record);
+    window.location.reload();
+  };
+
+  const removeAutoBackup = async (record: AutoBackupRecord) => {
+    const shouldDelete = window.confirm('この自動バックアップを削除しますか？');
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      await deleteAutoBackupRecord(record.id);
+      await refreshAutoBackupList();
+      setAutoBackupMessage('自動バックアップを削除しました。');
+    } catch {
+      setAutoBackupMessage('自動バックアップを削除できませんでした。');
+    }
+  };
+
+  useEffect(() => {
+    void refreshAutoBackupList();
+  }, []);
+
+  useEffect(() => {
+    let backupTimerId: number | null = null;
+
+    const scheduleAutomaticBackup = () => {
+      if (backupTimerId !== null) {
+        window.clearTimeout(backupTimerId);
+      }
+
+      backupTimerId = window.setTimeout(() => {
+        void saveAutoBackupFromCurrentStorage()
+          .then((result) => {
+            setAutoBackups(result.records);
+
+            if (result.created) {
+              setAutoBackupMessage('自動バックアップを保存しました。');
+            }
+          })
+          .catch(() => {
+            setAutoBackupMessage('自動バックアップを保存できませんでした。端末の空き容量やブラウザ設定を確認してください。');
+          });
+      }, AUTO_BACKUP_DELAY_MS);
+    };
+
+    const originalSetItem = Storage.prototype.setItem;
+    const originalRemoveItem = Storage.prototype.removeItem;
+
+    Storage.prototype.setItem = function setItemWithAutoBackup(key, value) {
+      const previousValue = this === window.localStorage && isHibitinStorageKey(key)
+        ? this.getItem(key)
+        : null;
+
+      originalSetItem.call(this, key, value);
+
+      if (
+        this === window.localStorage &&
+        isHibitinStorageKey(key) &&
+        previousValue !== value
+      ) {
+        scheduleAutomaticBackup();
+      }
+    };
+
+    Storage.prototype.removeItem = function removeItemWithAutoBackup(key) {
+      const hadValue = this === window.localStorage && isHibitinStorageKey(key)
+        ? this.getItem(key) !== null
+        : false;
+
+      originalRemoveItem.call(this, key);
+
+      if (hadValue) {
+        scheduleAutomaticBackup();
+      }
+    };
+
+    return () => {
+      if (backupTimerId !== null) {
+        window.clearTimeout(backupTimerId);
+      }
+
+      Storage.prototype.setItem = originalSetItem;
+      Storage.prototype.removeItem = originalRemoveItem;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (error) {
+        console.warn('Supabase user restore failed:', error.message);
+      }
+
+      if (isMounted) {
+        setAuthUser(data.user ?? null);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleAuthAction = async (mode: AuthMode) => {
+    if (!supabase) {
+      setAuthMessage('クラウド機能はまだ設定されていません。');
+      return;
+    }
+
+    const email = authEmail.trim();
+
+    if (!email) {
+      setAuthMessage('メールアドレスを入力してください。');
+      return;
+    }
+
+    if (authPassword.length < 6) {
+      setAuthMessage('パスワードは6文字以上で入力してください。');
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthMode(mode);
+    setAuthMessage('');
+
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: authPassword,
+          options: {
+            emailRedirectTo: window.location.origin,
+          },
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        setAuthMessage(
+          data.session
+            ? 'アカウントを作成し、ログインしました。'
+            : '確認メールを送信しました。メール内のリンクを開いてください。',
+        );
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password: authPassword,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthMessage('ログインしました。');
+    } catch (error) {
+      console.warn('Supabase auth failed:', error);
+      setAuthMessage(error instanceof Error
+        ? getAuthErrorMessage(error.message)
+        : 'しばらくしてから再度お試しください。');
+    } finally {
+      setIsAuthBusy(false);
+    }
+  };
+
+  const sendPasswordResetEmail = async () => {
+    if (!supabase) {
+      setAuthMessage('クラウド機能はまだ設定されていません。');
+      return;
+    }
+
+    const email = authEmail.trim();
+
+    if (!email) {
+      setAuthMessage('メールアドレスを入力してください。');
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthMessage('');
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthMessage('パスワード再設定メールを送信しました。');
+    } catch (error) {
+      console.warn('Supabase password reset failed:', error);
+      setAuthMessage(error instanceof Error
+        ? getAuthErrorMessage(error.message)
+        : 'しばらくしてから再度お試しください。');
+    } finally {
+      setIsAuthBusy(false);
+    }
+  };
+
+  const signOutAccount = async () => {
+    if (!supabase) {
+      setAuthMessage('クラウド機能はまだ設定されていません。');
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthMessage('');
+
+    try {
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthMessage('ログアウトしました。端末内のhibitinデータはそのまま残っています。');
+    } catch (error) {
+      console.warn('Supabase sign out failed:', error);
+      setAuthMessage('ログアウトできませんでした。しばらくしてから再度お試しください。');
+    } finally {
+      setIsAuthBusy(false);
+    }
   };
 
   const importBackup = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -5537,24 +6128,29 @@ function App() {
         return;
       }
 
-      const shouldRestore = window.confirm(
-        'バックアップを復元しますか？現在のhibitin保存データは上書きされます。',
-      );
+      const shouldRestore = window.confirm('本当に復元しますか？');
 
       if (!shouldRestore) {
         return;
       }
 
-      Array.from({ length: window.localStorage.length }, (_, index) =>
-        window.localStorage.key(index),
-      )
-        .filter((key): key is string => key !== null && isHibitinStorageKey(key))
-        .forEach((key) => window.localStorage.removeItem(key));
+      const safetyBackup = createBackupFile();
 
-      Object.entries(parsedBackup.data.storage).forEach(([key, value]) => {
-        window.localStorage.setItem(key, serializeRestoredStorageValue(key, value));
+      if (!safetyBackup) {
+        window.alert('現在データの自動バックアップを作成できなかったため、復元を中止しました。');
+        return;
+      }
+
+      downloadBackupFile(
+        safetyBackup,
+        '復元前に現在データの自動バックアップを書き出しました。復元後に画面を再読み込みします。',
+      );
+
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 100);
       });
 
+      restoreStorageFromBackup(parsedBackup);
       window.location.reload();
     } catch {
       setBackupMessage('');
@@ -5963,12 +6559,17 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
-  const saveScheduleForDate = (date: Date, schedule: DailySchedule) => {
-    const normalizedSchedule = normalizeDailySchedule(schedule);
+  const saveScheduleForDate = (
+    date: Date,
+    schedule: DailySchedule,
+    options: NormalizeDailyScheduleOptions = {},
+  ) => {
+    const normalizedSchedule = normalizeDailySchedule(schedule, options);
+    const hasStoredSchedule = normalizedSchedule.length > 0;
     const storageKey = getDailyScheduleStorageKey(date);
 
-    if (normalizedSchedule.length > 0) {
-      localStorage.setItem(storageKey, serializeDailySchedule(normalizedSchedule));
+    if (hasStoredSchedule) {
+      localStorage.setItem(storageKey, serializeDailySchedule(normalizedSchedule, options));
     } else {
       localStorage.removeItem(storageKey);
     }
@@ -5983,51 +6584,86 @@ function App() {
     value: string,
   ) => {
     const currentSchedule = loadDailySchedule(date);
-    const nextSchedule = upsertDailyScheduleItem(currentSchedule, {
+    const nextItem = {
       ...item,
       [field]: value,
-    });
+    };
+    const isComposing = composingScheduleIdsRef.current.has(item.id);
+    const preserveOptions = isComposing ? { preserveEmptyIds: [item.id] } : {};
+    const nextSchedule = hasScheduleValue(nextItem) || isComposing
+      ? upsertDailyScheduleItem(currentSchedule, nextItem, preserveOptions)
+      : deleteDailyScheduleItem(currentSchedule, item.id);
 
-    saveScheduleForDate(date, nextSchedule);
+    saveScheduleForDate(date, nextSchedule, preserveOptions);
   };
 
-  const commitScheduleDraft = (
+  const addScheduleDraftRow = (
     date: Date,
-    draft: Pick<DailyScheduleItem, 'time' | 'text'>,
   ) => {
-    if (!draft.text.trim()) {
-      return;
-    }
+    const dateKey = getDateKey(date);
 
-    const currentSchedule = loadDailySchedule(date);
-    const nextSchedule = upsertDailyScheduleItem(
-      currentSchedule,
-      createDailyScheduleItem(draft.time, draft.text),
-    );
+    setScheduleDrafts((currentDrafts) => {
+      const currentRows = currentDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
 
-    saveScheduleForDate(date, nextSchedule);
-    setScheduleDrafts((currentDrafts) => ({
-      ...currentDrafts,
-      [getDateKey(date)]: { time: '', text: '' },
-    }));
+      if (currentRows.some((draft) => !hasScheduleValue(draft))) {
+        return currentDrafts;
+      }
+
+      return {
+        ...currentDrafts,
+        [dateKey]: [...currentRows, createDailyScheduleDraftItem()],
+      };
+    });
   };
 
   const updateScheduleDraft = (
     date: Date,
+    draft: DailyScheduleItem,
     field: keyof Pick<DailyScheduleItem, 'time' | 'text'>,
     value: string,
   ) => {
     const dateKey = getDateKey(date);
-    const currentDraft = scheduleDrafts[dateKey] ?? { time: '', text: '' };
+    const currentRows = scheduleDrafts[dateKey] ?? [draft];
     const nextDraft = {
-      ...currentDraft,
+      ...draft,
       [field]: value,
     };
+    const isComposing = composingScheduleIdsRef.current.has(draft.id);
+    const preserveOptions = isComposing ? { preserveEmptyIds: [draft.id] } : {};
+    const nextRows = currentRows
+      .map((currentDraft) => (currentDraft.id === draft.id ? nextDraft : currentDraft))
+      .filter((currentDraft) =>
+        currentDraft.id === draft.id || hasScheduleValue(currentDraft));
+    const hasEmptyRow = nextRows.some((currentDraft) => !hasScheduleValue(currentDraft));
+    const normalizedRows = hasEmptyRow
+      ? nextRows
+      : [...nextRows, createDailyScheduleDraftItem()];
+
+    const currentSchedule = loadDailySchedule(date);
+    const nextSchedule = hasScheduleValue(nextDraft) || isComposing
+      ? upsertDailyScheduleItem(currentSchedule, nextDraft, preserveOptions)
+      : deleteDailyScheduleItem(currentSchedule, nextDraft.id);
+
+    saveScheduleForDate(date, nextSchedule, preserveOptions);
 
     setScheduleDrafts((currentDrafts) => ({
       ...currentDrafts,
-      [dateKey]: nextDraft,
+      [dateKey]: normalizedRows,
     }));
+  };
+
+  const startScheduleComposition = (id: string) => {
+    composingScheduleIdsRef.current.add(id);
+  };
+
+  const endScheduleComposition = (date: Date, item: DailyScheduleItem, value: string) => {
+    composingScheduleIdsRef.current.delete(item.id);
+    updateScheduleItem(date, item, 'text', value);
+  };
+
+  const endScheduleDraftComposition = (date: Date, draft: DailyScheduleItem, value: string) => {
+    composingScheduleIdsRef.current.delete(draft.id);
+    updateScheduleDraft(date, draft, 'text', value);
   };
 
   const removeScheduleItem = (date: Date, id: string) => {
@@ -6677,6 +7313,94 @@ function App() {
                 ))}
               </div>
             </div>
+          </section>
+        )}
+
+        {page === 'settings' && (
+          <section className="account-settings" aria-label="アカウント">
+            <div className="settings-header">
+              <div>
+                <h2>アカウント</h2>
+                <p>ログインするとアカウント状態を保持できます。クラウド同期はまだ行いません。</p>
+              </div>
+            </div>
+            {!isSupabaseConfigured && (
+              <p className="account-notice">
+                クラウド機能はまだ設定されていません。今までどおり端末内データで使えます。
+              </p>
+            )}
+            {authUser ? (
+              <div className="account-status-card">
+                <dl>
+                  <div>
+                    <dt>ログイン中</dt>
+                    <dd>{authUser.email ?? 'メールアドレス未取得'}</dd>
+                  </div>
+                  <div>
+                    <dt>状態</dt>
+                    <dd>アカウント接続中</dd>
+                  </div>
+                </dl>
+                <button
+                  disabled={isAuthBusy}
+                  onClick={() => void signOutAccount()}
+                  type="button"
+                >
+                  ログアウト
+                </button>
+              </div>
+            ) : (
+              <div className="account-auth-form">
+                <label>
+                  <span>メールアドレス</span>
+                  <input
+                    autoComplete="email"
+                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    inputMode="email"
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="mail@example.com"
+                    type="email"
+                    value={authEmail}
+                  />
+                </label>
+                <label>
+                  <span>パスワード</span>
+                  <input
+                    autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="6文字以上"
+                    type="password"
+                    value={authPassword}
+                  />
+                </label>
+                <div className="account-auth-actions">
+                  <button
+                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    onClick={() => void handleAuthAction('login')}
+                    type="button"
+                  >
+                    ログイン
+                  </button>
+                  <button
+                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    onClick={() => void handleAuthAction('signup')}
+                    type="button"
+                  >
+                    新規登録
+                  </button>
+                </div>
+                <button
+                  className="account-reset-button"
+                  disabled={!isSupabaseConfigured || isAuthBusy}
+                  onClick={() => void sendPasswordResetEmail()}
+                  type="button"
+                >
+                  パスワードを忘れた場合
+                </button>
+              </div>
+            )}
+            {authMessage && <p className="account-message">{authMessage}</p>}
           </section>
         )}
 
@@ -8031,7 +8755,7 @@ function App() {
                           {scheduleItems.map((scheduleItem) => (
                             <p key={scheduleItem.id}>
                               <time>{scheduleItem.time || '--:--'}</time>
-                              <span>{scheduleItem.text.trim()}</span>
+                              <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
                             </p>
                           ))}
                         </div>
@@ -8100,7 +8824,11 @@ function App() {
                 weekdayShortLabels[scheduleDate.getDay()]
               }${holidayName ? `・${holidayName}` : ''}）`;
               const scheduleItems = loadDailySchedule(scheduleDate);
-              const scheduleDraft = scheduleDrafts[dateKey] ?? { time: '', text: '' };
+              const scheduleDraftRows = scheduleDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
+              const scheduleDraftIds = new Set(scheduleDraftRows.map((draft) => draft.id));
+              const visibleScheduleItems = scheduleItems.filter(
+                (scheduleItem) => !scheduleDraftIds.has(scheduleItem.id),
+              );
 
               return (
                 <div
@@ -8132,7 +8860,7 @@ function App() {
                         <span>{scheduleItems.length}件</span>
                       </label>
                       <div className="schedule-editor-list">
-                        {scheduleItems.map((scheduleItem, index) => (
+                        {visibleScheduleItems.map((scheduleItem, index) => (
                           <div className="schedule-editor-row" key={scheduleItem.id}>
                             <input
                               aria-label={`${dateTitle}の予定 ${index + 1}の時間`}
@@ -8144,11 +8872,23 @@ function App() {
                                   event.target.value,
                                 )
                               }
+                              onInput={(event) =>
+                                updateScheduleItem(
+                                  scheduleDate,
+                                  scheduleItem,
+                                  'time',
+                                  event.currentTarget.value,
+                                )
+                              }
                               type="time"
                               value={scheduleItem.time}
                             />
                             <input
                               aria-label={`${dateTitle}の予定 ${index + 1}の内容`}
+                              onCompositionEnd={(event) =>
+                                endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
+                              }
+                              onCompositionStart={() => startScheduleComposition(scheduleItem.id)}
                               onChange={(event) =>
                                 updateScheduleItem(
                                   scheduleDate,
@@ -8171,34 +8911,62 @@ function App() {
                             </button>
                           </div>
                         ))}
-                        <div className="schedule-editor-row" data-new="true">
-                          <input
-                            aria-label={`${dateTitle}の新しい予定の時間`}
-                            onChange={(event) =>
-                              updateScheduleDraft(scheduleDate, 'time', event.target.value)
-                            }
-                            type="time"
-                            value={scheduleDraft.time}
-                          />
-                          <input
-                            aria-label={`${dateTitle}の新しい予定内容`}
-                            onChange={(event) =>
-                              updateScheduleDraft(scheduleDate, 'text', event.target.value)
-                            }
-                            placeholder="予定を追加"
-                            type="text"
-                            value={scheduleDraft.text}
-                          />
-                          <button
-                            aria-label={`${dateTitle}へ予定を追加`}
-                            className="schedule-new-mark"
-                            disabled={!scheduleDraft.text.trim()}
-                            onClick={() => commitScheduleDraft(scheduleDate, scheduleDraft)}
-                            type="button"
-                          >
-                            ＋
-                          </button>
-                        </div>
+                        {scheduleDraftRows.map((scheduleDraft, index) => (
+                          <div className="schedule-editor-row" data-new="true" key={scheduleDraft.id}>
+                            <input
+                              aria-label={`${dateTitle}の新しい予定 ${index + 1}の時間`}
+                              onChange={(event) =>
+                                updateScheduleDraft(
+                                  scheduleDate,
+                                  scheduleDraft,
+                                  'time',
+                                  event.target.value,
+                                )
+                              }
+                              onInput={(event) =>
+                                updateScheduleDraft(
+                                  scheduleDate,
+                                  scheduleDraft,
+                                  'time',
+                                  event.currentTarget.value,
+                                )
+                              }
+                              type="time"
+                              value={scheduleDraft.time}
+                            />
+                            <input
+                              aria-label={`${dateTitle}の新しい予定 ${index + 1}の内容`}
+                              onCompositionEnd={(event) =>
+                                endScheduleDraftComposition(
+                                  scheduleDate,
+                                  scheduleDraft,
+                                  event.currentTarget.value,
+                                )
+                              }
+                              onCompositionStart={() => startScheduleComposition(scheduleDraft.id)}
+                              onChange={(event) =>
+                                updateScheduleDraft(
+                                  scheduleDate,
+                                  scheduleDraft,
+                                  'text',
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="予定を追加"
+                              type="text"
+                              value={scheduleDraft.text}
+                            />
+                            <button
+                              aria-label={`${dateTitle}へ新しい予定欄を追加`}
+                              className="schedule-new-mark"
+                              disabled={scheduleDraftRows.some((draft) => !hasScheduleValue(draft))}
+                              onClick={() => addScheduleDraftRow(scheduleDate)}
+                              type="button"
+                            >
+                              ＋
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </section>
@@ -9358,10 +10126,12 @@ function App() {
         )}
 
         {page === 'settings' && (
-          <details className="data-management">
-            <summary>データ管理</summary>
+          <section className="data-management" aria-label="データ管理">
+            <div className="data-management-heading">
+              <h2>データ管理</h2>
+            </div>
             <div className="data-management-content">
-              <p>ルーティン、チェック履歴、設定をJSONファイルで保存・復元します。</p>
+              <p>hibitinの保存データをJSONファイルで書き出し・読み込みできます。</p>
               <div className="backup-actions">
                 <button onClick={exportBackup} type="button">
                   バックアップを書き出す
@@ -9389,8 +10159,68 @@ function App() {
                 </a>
               )}
               <p className="backup-warning">
-                読み込み時は、現在この端末に保存されているhibitinデータを上書きします。
+                読み込み時は、復元前に現在データの自動バックアップを書き出してから上書きします。
               </p>
+              <div className="auto-backup-panel">
+                <div className="auto-backup-header">
+                  <div>
+                    <h3>自動バックアップ</h3>
+                    <p>同じ端末内に、直近のセーブデータを自動で残します。</p>
+                  </div>
+                  <span>{autoBackups.length}世代</span>
+                </div>
+                <dl className="auto-backup-summary">
+                  <div>
+                    <dt>最終バックアップ</dt>
+                    <dd>
+                      {autoBackups[0]
+                        ? backupDateTimeFormatter.format(new Date(autoBackups[0].createdAt))
+                        : 'まだありません'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>保存世代数</dt>
+                    <dd>{autoBackups.length} / {AUTO_BACKUP_MAX_GENERATIONS}</dd>
+                  </div>
+                </dl>
+                <div className="auto-backup-actions">
+                  <button onClick={() => void createAutoBackupNow()} type="button">
+                    今すぐ自動バックアップを作成
+                  </button>
+                  <button
+                    aria-expanded={isAutoBackupListOpen}
+                    onClick={() => setIsAutoBackupListOpen((isOpen) => !isOpen)}
+                    type="button"
+                  >
+                    自動バックアップ一覧
+                  </button>
+                </div>
+                {autoBackupMessage && <p className="backup-message">{autoBackupMessage}</p>}
+                {isAutoBackupListOpen && (
+                  <div className="auto-backup-list">
+                    {autoBackups.length > 0 ? (
+                      autoBackups.map((record) => (
+                        <article className="auto-backup-item" key={record.id}>
+                          <div>
+                            <strong>{backupDateTimeFormatter.format(new Date(record.createdAt))}</strong>
+                            <span>{record.dataCount}件 / v{record.backupVersion}</span>
+                          </div>
+                          <div className="auto-backup-item-actions">
+                            <button onClick={() => void restoreAutoBackup(record)} type="button">
+                              復元
+                            </button>
+                            <button onClick={() => void removeAutoBackup(record)} type="button">
+                              削除
+                            </button>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <p className="auto-backup-empty">自動バックアップはまだありません。</p>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="reset-actions">
                 <button
                   className="reset-initial-button"
@@ -9404,7 +10234,7 @@ function App() {
                 </p>
               </div>
             </div>
-          </details>
+          </section>
         )}
 
       </div>
