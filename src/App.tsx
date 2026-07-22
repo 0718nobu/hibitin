@@ -7708,7 +7708,7 @@ function App() {
                   <span>メールアドレス</span>
                   <input
                     autoComplete="email"
-                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    disabled={isAuthBusy}
                     inputMode="email"
                     onChange={(event) => setAuthEmail(event.target.value)}
                     placeholder="mail@example.com"
@@ -7720,7 +7720,7 @@ function App() {
                   <span>パスワード</span>
                   <input
                     autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    disabled={isAuthBusy}
                     onChange={(event) => setAuthPassword(event.target.value)}
                     placeholder="6文字以上"
                     type="password"
@@ -7729,14 +7729,14 @@ function App() {
                 </label>
                 <div className="account-auth-actions">
                   <button
-                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    disabled={isAuthBusy}
                     onClick={() => void handleAuthAction('login')}
                     type="button"
                   >
                     ログイン
                   </button>
                   <button
-                    disabled={!isSupabaseConfigured || isAuthBusy}
+                    disabled={isAuthBusy}
                     onClick={() => void handleAuthAction('signup')}
                     type="button"
                   >
@@ -7745,7 +7745,7 @@ function App() {
                 </div>
                 <button
                   className="account-reset-button"
-                  disabled={!isSupabaseConfigured || isAuthBusy}
+                  disabled={isAuthBusy}
                   onClick={() => void sendPasswordResetEmail()}
                   type="button"
                 >
