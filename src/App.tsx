@@ -26,9 +26,10 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' | 'settings';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
-type ScheduleViewName = 'schedule' | 'todos';
+type ScheduleViewName = 'schedule';
+type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
 type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'failed';
@@ -56,6 +57,11 @@ type CloudBackupRow = {
   data_count: number | null;
   updated_at: string | null;
 };
+
+type CloudBackupLookupResult =
+  | { status: 'found'; info: CloudBackupInfo }
+  | { status: 'missing' }
+  | { status: 'failed' };
 
 const getAuthErrorMessage = (message: string) => {
   const normalizedMessage = message.toLowerCase();
@@ -103,7 +109,14 @@ const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] 
 
 const scheduleViewOptions: { key: ScheduleViewName; icon: string; label: string }[] = [
   { key: 'schedule', icon: '📅', label: '予定' },
-  { key: 'todos', icon: '☑️', label: 'やること' },
+];
+
+const todoStatusOptions: { key: TodoStatus; icon: string; label: string; title: string }[] = [
+  { key: 'today', icon: '☑️', label: '今日', title: '今日のやること' },
+  { key: 'tomorrow', icon: '🌤️', label: '明日', title: '明日のやること' },
+  { key: 'soon', icon: '🏃', label: '早め', title: '早めにやること' },
+  { key: 'someday', icon: '🧺', label: 'いずれ', title: 'いずれやること' },
+  { key: 'completed', icon: '✅', label: '完了', title: 'やり終えたこと' },
 ];
 
 const recordViewHeadings: Record<RecordViewName, string> = {
@@ -115,13 +128,21 @@ const recordViewHeadings: Record<RecordViewName, string> = {
 
 const scheduleViewHeadings: Record<ScheduleViewName, string> = {
   schedule: 'スケジュール',
-  todos: 'やること',
+};
+
+const todoStatusHeadings: Record<TodoStatus, string> = {
+  today: '今日のやること',
+  tomorrow: '明日のやること',
+  soon: '早めにやること',
+  someday: 'いずれやること',
+  completed: 'やり終えたこと',
 };
 
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'today', icon: '🎮', label: '今日' },
   { key: 'history', icon: '📅', label: 'スタンプ帳' },
   { key: 'schedule', icon: '🗓️', label: 'スケジュール' },
+  { key: 'todos', icon: '☑️', label: 'やること' },
   { key: 'records', icon: '📖', label: '記録' },
   { key: 'shop', icon: '🎁', label: 'ショップ' },
   { key: 'settings', icon: '⚙️', label: '設定' },
@@ -493,6 +514,8 @@ const PLAYER_ECONOMY_STORAGE_KEY = 'hibitin:playerEconomy:v1';
 const PLAYER_PROFILE_STORAGE_KEY = 'hibitin:playerProfile:v1';
 const PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v2';
 const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
+const TODO_ITEMS_STORAGE_KEY = 'hibitin:todos:v2';
+const TODO_ROLLOVER_STORAGE_KEY = 'hibitin:todos:lastRolloverDate:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -504,8 +527,11 @@ const isAllowedBackupStorageKey = (key: string) =>
 const isDailyTextStorageKey = (key: string) =>
   /^hibitin:(memo|events|anyMemo):\d{4}-\d{2}-\d{2}$/.test(key);
 
+const isRawStringStorageKey = (key: string) =>
+  isDailyTextStorageKey(key) || key === TODO_ROLLOVER_STORAGE_KEY;
+
 const serializeRestoredStorageValue = (key: string, value: unknown) => {
-  if (isDailyTextStorageKey(key) && typeof value === 'string') {
+  if (isRawStringStorageKey(key) && typeof value === 'string') {
     return value;
   }
 
@@ -524,9 +550,16 @@ const collectHibitinStorage = () => {
     const savedValue = window.localStorage.getItem(key);
 
     if (savedValue !== null) {
-      storage[key] = isDailyTextStorageKey(key)
-        ? savedValue
-        : JSON.parse(savedValue) as unknown;
+      if (isRawStringStorageKey(key)) {
+        storage[key] = savedValue;
+        return;
+      }
+
+      try {
+        storage[key] = JSON.parse(savedValue) as unknown;
+      } catch {
+        storage[key] = savedValue;
+      }
     }
   });
 
@@ -2229,6 +2262,19 @@ type DailyTodoItem = {
 
 type DailyTodos = DailyTodoItem[];
 
+type ManagedTodoItem = {
+  id: string;
+  text: string;
+  status: TodoStatus;
+  completed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  originalStatus?: Exclude<TodoStatus, 'completed'>;
+};
+
+type ManagedTodos = ManagedTodoItem[];
+
 type DailyScheduleItem = {
   id: string;
   time: string;
@@ -2251,6 +2297,9 @@ type NormalizeDailyScheduleOptions = {
 
 const createDailyTodoId = () =>
   `todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createManagedTodoId = () =>
+  `managed-todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2327,78 +2376,226 @@ const serializeDailyTodos = (todos: DailyTodos) =>
 const loadDailyTodos = (date: Date) =>
   parseDailyTodos(localStorage.getItem(getDailyTodosStorageKey(date)));
 
-const updateDailyTodoText = (
-  todos: DailyTodos,
-  id: string,
-  text: string,
-  options: NormalizeDailyTodoOptions = {},
-): DailyTodos =>
-  normalizeDailyTodos(
-    todos.map((todo) =>
-      todo.id === id
-        ? {
-            ...todo,
-            text,
-            completed: todo.completed && text.trim().length > 0,
-          }
-        : todo,
-    ),
-    {
-      ...options,
-      preserveEmptyIds: [...(options.preserveEmptyIds ?? []), id],
-    },
-  );
+const todoStatusKeys: TodoStatus[] = ['today', 'tomorrow', 'soon', 'someday', 'completed'];
 
-const upsertDailyTodoText = (
-  todos: DailyTodos,
-  id: string,
-  text: string,
-  options: NormalizeDailyTodoOptions = {},
-): DailyTodos => {
-  const hasTargetTodo = todos.some((todo) => todo.id === id);
+const isTodoStatus = (value: unknown): value is TodoStatus =>
+  typeof value === 'string' && todoStatusKeys.includes(value as TodoStatus);
 
-  if (hasTargetTodo) {
-    return updateDailyTodoText(todos, id, text, options);
-  }
+const isActiveTodoStatus = (value: TodoStatus): value is Exclude<TodoStatus, 'completed'> =>
+  value !== 'completed';
 
-  if (!text.trim()) {
-    return normalizeDailyTodos(todos, options);
-  }
-
-  return normalizeDailyTodos(
-    [...todos, createDailyTodoItem(text, false, id)],
-    options,
-  );
-};
-
-const toggleDailyTodoCompleted = (
-  todos: DailyTodos,
-  id: string,
-  completed: boolean,
-): DailyTodos =>
-  normalizeDailyTodos(
-    todos.map((todo) =>
-      todo.id === id && hasTodoText(todo)
-        ? {
-            ...todo,
-            completed,
-          }
-        : todo,
-    ),
-  );
-
-const deleteDailyTodo = (todos: DailyTodos, id: string): DailyTodos =>
-  normalizeDailyTodos(todos.filter((todo) => todo.id !== id));
-
-const getDailyTodoStats = (todos: DailyTodos) => {
-  const filledTodos = todos.filter(hasTodoText);
-  const completedCount = filledTodos.filter((todo) => todo.completed).length;
+const createManagedTodoItem = (
+  text = '',
+  status: TodoStatus = 'today',
+  options: Partial<Pick<ManagedTodoItem, 'id' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus'>> = {},
+): ManagedTodoItem => {
+  const timestamp = new Date().toISOString();
+  const completed = status === 'completed' || Boolean(options.completed);
+  const originalStatus =
+    options.originalStatus && isActiveTodoStatus(options.originalStatus)
+      ? options.originalStatus
+      : status === 'completed'
+        ? 'today'
+        : undefined;
 
   return {
-    completedCount,
-    totalCount: filledTodos.length,
+    id: options.id ?? createManagedTodoId(),
+    text,
+    status,
+    completed,
+    createdAt: options.createdAt ?? timestamp,
+    updatedAt: options.updatedAt ?? timestamp,
+    ...(completed && (options.completedAt || status === 'completed')
+      ? { completedAt: options.completedAt ?? timestamp }
+      : {}),
+    ...(originalStatus ? { originalStatus } : {}),
   };
 };
+
+const hasManagedTodoText = (todo: ManagedTodoItem) => todo.text.trim().length > 0;
+
+const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
+  if (!Array.isArray(todos)) {
+    return [];
+  }
+
+  return todos
+    .map((todo) => {
+      if (!todo || typeof todo !== 'object' || Array.isArray(todo)) {
+        return null;
+      }
+
+      const parsedTodo = todo as Partial<ManagedTodoItem>;
+      const text = typeof parsedTodo.text === 'string' ? parsedTodo.text : '';
+      const status = isTodoStatus(parsedTodo.status) ? parsedTodo.status : 'today';
+      const createdAt =
+        typeof parsedTodo.createdAt === 'string' && !Number.isNaN(Date.parse(parsedTodo.createdAt))
+          ? parsedTodo.createdAt
+          : new Date().toISOString();
+      const updatedAt =
+        typeof parsedTodo.updatedAt === 'string' && !Number.isNaN(Date.parse(parsedTodo.updatedAt))
+          ? parsedTodo.updatedAt
+          : createdAt;
+      const completedAt =
+        typeof parsedTodo.completedAt === 'string' && !Number.isNaN(Date.parse(parsedTodo.completedAt))
+          ? parsedTodo.completedAt
+          : undefined;
+      const originalStatus =
+        parsedTodo.originalStatus && isActiveTodoStatus(parsedTodo.originalStatus)
+          ? parsedTodo.originalStatus
+          : status === 'completed'
+            ? 'today'
+            : undefined;
+
+      return createManagedTodoItem(text, status, {
+        id:
+          typeof parsedTodo.id === 'string' && parsedTodo.id.trim()
+            ? parsedTodo.id
+            : createManagedTodoId(),
+        completed: status === 'completed' || Boolean(parsedTodo.completed),
+        createdAt,
+        updatedAt,
+        completedAt,
+        originalStatus,
+      });
+    })
+    .filter((todo): todo is ManagedTodoItem => Boolean(todo))
+    .filter(hasManagedTodoText);
+};
+
+const serializeManagedTodos = (todos: ManagedTodos) =>
+  JSON.stringify(normalizeManagedTodos(todos));
+
+const getLegacyTodoDateKeys = () =>
+  Object.keys(localStorage)
+    .map((key) => key.match(/^hibitin:todos:(\d{4}-\d{2}-\d{2})$/)?.[1])
+    .filter((dateKey): dateKey is string => Boolean(dateKey))
+    .sort();
+
+const migrateLegacyDailyTodos = (todayDate: Date): ManagedTodos => {
+  const todayDateKey = getDateKey(todayDate);
+  const tomorrowDateKey = getDateKey(addDays(todayDate, 1));
+
+  return getLegacyTodoDateKeys().flatMap((dateKey) => {
+    const legacyTodos = parseDailyTodos(localStorage.getItem(`hibitin:todos:${dateKey}`))
+      .filter(hasTodoText);
+
+    return legacyTodos.map((todo) => {
+      const completedAt = `${dateKey}T23:59:00.000`;
+      const baseOptions = {
+        id: `legacy-${dateKey}-${todo.id}`,
+        createdAt: `${dateKey}T00:00:00.000`,
+        updatedAt: `${dateKey}T12:00:00.000`,
+      };
+
+      if (todo.completed) {
+        return createManagedTodoItem(todo.text, 'completed', {
+          ...baseOptions,
+          completed: true,
+          completedAt,
+          originalStatus: dateKey === tomorrowDateKey ? 'tomorrow' : 'today',
+        });
+      }
+
+      if (dateKey === todayDateKey) {
+        return createManagedTodoItem(todo.text, 'today', baseOptions);
+      }
+
+      if (dateKey === tomorrowDateKey) {
+        return createManagedTodoItem(todo.text, 'tomorrow', baseOptions);
+      }
+
+      return createManagedTodoItem(todo.text, dateKey < todayDateKey ? 'soon' : 'someday', baseOptions);
+    });
+  });
+};
+
+const applyTodoRollover = (todos: ManagedTodos, todayDate: Date) => {
+  const todayDateKey = getDateKey(todayDate);
+  const lastRolloverDateKey = localStorage.getItem(TODO_ROLLOVER_STORAGE_KEY);
+
+  if (!lastRolloverDateKey || lastRolloverDateKey >= todayDateKey) {
+    if (!lastRolloverDateKey) {
+      localStorage.setItem(TODO_ROLLOVER_STORAGE_KEY, todayDateKey);
+    }
+
+    return todos;
+  }
+
+  const rolloverTimestamp = new Date().toISOString();
+  const rolledTodos = todos.map((todo) => {
+    if (todo.status === 'completed') {
+      return todo;
+    }
+
+    if (todo.completed) {
+      return {
+        ...todo,
+        status: 'completed' as const,
+        completed: true,
+        completedAt: todo.completedAt ?? rolloverTimestamp,
+        originalStatus: isActiveTodoStatus(todo.status) ? todo.status : 'today',
+        updatedAt: rolloverTimestamp,
+      };
+    }
+
+    if (todo.status === 'tomorrow') {
+      return {
+        ...todo,
+        status: 'today' as const,
+        updatedAt: rolloverTimestamp,
+      };
+    }
+
+    return todo;
+  });
+
+  localStorage.setItem(TODO_ROLLOVER_STORAGE_KEY, todayDateKey);
+  return rolledTodos;
+};
+
+const loadManagedTodos = (todayDate: Date): ManagedTodos => {
+  const storedTodos = localStorage.getItem(TODO_ITEMS_STORAGE_KEY);
+  const loadedTodos = storedTodos
+    ? (() => {
+        try {
+          return normalizeManagedTodos(JSON.parse(storedTodos) as unknown);
+        } catch {
+          return [];
+        }
+      })()
+    : migrateLegacyDailyTodos(todayDate);
+
+  return applyTodoRollover(loadedTodos, todayDate);
+};
+
+const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
+  const filteredTodos = todos.filter((todo) => todo.status === status && hasManagedTodoText(todo));
+
+  return {
+    completedCount: filteredTodos.filter((todo) => todo.completed).length,
+    totalCount: filteredTodos.length,
+  };
+};
+
+const getManagedTodoRows = (todos: ManagedTodos, status: Exclude<TodoStatus, 'completed'>) => {
+  const statusTodos = todos.filter((todo) => todo.status === status);
+
+  if (statusTodos.some((todo) => !hasManagedTodoText(todo))) {
+    return statusTodos;
+  }
+
+  return [
+    ...statusTodos,
+    createManagedTodoItem('', status, {
+      id: `new-${status}`,
+      completed: false,
+    }),
+  ];
+};
+
+const getTodoStatusLabel = (status: TodoStatus) =>
+  todoStatusOptions.find((option) => option.key === status)?.title ?? status;
 
 const hasScheduleValue = (scheduleItem: DailyScheduleItem) =>
   scheduleItem.time.trim().length > 0 || scheduleItem.text.trim().length > 0;
@@ -3520,12 +3717,13 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
-  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('schedule');
+  const scheduleView: ScheduleViewName = 'schedule';
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
+  const [todoView, setTodoView] = useState<TodoStatus>('today');
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
@@ -3567,7 +3765,6 @@ function App() {
   const dailyEventExample = getDailyEventExample(selectedDateKey);
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
-  const dailyTodoLabel = isToday ? '今日のやること' : '昨日のやること';
   const dailyAnyMemoLabel = 'なんでもメモ';
   const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
@@ -3648,8 +3845,12 @@ function App() {
   const [isCloudRestoreBusy, setIsCloudRestoreBusy] = useState(false);
   const authUserRef = useRef<User | null>(null);
   const cloudBackupTimerIdRef = useRef<number | null>(null);
+  const initialCloudBackupTimerIdRef = useRef<number | null>(null);
   const cloudBackupHashRef = useRef<string | null>(null);
   const hasPendingCloudBackupRef = useRef(false);
+  const initialCloudBackupAttemptedUserIdsRef = useRef<Set<string>>(new Set());
+  const isInitialCloudBackupRunningRef = useRef(false);
+  const pendingInitialCloudBackupUserIdRef = useRef<string | null>(null);
   const scheduleCloudBackupRef = useRef<() => void>(() => {});
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
@@ -3657,6 +3858,7 @@ function App() {
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
   const [dailyTodos, setDailyTodos] = useState(() => loadDailyTodos(today));
   const [dailyTodosDateKey, setDailyTodosDateKey] = useState(() => todayKey);
+  const [managedTodos, setManagedTodos] = useState<ManagedTodos>(() => loadManagedTodos(today));
   const [dailyAnyMemo, setDailyAnyMemo] = useState(() => loadDailyAnyMemo(today));
   const [dailyAnyMemoDateKey, setDailyAnyMemoDateKey] = useState(() => todayKey);
   const [historyDailyEvent, setHistoryDailyEvent] = useState<DailyRecordEntries>([
@@ -3673,8 +3875,7 @@ function App() {
   const [historyDailyTodosDateKey, setHistoryDailyTodosDateKey] = useState('');
   const [historyDailyAnyMemo, setHistoryDailyAnyMemo] = useState('');
   const [historyDailyAnyMemoDateKey, setHistoryDailyAnyMemoDateKey] = useState('');
-  const dailyTodoStats = getDailyTodoStats(dailyTodos);
-  const historyDailyTodoStats = getDailyTodoStats(historyDailyTodos);
+  const dailyTodoStats = getManagedTodoStats(managedTodos, 'today');
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -4216,6 +4417,10 @@ function App() {
 
     localStorage.setItem(getDailyTodosStorageKey(selectedDate), serializeDailyTodos(dailyTodos));
   }, [dailyTodos, dailyTodosDateKey, selectedDate, selectedDateKey]);
+
+  useEffect(() => {
+    localStorage.setItem(TODO_ITEMS_STORAGE_KEY, serializeManagedTodos(managedTodos));
+  }, [managedTodos]);
 
   useEffect(() => {
     if (dailyAnyMemoDateKey !== selectedDateKey) {
@@ -5919,10 +6124,12 @@ function App() {
     }
   };
 
-  const refreshCloudBackupInfo = async (userId = authUser?.id) => {
+  const refreshCloudBackupInfo = async (
+    userId = authUser?.id,
+  ): Promise<CloudBackupLookupResult> => {
     if (!supabase || !userId) {
       setCloudBackupInfo(null);
-      return null;
+      return { status: 'failed' };
     }
 
     setIsCloudBackupChecking(true);
@@ -5940,8 +6147,9 @@ function App() {
 
       if (!data) {
         setCloudBackupInfo(null);
+        cloudBackupHashRef.current = null;
         setCloudBackupMessage('クラウドバックアップはまだありません。');
-        return null;
+        return { status: 'missing' };
       }
 
       const row = data as CloudBackupRow;
@@ -5969,12 +6177,15 @@ function App() {
         setCloudBackupMessage('');
       }
 
-      return backupInfo;
+      return {
+        status: 'found',
+        info: backupInfo,
+      };
     } catch (error) {
       console.warn('Cloud backup metadata fetch failed:', error);
       setCloudBackupInfo(null);
       setCloudBackupMessage('クラウドバックアップの確認に失敗しました。');
-      return null;
+      return { status: 'failed' };
     } finally {
       setIsCloudBackupChecking(false);
     }
@@ -5984,6 +6195,7 @@ function App() {
     options: {
       manual?: boolean;
       force?: boolean;
+      initial?: boolean;
     } = {},
   ) => {
     if (!supabase) {
@@ -6038,7 +6250,9 @@ function App() {
       }
     } else {
       setCloudBackupStatus('saving');
-      setCloudBackupMessage('クラウドへ自動バックアップしています。');
+      setCloudBackupMessage(options.initial
+        ? '最初のクラウドバックアップを作成中…'
+        : 'クラウドへ自動バックアップしています。');
     }
 
     try {
@@ -6072,9 +6286,11 @@ function App() {
         backupVersion: backup.backupVersion,
       });
       setCloudBackupStatus('success');
-      setCloudBackupMessage(options.manual
-        ? 'クラウドへバックアップしました。'
-        : 'クラウドへ自動バックアップしました。');
+      setCloudBackupMessage(options.initial
+        ? '最初のクラウドバックアップを保存しました。'
+        : options.manual
+          ? 'クラウドへバックアップしました。'
+          : 'クラウドへ自動バックアップしました。');
       return true;
     } catch (error) {
       console.warn('Cloud backup failed:', error);
@@ -6086,7 +6302,9 @@ function App() {
       setCloudBackupStatus(shouldWaitForOnline ? 'pending' : 'failed');
       setCloudBackupMessage(shouldWaitForOnline
         ? '通信できなかったため、クラウド保存は保留中です。端末内データは保存されています。'
-        : 'クラウド保存に失敗しました。端末データはそのまま残っています。');
+        : options.initial
+          ? '初回クラウド保存に失敗しました。端末データはそのまま残っています。'
+          : 'クラウド保存に失敗しました。端末データはそのまま残っています。');
       return false;
     }
   };
@@ -6098,6 +6316,88 @@ function App() {
     });
   };
 
+  const runInitialCloudBackup = async (userId: string) => {
+    const currentUser = authUserRef.current;
+
+    if (
+      isInitialCloudBackupRunningRef.current ||
+      !currentUser ||
+      currentUser.id !== userId
+    ) {
+      return;
+    }
+
+    const localDataCount = Object.keys(collectHibitinStorage()).length;
+
+    if (localDataCount === 0) {
+      return;
+    }
+
+    if (!window.navigator.onLine) {
+      pendingInitialCloudBackupUserIdRef.current = userId;
+      initialCloudBackupAttemptedUserIdsRef.current.delete(userId);
+      hasPendingCloudBackupRef.current = true;
+      setCloudBackupStatus('pending');
+      setCloudBackupMessage('オフラインのため、最初のクラウドバックアップは通信復帰後に再試行します。端末内データは保存されています。');
+      return;
+    }
+
+    isInitialCloudBackupRunningRef.current = true;
+
+    try {
+      const latestCloudState = await refreshCloudBackupInfo(userId);
+
+      if (latestCloudState.status !== 'missing') {
+        if (latestCloudState.status === 'failed' && !window.navigator.onLine) {
+          pendingInitialCloudBackupUserIdRef.current = userId;
+          initialCloudBackupAttemptedUserIdsRef.current.delete(userId);
+          hasPendingCloudBackupRef.current = true;
+          setCloudBackupStatus('pending');
+          setCloudBackupMessage('オフラインのため、最初のクラウドバックアップは通信復帰後に再試行します。端末内データは保存されています。');
+        }
+
+        return;
+      }
+
+      pendingInitialCloudBackupUserIdRef.current = null;
+      setCloudBackupStatus('saving');
+      setCloudBackupMessage('最初のクラウドバックアップを作成中…');
+
+      try {
+        const result = await saveAutoBackupFromCurrentStorage({ force: true });
+        setAutoBackups(result.records);
+      } catch (error) {
+        console.warn('Initial cloud backup safety auto backup failed:', error);
+        setCloudBackupStatus('failed');
+        setCloudBackupMessage('初回クラウド保存に失敗しました。端末データはそのまま残っています。');
+        return;
+      }
+
+      await uploadCloudBackup({
+        initial: true,
+      });
+    } finally {
+      isInitialCloudBackupRunningRef.current = false;
+    }
+  };
+
+  const scheduleInitialCloudBackup = (userId: string) => {
+    if (initialCloudBackupAttemptedUserIdsRef.current.has(userId)) {
+      return;
+    }
+
+    initialCloudBackupAttemptedUserIdsRef.current.add(userId);
+
+    if (initialCloudBackupTimerIdRef.current !== null) {
+      window.clearTimeout(initialCloudBackupTimerIdRef.current);
+    }
+
+    initialCloudBackupTimerIdRef.current = window.setTimeout(() => {
+      initialCloudBackupTimerIdRef.current = null;
+      void runInitialCloudBackup(userId);
+    }, CLOUD_AUTO_BACKUP_DELAY_MS);
+  };
+
   const openCloudRestoreConfirm = async () => {
     if (!authUser) {
       setCloudBackupMessage('クラウドバックアップからの復元にはログインが必要です。');
@@ -6106,7 +6406,7 @@ function App() {
 
     const backupInfo = await refreshCloudBackupInfo(authUser.id);
 
-    if (!backupInfo) {
+    if (backupInfo.status !== 'found') {
       return;
     }
 
@@ -6375,26 +6675,51 @@ function App() {
         cloudBackupTimerIdRef.current = null;
       }
 
+      if (initialCloudBackupTimerIdRef.current !== null) {
+        window.clearTimeout(initialCloudBackupTimerIdRef.current);
+        initialCloudBackupTimerIdRef.current = null;
+      }
+
       hasPendingCloudBackupRef.current = false;
       cloudBackupHashRef.current = null;
+      pendingInitialCloudBackupUserIdRef.current = null;
+      initialCloudBackupAttemptedUserIdsRef.current.clear();
       setCloudBackupInfo(null);
       setLastCloudBackupAt(null);
       setCloudBackupStatus('idle');
       return;
     }
 
-    void refreshCloudBackupInfo(authUser.id);
+    void refreshCloudBackupInfo(authUser.id).then((result) => {
+      if (result.status === 'missing') {
+        scheduleInitialCloudBackup(authUser.id);
+      }
+    });
   }, [authUser]);
 
   useEffect(() => {
     const retryPendingCloudBackup = () => {
+      const pendingInitialUserId = pendingInitialCloudBackupUserIdRef.current;
+
+      if (
+        pendingInitialUserId &&
+        authUserRef.current &&
+        authUserRef.current.id === pendingInitialUserId
+      ) {
+        scheduleInitialCloudBackup(pendingInitialUserId);
+        return;
+      }
+
       if (hasPendingCloudBackupRef.current && authUserRef.current) {
         scheduleCloudBackupRef.current();
       }
     };
 
     const markCloudBackupPending = () => {
-      if (hasPendingCloudBackupRef.current && authUserRef.current) {
+      if (
+        (hasPendingCloudBackupRef.current || pendingInitialCloudBackupUserIdRef.current) &&
+        authUserRef.current
+      ) {
         setCloudBackupStatus('pending');
         setCloudBackupMessage('オフラインのため、クラウド保存は通信復帰後に再試行します。端末内データは保存されています。');
       }
@@ -6777,82 +7102,6 @@ function App() {
     }
   };
 
-  const updateDailyTodoForSelectedDate = (id: string, text: string) => {
-    setDailyTodosDateKey(selectedDateKey);
-    setDailyTodos((currentTodos) => updateDailyTodoText(currentTodos, id, text));
-  };
-
-  const cleanupDailyTodoForSelectedDate = () => {
-    setDailyTodosDateKey(selectedDateKey);
-    setDailyTodos((currentTodos) => normalizeDailyTodos(currentTodos));
-  };
-
-  const toggleDailyTodoForSelectedDate = (id: string, completed: boolean) => {
-    setDailyTodosDateKey(selectedDateKey);
-    setDailyTodos((currentTodos) => toggleDailyTodoCompleted(currentTodos, id, completed));
-  };
-
-  const deleteDailyTodoForSelectedDate = (id: string) => {
-    setDailyTodosDateKey(selectedDateKey);
-    setDailyTodos((currentTodos) => deleteDailyTodo(currentTodos, id));
-  };
-
-  const updateHistoryDailyTodo = (id: string, text: string) => {
-    setHistoryDailyTodosDateKey(historySelectedDateKey);
-    setHistoryDailyTodos((currentTodos) => {
-      const nextTodos = updateDailyTodoText(currentTodos, id, text);
-
-      if (historySelectedDateKey === selectedDateKey) {
-        setDailyTodosDateKey(selectedDateKey);
-        setDailyTodos(nextTodos);
-      }
-
-      return nextTodos;
-    });
-  };
-
-  const cleanupHistoryDailyTodo = () => {
-    setHistoryDailyTodosDateKey(historySelectedDateKey);
-    setHistoryDailyTodos((currentTodos) => {
-      const nextTodos = normalizeDailyTodos(currentTodos);
-
-      if (historySelectedDateKey === selectedDateKey) {
-        setDailyTodosDateKey(selectedDateKey);
-        setDailyTodos(nextTodos);
-      }
-
-      return nextTodos;
-    });
-  };
-
-  const toggleHistoryDailyTodo = (id: string, completed: boolean) => {
-    setHistoryDailyTodosDateKey(historySelectedDateKey);
-    setHistoryDailyTodos((currentTodos) => {
-      const nextTodos = toggleDailyTodoCompleted(currentTodos, id, completed);
-
-      if (historySelectedDateKey === selectedDateKey) {
-        setDailyTodosDateKey(selectedDateKey);
-        setDailyTodos(nextTodos);
-      }
-
-      return nextTodos;
-    });
-  };
-
-  const deleteHistoryDailyTodo = (id: string) => {
-    setHistoryDailyTodosDateKey(historySelectedDateKey);
-    setHistoryDailyTodos((currentTodos) => {
-      const nextTodos = deleteDailyTodo(currentTodos, id);
-
-      if (historySelectedDateKey === selectedDateKey) {
-        setDailyTodosDateKey(selectedDateKey);
-        setDailyTodos(nextTodos);
-      }
-
-      return nextTodos;
-    });
-  };
-
   const updateDailyAnyMemoForSelectedDate = (value: string) => {
     setDailyAnyMemoDateKey(selectedDateKey);
     setDailyAnyMemo(value);
@@ -6924,20 +7173,6 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
-  const syncRecordTodosToActiveDates = (date: Date, todos: DailyTodos) => {
-    const dateKey = getDateKey(date);
-
-    if (dateKey === selectedDateKey) {
-      setDailyTodosDateKey(selectedDateKey);
-      setDailyTodos(todos);
-    }
-
-    if (dateKey === historySelectedDateKey) {
-      setHistoryDailyTodosDateKey(historySelectedDateKey);
-      setHistoryDailyTodos(todos);
-    }
-  };
-
   const syncRecordAnyMemoToActiveDates = (date: Date, value: string) => {
     const dateKey = getDateKey(date);
 
@@ -6952,60 +7187,106 @@ function App() {
     }
   };
 
-  const updateRecordTodo = (date: Date, id: string, text: string) => {
-    const dateKey = getDateKey(date);
-    const currentTodos = dateKey === selectedDateKey
-      ? dailyTodos
-      : dateKey === historySelectedDateKey
-        ? historyDailyTodos
-        : loadDailyTodos(date);
-    const nextTodos = upsertDailyTodoText(currentTodos, id, text);
+  const updateManagedTodoText = (
+    id: string,
+    status: Exclude<TodoStatus, 'completed'>,
+    text: string,
+  ) => {
+    setManagedTodos((currentTodos) => {
+      const timestamp = new Date().toISOString();
 
-    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
-    syncRecordTodosToActiveDates(date, nextTodos);
-    setRecordRevision((revision) => revision + 1);
+      if (id.startsWith('new-')) {
+        if (!text.trim()) {
+          return currentTodos;
+        }
+
+        return [
+          ...currentTodos,
+          createManagedTodoItem(text, status, {
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        ];
+      }
+
+      return currentTodos.map((todo) =>
+        todo.id === id
+          ? {
+              ...todo,
+              text,
+              completed: todo.completed && text.trim().length > 0,
+              updatedAt: timestamp,
+              ...(text.trim().length > 0 ? {} : { completedAt: undefined, originalStatus: undefined }),
+            }
+          : todo,
+      );
+    });
   };
 
-  const cleanupRecordTodo = (date: Date) => {
-    const dateKey = getDateKey(date);
-    const currentTodos = dateKey === selectedDateKey
-      ? dailyTodos
-      : dateKey === historySelectedDateKey
-        ? historyDailyTodos
-        : loadDailyTodos(date);
-    const nextTodos = normalizeDailyTodos(currentTodos);
-
-    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
-    syncRecordTodosToActiveDates(date, nextTodos);
-    setRecordRevision((revision) => revision + 1);
+  const cleanupManagedTodos = () => {
+    setManagedTodos((currentTodos) => normalizeManagedTodos(currentTodos));
   };
 
-  const toggleRecordTodo = (date: Date, id: string, completed: boolean) => {
-    const dateKey = getDateKey(date);
-    const currentTodos = dateKey === selectedDateKey
-      ? dailyTodos
-      : dateKey === historySelectedDateKey
-        ? historyDailyTodos
-        : loadDailyTodos(date);
-    const nextTodos = toggleDailyTodoCompleted(currentTodos, id, completed);
+  const toggleManagedTodo = (id: string, completed: boolean) => {
+    setManagedTodos((currentTodos) => {
+      const timestamp = new Date().toISOString();
 
-    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
-    syncRecordTodosToActiveDates(date, nextTodos);
-    setRecordRevision((revision) => revision + 1);
+      return currentTodos.map((todo) => {
+        if (todo.id !== id || !hasManagedTodoText(todo) || todo.status === 'completed') {
+          return todo;
+        }
+
+        if (!completed) {
+          return {
+            ...todo,
+            completed: false,
+            completedAt: undefined,
+            originalStatus: undefined,
+            updatedAt: timestamp,
+          };
+        }
+
+        if (todo.status === 'today') {
+          return {
+            ...todo,
+            completed: true,
+            completedAt: timestamp,
+            originalStatus: 'today',
+            updatedAt: timestamp,
+          };
+        }
+
+        return {
+          ...todo,
+          status: 'completed' as const,
+          completed: true,
+          completedAt: timestamp,
+          originalStatus: todo.status,
+          updatedAt: timestamp,
+        };
+      });
+    });
   };
 
-  const deleteRecordTodo = (date: Date, id: string) => {
-    const dateKey = getDateKey(date);
-    const currentTodos = dateKey === selectedDateKey
-      ? dailyTodos
-      : dateKey === historySelectedDateKey
-        ? historyDailyTodos
-        : loadDailyTodos(date);
-    const nextTodos = deleteDailyTodo(currentTodos, id);
+  const moveManagedTodo = (id: string, status: Exclude<TodoStatus, 'completed'>) => {
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.id === id && todo.status !== 'completed'
+          ? {
+              ...todo,
+              status,
+              completed: false,
+              completedAt: undefined,
+              originalStatus: undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          : todo,
+      ),
+    );
+  };
 
-    localStorage.setItem(getDailyTodosStorageKey(date), serializeDailyTodos(nextTodos));
-    syncRecordTodosToActiveDates(date, nextTodos);
-    setRecordRevision((revision) => revision + 1);
+  const deleteManagedTodo = (id: string) => {
+    setManagedTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== id));
   };
 
   const updateRecordAnyMemo = (date: Date, value: string) => {
@@ -7167,11 +7448,6 @@ function App() {
   const changePage = (nextPage: PageName) => {
     resetEditUiState();
     setPage(nextPage);
-  };
-
-  const selectScheduleView = (nextView: ScheduleViewName) => {
-    setScheduleView(nextView);
-    setSelectedScheduleDate(null);
   };
 
   const selectRecordView = (nextView: RecordViewName) => {
@@ -7515,6 +7791,9 @@ function App() {
   const activeScheduleViewOption =
     scheduleViewOptions.find((option) => option.key === scheduleView) ?? scheduleViewOptions[0];
   const activeScheduleHeading = scheduleViewHeadings[scheduleView];
+  const activeTodoStatusOption =
+    todoStatusOptions.find((option) => option.key === todoView) ?? todoStatusOptions[0];
+  const activeTodoHeading = todoStatusHeadings[todoView];
 
   return (
     <main
@@ -7538,11 +7817,13 @@ function App() {
             )}
             {page === 'history' && 'スタンプ帳'}
             {page === 'schedule' && `${activeScheduleViewOption.icon} ${activeScheduleHeading}`}
+            {page === 'todos' && `☑️ やること`}
             {page === 'records' && `${activeRecordViewOption.icon} ${activeRecordHeading}`}
             {page === 'shop' && 'ショップ'}
             {page === 'settings' && '設定'}
           </h1>
           {page === 'schedule' && <p className="record-header-kicker">スケジュール</p>}
+          {page === 'todos' && <p className="record-header-kicker">{activeTodoStatusOption.icon} {activeTodoHeading}</p>}
           {page === 'records' && <p className="record-header-kicker">記録</p>}
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
@@ -9065,16 +9346,16 @@ function App() {
         )}
 
         {page === 'today' && !isEditMode && (
-          <section className="daily-todo-card" aria-label={dailyTodoLabel}>
+          <section className="daily-todo-card" aria-label="今日のやること">
             <div className="daily-todo-header">
-              <h2>☑️ {dailyTodoLabel}</h2>
+              <h2>☑️ 今日のやること</h2>
               <span>
                 {dailyTodoStats.completedCount} / {dailyTodoStats.totalCount}
               </span>
             </div>
             <div className="daily-todo-list">
-              {dailyTodos.map((todo, index) => {
-                const isFilledTodo = hasTodoText(todo);
+              {getManagedTodoRows(managedTodos, 'today').map((todo, index) => {
+                const isFilledTodo = hasManagedTodoText(todo);
 
                 return (
                   <div
@@ -9084,22 +9365,22 @@ function App() {
                     key={todo.id}
                   >
                     <input
-                      aria-label={`${dailyTodoLabel} ${index + 1}を完了`}
+                      aria-label={`今日のやること ${index + 1}を完了`}
                       checked={todo.completed}
                       disabled={!isFilledTodo}
                       onChange={(event) =>
-                        toggleDailyTodoForSelectedDate(todo.id, event.target.checked)
+                        toggleManagedTodo(todo.id, event.target.checked)
                       }
                       type="checkbox"
                     />
                     <input
-                      aria-label={`${dailyTodoLabel} ${index + 1}`}
-                      onBlur={cleanupDailyTodoForSelectedDate}
+                      aria-label={`今日のやること ${index + 1}`}
+                      onBlur={cleanupManagedTodos}
                       onChange={(event) =>
-                        updateDailyTodoForSelectedDate(todo.id, event.target.value)
+                        updateManagedTodoText(todo.id, 'today', event.target.value)
                       }
                       onCompositionEnd={(event) =>
-                        updateDailyTodoForSelectedDate(todo.id, event.currentTarget.value)
+                        updateManagedTodoText(todo.id, 'today', event.currentTarget.value)
                       }
                       placeholder="やることをメモ"
                       type="text"
@@ -9107,9 +9388,9 @@ function App() {
                     />
                     {isFilledTodo && (
                       <button
-                        aria-label={`${dailyTodoLabel} ${index + 1}を削除`}
+                        aria-label={`今日のやること ${index + 1}を削除`}
                         className="daily-todo-delete-button"
-                        onClick={() => deleteDailyTodoForSelectedDate(todo.id)}
+                        onClick={() => deleteManagedTodo(todo.id)}
                         type="button"
                       >
                         ×
@@ -9144,8 +9425,8 @@ function App() {
         {page === 'schedule' && (
           <section
             className="schedule-page records-page record-view-content"
-            aria-label={scheduleView === 'schedule' ? '月間スケジュール' : '月間やること'}
-            key={scheduleView}
+            aria-label="月間スケジュール"
+            key="schedule"
           >
             <div className="records-month-header">
               <button
@@ -9177,23 +9458,7 @@ function App() {
                 const holidayName = getHolidayName(scheduleDate);
                 const dayKind = getDateDisplayKind(scheduleDate);
                 const scheduleItems = loadDailySchedule(scheduleDate);
-                const todoEntries = dateKey === selectedDateKey
-                  ? dailyTodos
-                  : dateKey === historySelectedDateKey
-                    ? historyDailyTodos
-                    : loadDailyTodos(scheduleDate);
-                const filledTodos = todoEntries.filter(hasTodoText);
-                const scheduleTodoStats = getDailyTodoStats(todoEntries);
                 const hasSchedule = scheduleItems.length > 0;
-                const hasTodos = filledTodos.length > 0;
-                const contentCount = scheduleView === 'schedule'
-                  ? scheduleItems.length
-                  : filledTodos.length;
-                const hasContent = contentCount > 0;
-                const isSelectedTodoDate =
-                  scheduleView === 'todos' &&
-                  selectedScheduleDate !== null &&
-                  getDateKey(selectedScheduleDate) === dateKey;
                 const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
                   weekdayShortLabels[scheduleDate.getDay()]
                 }${holidayName ? `・${holidayName}` : ''}）`;
@@ -9203,7 +9468,7 @@ function App() {
                     className="record-day-card schedule-day-card"
                     data-date-key={dateKey}
                     data-day-kind={dayKind}
-                    data-empty={!hasContent ? 'true' : 'false'}
+                    data-empty={!hasSchedule ? 'true' : 'false'}
                     data-today={dateKey === todayKey ? 'true' : 'false'}
                     key={dateKey}
                   >
@@ -9217,17 +9482,11 @@ function App() {
                       </span>
                       <span className="record-day-meta">
                         {dateKey === todayKey && <strong>今日</strong>}
-                        {scheduleView === 'schedule'
-                          ? hasSchedule ? `${scheduleItems.length}件` : '予定なし'
-                          : hasTodos
-                            ? `${scheduleTodoStats.completedCount} / ${scheduleTodoStats.totalCount}`
-                            : isSelectedTodoDate
-                              ? '追加中'
-                              : 'やることなし'}
+                        {hasSchedule ? `${scheduleItems.length}件` : '予定なし'}
                       </span>
                     </button>
 
-                    {scheduleView === 'schedule' && hasSchedule && (
+                    {hasSchedule && (
                       <div className="record-day-body schedule-day-body">
                         <div className="schedule-read-list">
                           {scheduleItems.map((scheduleItem) => (
@@ -9239,62 +9498,11 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {scheduleView === 'todos' && (hasTodos || isSelectedTodoDate) && (
-                      <div className="record-day-body schedule-day-body schedule-todo-manager">
-                        <div className="daily-todo-list">
-                          {todoEntries.map((todo, index) => {
-                            const isFilledTodo = hasTodoText(todo);
-
-                            return (
-                              <div
-                                className="daily-todo-row record-todo-row"
-                                data-completed={todo.completed ? 'true' : 'false'}
-                                data-empty={!isFilledTodo ? 'true' : 'false'}
-                                key={todo.id}
-                              >
-                                <input
-                                  aria-label={`${dateTitle}のやること ${index + 1}を完了`}
-                                  checked={todo.completed}
-                                  disabled={!isFilledTodo}
-                                  onChange={(event) =>
-                                    toggleRecordTodo(scheduleDate, todo.id, event.target.checked)
-                                  }
-                                  type="checkbox"
-                                />
-                                <input
-                                  aria-label={`${dateTitle}のやること ${index + 1}`}
-                                  onBlur={() => cleanupRecordTodo(scheduleDate)}
-                                  onChange={(event) =>
-                                    updateRecordTodo(scheduleDate, todo.id, event.target.value)
-                                  }
-                                  onCompositionEnd={(event) =>
-                                    updateRecordTodo(scheduleDate, todo.id, event.currentTarget.value)
-                                  }
-                                  placeholder="やることを追加"
-                                  type="text"
-                                  value={todo.text}
-                                />
-                                {isFilledTodo && (
-                                  <button
-                                    aria-label={`${dateTitle}のやること ${index + 1}を削除`}
-                                    className="daily-todo-delete-button"
-                                    onClick={() => deleteRecordTodo(scheduleDate, todo.id)}
-                                    type="button"
-                                  >
-                                    ×
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
                   </article>
                 );
               })}
             </div>
-            {selectedScheduleDate && scheduleView === 'schedule' && (() => {
+            {selectedScheduleDate && (() => {
               const scheduleDate = selectedScheduleDate;
               const dateKey = getDateKey(scheduleDate);
               const holidayName = getHolidayName(scheduleDate);
@@ -9467,6 +9675,145 @@ function App() {
                 </div>
               );
             })()}
+          </section>
+        )}
+
+        {page === 'todos' && (
+          <section className="todo-manager-page record-view-content" aria-label="やること管理">
+            <div className="todo-manager-intro">
+              <p>予定は日時、やることは今の置き場所で整理します。</p>
+            </div>
+            <div className="todo-status-tabs" aria-label="やることの区分切り替え">
+              {todoStatusOptions.map((option) => (
+                <button
+                  aria-current={todoView === option.key ? 'page' : undefined}
+                  data-active={todoView === option.key ? 'true' : 'false'}
+                  key={option.key}
+                  onClick={() => setTodoView(option.key)}
+                  type="button"
+                >
+                  <span aria-hidden="true">{option.icon}</span>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {todoView !== 'completed' ? (() => {
+              const currentStatus = todoView;
+              const rows = getManagedTodoRows(managedTodos, currentStatus);
+              const stats = getManagedTodoStats(managedTodos, currentStatus);
+
+              return (
+                <section className="daily-todo-card todo-manager-card" aria-label={todoStatusHeadings[currentStatus]}>
+                  <div className="daily-todo-header">
+                    <h2>{activeTodoStatusOption.icon} {todoStatusHeadings[currentStatus]}</h2>
+                    <span>{stats.totalCount}件</span>
+                  </div>
+                  <div className="daily-todo-list">
+                    {rows.map((todo, index) => {
+                      const isFilledTodo = hasManagedTodoText(todo);
+
+                      return (
+                        <div
+                          className="daily-todo-row todo-manager-row"
+                          data-completed={todo.completed ? 'true' : 'false'}
+                          data-empty={!isFilledTodo ? 'true' : 'false'}
+                          key={todo.id}
+                        >
+                          <input
+                            aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}を完了`}
+                            checked={todo.completed}
+                            disabled={!isFilledTodo}
+                            onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
+                            type="checkbox"
+                          />
+                          <input
+                            aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}`}
+                            onBlur={cleanupManagedTodos}
+                            onChange={(event) =>
+                              updateManagedTodoText(todo.id, currentStatus, event.target.value)
+                            }
+                            onCompositionEnd={(event) =>
+                              updateManagedTodoText(todo.id, currentStatus, event.currentTarget.value)
+                            }
+                            placeholder="やることをメモ"
+                            type="text"
+                            value={todo.text}
+                          />
+                          {isFilledTodo && (
+                            <>
+                              <select
+                                aria-label={`${todo.text}の区分を変更`}
+                                onChange={(event) =>
+                                  moveManagedTodo(
+                                    todo.id,
+                                    event.target.value as Exclude<TodoStatus, 'completed'>,
+                                  )
+                                }
+                                value={todo.status}
+                              >
+                                {todoStatusOptions
+                                  .filter((option) => option.key !== 'completed')
+                                  .map((option) => (
+                                    <option key={option.key} value={option.key}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                              </select>
+                              <button
+                                aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}を削除`}
+                                className="daily-todo-delete-button"
+                                onClick={() => deleteManagedTodo(todo.id)}
+                                type="button"
+                              >
+                                ×
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })() : (
+              <section className="daily-todo-card todo-manager-card" aria-label="やり終えたこと">
+                <div className="daily-todo-header">
+                  <h2>✅ やり終えたこと</h2>
+                  <span>{getManagedTodoStats(managedTodos, 'completed').totalCount}件</span>
+                </div>
+                <div className="todo-completed-list">
+                  {managedTodos.filter((todo) => todo.status === 'completed').length > 0 ? (
+                    managedTodos
+                      .filter((todo) => todo.status === 'completed')
+                      .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''))
+                      .map((todo) => (
+                        <article className="todo-completed-item" key={todo.id}>
+                          <div>
+                            <p>{todo.text}</p>
+                            <span>
+                              {todo.completedAt
+                                ? backupDateTimeFormatter.format(new Date(todo.completedAt))
+                                : '完了日時なし'}
+                              {' / '}
+                              元の区分: {getTodoStatusLabel(todo.originalStatus ?? 'today')}
+                            </span>
+                          </div>
+                          <button
+                            aria-label={`${todo.text}を履歴から削除`}
+                            className="daily-todo-delete-button"
+                            onClick={() => deleteManagedTodo(todo.id)}
+                            type="button"
+                          >
+                            ×
+                          </button>
+                        </article>
+                      ))
+                  ) : (
+                    <p className="todo-completed-empty">やり終えたことはまだありません。</p>
+                  )}
+                </div>
+              </section>
+            )}
           </section>
         )}
 
@@ -9967,61 +10314,6 @@ function App() {
                         );
                       })}
                     </div>
-                  </div>
-                </section>
-                <section className="daily-todo-card history-todo-card" aria-label="その日のやること">
-                  <div className="daily-todo-header">
-                    <h2>☑️ その日のやること</h2>
-                    <span>
-                      {historyDailyTodoStats.completedCount} / {historyDailyTodoStats.totalCount}
-                    </span>
-                  </div>
-                  <div className="daily-todo-list">
-                    {historyDailyTodos.map((todo, index) => {
-                      const isFilledTodo = hasTodoText(todo);
-
-                      return (
-                        <div
-                          className="daily-todo-row"
-                          data-completed={todo.completed ? 'true' : 'false'}
-                          data-empty={!isFilledTodo ? 'true' : 'false'}
-                          key={todo.id}
-                        >
-                          <input
-                            aria-label={`その日のやること ${index + 1}を完了`}
-                            checked={todo.completed}
-                            disabled={!isFilledTodo}
-                            onChange={(event) =>
-                              toggleHistoryDailyTodo(todo.id, event.target.checked)
-                            }
-                            type="checkbox"
-                          />
-                          <input
-                            aria-label={`その日のやること ${index + 1}`}
-                            onBlur={cleanupHistoryDailyTodo}
-                            onChange={(event) =>
-                              updateHistoryDailyTodo(todo.id, event.target.value)
-                            }
-                            onCompositionEnd={(event) =>
-                              updateHistoryDailyTodo(todo.id, event.currentTarget.value)
-                            }
-                            placeholder="やることをメモ"
-                            type="text"
-                            value={todo.text}
-                          />
-                          {isFilledTodo && (
-                            <button
-                              aria-label={`その日のやること ${index + 1}を削除`}
-                              className="daily-todo-delete-button"
-                              onClick={() => deleteHistoryDailyTodo(todo.id)}
-                              type="button"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
                   </div>
                 </section>
                 <section className="daily-any-memo-card history-any-memo-card" aria-label="なんでもメモ">
@@ -10804,27 +11096,6 @@ function App() {
         )}
 
       </div>
-
-      {page === 'schedule' && (
-        <nav
-          className="record-subtab-nav schedule-subtab-nav"
-          aria-label="スケジュールの表示切り替え"
-        >
-          {scheduleViewOptions.map((option) => (
-            <button
-              aria-current={scheduleView === option.key ? 'page' : undefined}
-              className="record-subtab-item schedule-subtab-item"
-              data-active={scheduleView === option.key ? 'true' : 'false'}
-              key={option.key}
-              onClick={() => selectScheduleView(option.key)}
-              type="button"
-            >
-              <span aria-hidden="true">{option.icon}</span>
-              {option.label}
-            </button>
-          ))}
-        </nav>
-      )}
 
       {page === 'records' && (
         <nav
