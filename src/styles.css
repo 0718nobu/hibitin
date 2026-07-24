@@ -1980,6 +1980,11 @@ h1 {
   color: #23764e;
 }
 
+.cloud-backup-header > span[data-status='pending'] {
+  background: #fff7d8;
+  color: #8a6517;
+}
+
 .cloud-backup-header > span[data-status='failed'] {
   background: #fff0ef;
   color: #9c453c;

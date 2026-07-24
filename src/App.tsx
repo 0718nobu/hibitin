@@ -31,7 +31,7 @@ type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
 type ScheduleViewName = 'schedule' | 'todos';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
-type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'failed';
+type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'failed';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -88,8 +88,9 @@ const supabaseConnectionLabels: Record<SupabaseConnectionStatus, string> = {
 
 const cloudBackupStatusLabels: Record<CloudBackupStatus, string> = {
   idle: '未保存',
-  saving: '保存中',
-  success: '保存成功',
+  saving: '同期中…',
+  success: '保存済み',
+  pending: 'オフライン（同期待ち）',
   failed: '保存失敗',
 };
 
@@ -473,6 +474,7 @@ const AUTO_BACKUP_DB_NAME = 'hibitin:autoBackups';
 const AUTO_BACKUP_STORE_NAME = 'autoBackups';
 const AUTO_BACKUP_DELAY_MS = 30000;
 const AUTO_BACKUP_MAX_GENERATIONS = 10;
+const CLOUD_AUTO_BACKUP_DELAY_MS = 8000;
 const LEGACY_ROUTINES_STORAGE_KEY = 'hibitin-routines:v1';
 const TEMPLATES_STORAGE_KEY = 'hibitin:templates:v1';
 const DATE_SNAPSHOTS_STORAGE_KEY = 'hibitin:dateSnapshots:v1';
@@ -3644,6 +3646,11 @@ function App() {
   const [isCloudBackupChecking, setIsCloudBackupChecking] = useState(false);
   const [isCloudRestoreConfirmOpen, setIsCloudRestoreConfirmOpen] = useState(false);
   const [isCloudRestoreBusy, setIsCloudRestoreBusy] = useState(false);
+  const authUserRef = useRef<User | null>(null);
+  const cloudBackupTimerIdRef = useRef<number | null>(null);
+  const cloudBackupHashRef = useRef<string | null>(null);
+  const hasPendingCloudBackupRef = useRef(false);
+  const scheduleCloudBackupRef = useRef<() => void>(() => {});
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -5923,7 +5930,7 @@ function App() {
     try {
       const { data, error } = await supabase
         .from('hibitin_backups')
-        .select('backup_version, data_count, updated_at')
+        .select('backup_data, backup_version, data_count, updated_at')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -5937,15 +5944,18 @@ function App() {
         return null;
       }
 
-      const row = data as Pick<CloudBackupRow, 'backup_version' | 'data_count' | 'updated_at'>;
+      const row = data as CloudBackupRow;
 
       if (
         typeof row.updated_at !== 'string' ||
         typeof row.data_count !== 'number' ||
-        typeof row.backup_version !== 'number'
+        typeof row.backup_version !== 'number' ||
+        !isBackupFile(row.backup_data)
       ) {
         throw new Error('Invalid cloud backup metadata.');
       }
+
+      cloudBackupHashRef.current = getBackupContentHash(row.backup_data);
 
       const backupInfo = {
         updatedAt: row.updated_at,
@@ -5970,40 +5980,75 @@ function App() {
     }
   };
 
-  const saveCloudBackup = async () => {
+  const uploadCloudBackup = async (
+    options: {
+      manual?: boolean;
+      force?: boolean;
+    } = {},
+  ) => {
     if (!supabase) {
       setCloudBackupStatus('failed');
       setCloudBackupMessage('Supabase接続が設定されていません。');
-      return;
+      return false;
     }
 
-    if (!authUser) {
-      setCloudBackupStatus('idle');
-      setCloudBackupMessage('クラウド保存にはログインが必要です。');
-      return;
+    const uploadUser = authUserRef.current;
+
+    if (!uploadUser) {
+      if (options.manual) {
+        setCloudBackupStatus('idle');
+        setCloudBackupMessage('クラウド保存にはログインが必要です。');
+      }
+
+      return false;
     }
 
-    setCloudBackupStatus('saving');
-    setCloudBackupMessage('端末内バックアップを作成しています。');
+    const backup = createBackupFromCurrentStorage();
+    const contentHash = getBackupContentHash(backup);
+
+    if (!options.force && cloudBackupHashRef.current === contentHash) {
+      setCloudBackupStatus('success');
+
+      if (options.manual) {
+        setCloudBackupMessage('クラウドバックアップは最新です。');
+      }
+
+      hasPendingCloudBackupRef.current = false;
+      return true;
+    }
+
+    if (!window.navigator.onLine) {
+      hasPendingCloudBackupRef.current = true;
+      setCloudBackupStatus('pending');
+      setCloudBackupMessage('オフラインのため、クラウド保存は通信復帰後に再試行します。端末内データは保存されています。');
+      return false;
+    }
+
+    if (options.manual) {
+      setCloudBackupStatus('saving');
+      setCloudBackupMessage('端末内バックアップを作成しています。');
+
+      try {
+        await saveAutoBackupFromCurrentStorage({ force: true });
+      } catch (error) {
+        console.warn('Cloud backup safety auto backup failed:', error);
+        setCloudBackupStatus('failed');
+        setCloudBackupMessage('端末内バックアップを作成できなかったため、クラウド保存を中止しました。');
+        return false;
+      }
+    } else {
+      setCloudBackupStatus('saving');
+      setCloudBackupMessage('クラウドへ自動バックアップしています。');
+    }
 
     try {
-      await saveAutoBackupFromCurrentStorage({ force: true });
-    } catch (error) {
-      console.warn('Cloud backup safety auto backup failed:', error);
-      setCloudBackupStatus('failed');
-      setCloudBackupMessage('端末内バックアップを作成できなかったため、クラウド保存を中止しました。');
-      return;
-    }
-
-    try {
-      const backup = createBackupFromCurrentStorage();
       const updatedAt = new Date().toISOString();
       const dataCount = Object.keys(backup.data.storage).length;
       const { error } = await supabase
         .from('hibitin_backups')
         .upsert(
           {
-            user_id: authUser.id,
+            user_id: uploadUser.id,
             backup_data: backup,
             backup_version: backup.backupVersion,
             data_count: dataCount,
@@ -6018,6 +6063,8 @@ function App() {
         throw error;
       }
 
+      cloudBackupHashRef.current = contentHash;
+      hasPendingCloudBackupRef.current = false;
       setLastCloudBackupAt(updatedAt);
       setCloudBackupInfo({
         updatedAt,
@@ -6025,12 +6072,30 @@ function App() {
         backupVersion: backup.backupVersion,
       });
       setCloudBackupStatus('success');
-      setCloudBackupMessage('クラウドへバックアップしました。');
+      setCloudBackupMessage(options.manual
+        ? 'クラウドへバックアップしました。'
+        : 'クラウドへ自動バックアップしました。');
+      return true;
     } catch (error) {
       console.warn('Cloud backup failed:', error);
-      setCloudBackupStatus('failed');
-      setCloudBackupMessage('クラウド保存に失敗しました。端末データはそのまま残っています。');
+      const shouldWaitForOnline =
+        !window.navigator.onLine ||
+        (error instanceof Error && /fetch|network|offline|failed to fetch/i.test(error.message));
+
+      hasPendingCloudBackupRef.current = shouldWaitForOnline;
+      setCloudBackupStatus(shouldWaitForOnline ? 'pending' : 'failed');
+      setCloudBackupMessage(shouldWaitForOnline
+        ? '通信できなかったため、クラウド保存は保留中です。端末内データは保存されています。'
+        : 'クラウド保存に失敗しました。端末データはそのまま残っています。');
+      return false;
     }
+  };
+
+  const saveCloudBackup = async () => {
+    await uploadCloudBackup({
+      manual: true,
+      force: true,
+    });
   };
 
   const openCloudRestoreConfirm = async () => {
@@ -6177,6 +6242,31 @@ function App() {
     }
   };
 
+  const scheduleCloudBackup = () => {
+    if (!authUserRef.current) {
+      return;
+    }
+
+    hasPendingCloudBackupRef.current = true;
+
+    if (cloudBackupTimerIdRef.current !== null) {
+      window.clearTimeout(cloudBackupTimerIdRef.current);
+    }
+
+    if (!window.navigator.onLine) {
+      setCloudBackupStatus('pending');
+      setCloudBackupMessage('オフラインのため、クラウド保存は通信復帰後に再試行します。端末内データは保存されています。');
+      return;
+    }
+
+    cloudBackupTimerIdRef.current = window.setTimeout(() => {
+      cloudBackupTimerIdRef.current = null;
+      void uploadCloudBackup();
+    }, CLOUD_AUTO_BACKUP_DELAY_MS);
+  };
+
+  scheduleCloudBackupRef.current = scheduleCloudBackup;
+
   useEffect(() => {
     void refreshAutoBackupList();
   }, []);
@@ -6220,6 +6310,7 @@ function App() {
         previousValue !== value
       ) {
         scheduleAutomaticBackup();
+        scheduleCloudBackupRef.current();
       }
     };
 
@@ -6232,6 +6323,7 @@ function App() {
 
       if (hadValue) {
         scheduleAutomaticBackup();
+        scheduleCloudBackupRef.current();
       }
     };
 
@@ -6275,14 +6367,47 @@ function App() {
   }, []);
 
   useEffect(() => {
+    authUserRef.current = authUser;
+
     if (!authUser) {
+      if (cloudBackupTimerIdRef.current !== null) {
+        window.clearTimeout(cloudBackupTimerIdRef.current);
+        cloudBackupTimerIdRef.current = null;
+      }
+
+      hasPendingCloudBackupRef.current = false;
+      cloudBackupHashRef.current = null;
       setCloudBackupInfo(null);
       setLastCloudBackupAt(null);
+      setCloudBackupStatus('idle');
       return;
     }
 
     void refreshCloudBackupInfo(authUser.id);
   }, [authUser]);
+
+  useEffect(() => {
+    const retryPendingCloudBackup = () => {
+      if (hasPendingCloudBackupRef.current && authUserRef.current) {
+        scheduleCloudBackupRef.current();
+      }
+    };
+
+    const markCloudBackupPending = () => {
+      if (hasPendingCloudBackupRef.current && authUserRef.current) {
+        setCloudBackupStatus('pending');
+        setCloudBackupMessage('オフラインのため、クラウド保存は通信復帰後に再試行します。端末内データは保存されています。');
+      }
+    };
+
+    window.addEventListener('online', retryPendingCloudBackup);
+    window.addEventListener('offline', markCloudBackupPending);
+
+    return () => {
+      window.removeEventListener('online', retryPendingCloudBackup);
+      window.removeEventListener('offline', markCloudBackupPending);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -10534,7 +10659,7 @@ function App() {
                 <div className="cloud-backup-header">
                   <div>
                     <h3>クラウドバックアップ</h3>
-                    <p>ログイン中のアカウントへ、今のhibitinデータを手動で保存します。</p>
+                    <p>ログイン中は、端末内データを数秒後にクラウドへ自動保存します。</p>
                   </div>
                   <span data-status={cloudBackupStatus}>
                     {cloudBackupStatusLabels[cloudBackupStatus]}
