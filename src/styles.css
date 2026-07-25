@@ -684,7 +684,6 @@ h1 {
 .month-actions button:focus-visible,
 .calendar-day:focus-visible,
 .add-button:focus-visible,
-.sort-button:focus-visible,
 .delete-button:focus-visible,
 .routine-name-button:focus-visible,
 .routine-name input:focus-visible,
@@ -3389,6 +3388,22 @@ h1 {
   gap: 8px;
 }
 
+.mastery-section-group {
+  display: grid;
+  gap: 8px;
+}
+
+.mastery-section-group + .mastery-section-group {
+  margin-top: 16px;
+}
+
+.mastery-section-group > h3 {
+  margin: 0;
+  color: #31543b;
+  font-size: 0.95rem;
+  font-weight: 1000;
+}
+
 .mastery-card {
   display: grid;
   gap: 8px;
@@ -3479,81 +3494,6 @@ h1 {
   margin: 2px 0 0;
   color: #15362b;
   font-size: 0.95rem;
-  font-weight: 900;
-}
-
-.archive-panel {
-  display: grid;
-  gap: 10px;
-  border-top: 1px solid rgb(0 122 85 / 12%);
-  padding-top: 12px;
-}
-
-.archive-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.archive-header h3,
-.archive-card h4,
-.archive-header p,
-.archive-date,
-.archive-empty {
-  margin: 0;
-}
-
-.archive-header h3,
-.archive-card h4 {
-  color: #15362b;
-}
-
-.archive-header p,
-.archive-date,
-.archive-empty {
-  color: #6f7c75;
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-
-.archive-header > span {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 8px;
-  background: #eafaf1;
-  color: #007a55;
-  font-size: 0.76rem;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.archive-list {
-  display: grid;
-  gap: 8px;
-}
-
-.archive-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid rgb(83 97 90 / 14%);
-  border-radius: 10px;
-  padding: 10px;
-  background: rgb(255 255 255 / 74%);
-}
-
-.restore-button {
-  justify-self: start;
-  min-height: 30px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: #1f7a5a;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 0.82rem;
   font-weight: 900;
 }
 
@@ -6519,6 +6459,14 @@ h1 {
   background: rgb(255 253 244 / 90%);
 }
 
+.routine-section[data-drop-target='true'] {
+  outline: 2px solid rgb(0 168 107 / 34%);
+  outline-offset: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 52%),
+    0 14px 30px rgb(0 122 85 / 12%);
+}
+
 .routine-section:last-child {
   border-bottom: 0;
   padding-bottom: 0;
@@ -6585,8 +6533,7 @@ h1 {
 }
 
 .add-button,
-.delete-button,
-.sort-button {
+.delete-button {
   border: 0;
   border-radius: 8px;
   cursor: pointer;
@@ -6615,26 +6562,6 @@ h1 {
   border-color: #e2bd63;
   background: #fff5d8;
   color: #895d00;
-}
-
-.quest-limit-note {
-  margin: 7px 0 0;
-  border: 1px dashed #cfe4d7;
-  border-radius: 8px;
-  padding: 8px 9px;
-  background: #f7fbf8;
-  color: #537466;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-align: center;
-}
-
-.sort-button {
-  min-height: 30px;
-  padding: 0 9px;
-  background: #eef2ee;
-  color: #53615a;
-  white-space: nowrap;
 }
 
 .delete-button {
@@ -6747,6 +6674,15 @@ h1 {
   line-height: 1.1;
 }
 
+.quest-badge-row {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
 .quest-kind-mini-badge[data-kind='fixed'] {
   border-color: rgb(194 156 75 / 32%);
   background: rgb(255 248 222 / 76%);
@@ -6766,37 +6702,56 @@ h1 {
   color: #1f7a5a;
 }
 
+.quest-support-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 20px;
+  align-items: center;
+  border: 1px solid rgb(75 106 90 / 14%);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgb(255 255 255 / 70%);
+  color: #5d6b63;
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 850;
+  line-height: 1.1;
+  text-align: left;
+}
+
+button.quest-support-badge {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.quest-support-badge:hover {
+  border-color: rgb(0 122 85 / 24%);
+  background: rgb(245 255 249 / 88%);
+  color: #1f7a5a;
+}
+
+button.quest-support-badge:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button.quest-support-badge:focus-visible {
+  outline: 2px solid #00a86b;
+  outline-offset: 2px;
+}
+
 .history-routine-name .quest-kind-mini-badge {
   flex-basis: 100%;
 }
 
-.core-routine-section-select {
-  display: inline-grid;
-  flex: 0 0 auto;
-  gap: 3px;
-  color: #637267;
-  font-size: 0.66rem;
-  font-weight: 900;
-}
-
-.core-routine-section-select select {
-  min-height: 28px;
-  border: 1px solid #c8d6cf;
-  border-radius: 999px;
-  padding: 0 8px;
-  background: #ffffff;
-  color: #25483a;
-  cursor: pointer;
-  font-size: 0.78rem;
-  font-weight: 900;
-}
-
-.routine-item[draggable='true'] {
-  cursor: grab;
+.history-routine-name .quest-badge-row {
+  flex-basis: 100%;
 }
 
 .routine-item[data-dragging='true'] {
-  opacity: 0.55;
+  opacity: 0.72;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgb(0 90 64 / 16%);
 }
 
 .routine-item[data-checked='true'] {
@@ -6822,6 +6777,13 @@ h1 {
 }
 
 .drag-handle {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgb(0 122 85 / 16%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 82%);
   flex: 0 0 auto;
   color: #7b8982;
   cursor: grab;
@@ -6829,6 +6791,21 @@ h1 {
   line-height: 1;
   touch-action: none;
   user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  background: #eafaf1;
+  color: #007a55;
+}
+
+.drag-handle:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.drag-handle:focus-visible {
+  outline: 2px solid #00a86b;
+  outline-offset: 2px;
 }
 
 .routine-check {
@@ -7303,6 +7280,11 @@ h1 {
 .dialog-actions button:last-child {
   background: #edf0ec;
   color: #4f5d55;
+}
+
+.quest-slot-guide-dialog .dialog-actions button:first-child {
+  background: #1f7a5a;
+  color: #ffffff;
 }
 
 @media (max-width: 640px) {

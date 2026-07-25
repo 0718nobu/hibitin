@@ -39,6 +39,7 @@ type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
 type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'failed';
+type DailyQuestMasterStatus = 'idle' | 'loading' | 'success' | 'cache' | 'failed';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
 type WeekdayKey =
@@ -106,6 +107,14 @@ const cloudBackupStatusLabels: Record<CloudBackupStatus, string> = {
   failed: '保存失敗',
 };
 
+const dailyQuestMasterStatusLabels: Record<DailyQuestMasterStatus, string> = {
+  idle: '未取得',
+  loading: '取得中…',
+  success: '共通候補を使用中',
+  cache: 'キャッシュを使用中',
+  failed: '取得失敗',
+};
+
 const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
   { key: 'memo', icon: '✍️', label: 'ひとこと' },
   { key: 'events', icon: '📅', label: 'できごと' },
@@ -171,6 +180,8 @@ type RoutineItem = {
   source: RoutineSource;
   createdAt: string;
   fixedKind?: 'wake' | 'sleep';
+  routineNumber?: number;
+  retiredAt?: string;
   time?: string;
   timerMinutes?: number;
   timerSeconds?: number;
@@ -396,6 +407,7 @@ type ArchivedItem = {
   sectionTitle: string;
   target: ResolvedEditTarget;
   archivedAt: string;
+  retiredAt?: string;
 };
 
 type BackupFile = {
@@ -424,12 +436,26 @@ type ItemNotes = Record<string, Record<string, string>>;
 
 type DailyNudgeCandidate = {
   id: string;
+  masterId?: string;
   text: string;
   completionMessage: string;
   category: string;
   enabled: boolean;
   order: number;
   createdAt: string;
+  updatedAt?: string;
+};
+
+type DailyQuestMasterRow = {
+  id: string;
+  slug: string;
+  prompt: string;
+  completion_message: string | null;
+  category: string | null;
+  is_active: boolean | null;
+  sort_order: number | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 type DailyNudgeRecord = {
@@ -518,6 +544,8 @@ type MasteryStats = {
   sectionId: string;
   sectionTitle: string;
   order: number;
+  questKind: 'fixed' | 'core';
+  routineNumber?: number;
   totalCompletions: number;
   currentStreak: number;
   bestStreak: number;
@@ -553,7 +581,7 @@ const ARCHIVED_ITEMS_STORAGE_KEY = 'hibitin:archivedItems:v1';
 const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const CORE_ROUTINE_PLACEMENTS_STORAGE_KEY = 'hibitin:coreRoutinePlacements:v1';
-const DAILY_NUDGE_CANDIDATES_STORAGE_KEY = 'hibitin:dailyNudgeCandidates:v1';
+const DAILY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:dailyQuestMasterCache:v1';
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
@@ -858,6 +886,10 @@ type RhythmConfig = {
   wakeTime: string;
   sleepTime: string;
   startSection: StartSection;
+  fixedQuestPlacements?: Partial<Record<'wake' | 'sleep', {
+    sectionId: StartSection;
+    order: number;
+  }>>;
 };
 
 type RhythmSettings = Record<TemplateKind, RhythmConfig>;
@@ -979,24 +1011,34 @@ const dailyNudgeCelebrationMessages = [
 ];
 const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   ['daily-nudge-water', '水を一杯飲もう', '水分補給クリア。体にやさしい一歩。', '健康'],
+  ['daily-nudge-water-sip', '水を一口飲もう', '一口補給完了。体が少し助かった。', '休息'],
   ['daily-nudge-stretch-10', '10秒だけ背伸びしよう', '背伸び完了。少し空気が入れ替わった。', '健康'],
   ['daily-nudge-breath', '深呼吸をひとつしよう', '深呼吸完了。いま、ここに戻れた。', '休息'],
+  ['daily-nudge-breath-one', '深呼吸を一回しよう', '深呼吸一回完了。ちゃんと整えた。', '休息'],
   ['daily-nudge-shoulder', '肩を3回まわそう', '肩まわし完了。こわばりを少し解除。', '健康'],
+  ['daily-nudge-shoulder-drop', '肩の力を抜こう', '力みリセット完了。少し軽くなった。', '休息'],
   ['daily-nudge-step', '立ち上がって一歩歩こう', '一歩完了。ちゃんと動き出した。', '行動開始'],
+  ['daily-nudge-stand-up', '立ち上がろう', '立ち上がり完了。もう始まってる。', '行動開始'],
+  ['daily-nudge-three-seconds', '3秒だけ始めよう', '3秒着手完了。入口に立てた。', '行動開始'],
+  ['daily-nudge-one-time', 'まず1回だけやろう', '1回完了。小さく突破した。', '行動開始'],
   ['daily-nudge-far-look', '遠くを10秒眺めよう', '視界リセット完了。目にも休憩を。', '休息'],
+  ['daily-nudge-look-sky', '空を見よう', '空チェック完了。少し視界が広がった。', '休息'],
   ['daily-nudge-close-eyes', '目を閉じて5秒休もう', '5秒休憩完了。小さく回復。', '休息'],
   ['daily-nudge-desk-one', '机の上を一つだけ片付けよう', '一つ片付いた。場が少し軽くなった。', '行動開始'],
   ['daily-nudge-posture', '背筋を伸ばそう', '姿勢リセット完了。ちょっといい感じ。', '健康'],
-  ['daily-nudge-done-one', '今日できたことを一つ思い出そう', 'できたこと発見。今日にもちゃんと進捗あり。', '感謝'],
-  ['daily-nudge-like-one', '好きなものを一つ思い出そう', '好きなもの確認。心の燃料を補給。', '感謝'],
   ['daily-nudge-thanks-self', '自分にありがとうと言おう', '自分へのありがとう完了。ナイス存在。', '感謝'],
-  ['daily-nudge-survive', '今日ここまで生きた。それだけで勝利。', '生存勝利。今日はもう土台クリア。', '休息'],
+  ['daily-nudge-say-thanks', 'ありがとうを一回言おう', 'ありがとう完了。小さなあたたかさを渡せた。', '感謝'],
+  ['daily-nudge-greeting', 'あいさつを一回しよう', 'あいさつ完了。今日の扉を少し開けた。', '感謝'],
   ['daily-nudge-window', '窓の外をちらっと見よう', '外の世界を確認。視点が少し広がった。', '休息'],
   ['daily-nudge-smile', '口角を少しだけ上げてみよう', '表情ミニ調整完了。気分に小さなバフ。', '遊び'],
+  ['daily-nudge-smile-once', '笑顔を一回つくろう', '笑顔一回完了。表情に小さな灯り。', '感謝'],
   ['daily-nudge-hands', '手をぎゅっと握って開こう', '手のリセット完了。操作感が戻った。', '健康'],
-  ['daily-nudge-one-word', '今の気分を一言で言ってみよう', '気分ログ完了。自分の現在地を確認。', '記録'],
-  ['daily-nudge-kind', '誰かにやさしくする作戦を一つ考えよう', 'やさしさ作戦セット。実行できたらボーナス。', '感謝'],
-  ['daily-nudge-tiny-start', 'やることを一つだけ小さくしよう', '小さく分解完了。着手しやすくなった。', '行動開始'],
+  ['daily-nudge-hand-warm', '手のひらを温めよう', '手のひら回復。少し落ち着いた。', '休息'],
+  ['daily-nudge-neck', '首をゆっくり一回まわそう', '首まわし完了。こりを少しほどいた。', '健康'],
+  ['daily-nudge-foot', '足を一回伸ばそう', '足のばし完了。体に小さな余白。', '健康'],
+  ['daily-nudge-open-door', 'ドアか窓を少し開けよう', '空気入れ替え完了。場が少し変わった。', '休息'],
+  ['daily-nudge-put-one-away', '目の前の物を一つ戻そう', '一つ戻した。周りが少し整った。', '行動開始'],
+  ['daily-nudge-touch-tool', '使う物を一つ手に取ろう', '道具を持った。始める準備クリア。', '行動開始'],
   ['daily-nudge-floor', '足の裏を床に感じてみよう', '接地完了。ここからまた始められる。', '休息'],
 ].map(([id, text, completionMessage, category], index) => ({
   id,
@@ -1007,6 +1049,14 @@ const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   order: (index + 1) * 10,
   createdAt: '2026-07-11T00:00:00.000Z',
 }));
+const retiredDailyNudgeCandidateIds = new Set([
+  'daily-nudge-done-one',
+  'daily-nudge-like-one',
+  'daily-nudge-survive',
+  'daily-nudge-one-word',
+  'daily-nudge-kind',
+  'daily-nudge-tiny-start',
+]);
 
 const weekdayOptions: { key: WeekdayKey; label: string }[] = [
   { key: 'monday', label: '月' },
@@ -1075,13 +1125,6 @@ const monthFormatter = new Intl.DateTimeFormat('ja-JP', {
   month: 'long',
 });
 
-const questDateFormatter = new Intl.DateTimeFormat('ja-JP', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-  weekday: 'long',
-});
-
 const backupDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
   year: 'numeric',
   month: '2-digit',
@@ -1109,11 +1152,174 @@ const areSectionsEqual = (
   return JSON.stringify(firstSections) === JSON.stringify(secondSections);
 };
 
+const areObjectsEqual = (firstValue: unknown, secondValue: unknown) =>
+  JSON.stringify(firstValue) === JSON.stringify(secondValue);
+
 const removeFixedRoutineItems = (sections: RoutineSection[]) =>
   sections.map((section) => ({
     ...section,
     items: section.items.filter((item) => !fixedRoutineIds.has(item.id)),
   }));
+
+const isCoreRoutineSectionId = (sectionId: string): sectionId is StartSection =>
+  dailySectionIds.includes(sectionId as StartSection);
+
+const isNumberedCoreRoutineItem = (sectionId: string, item: RoutineItem) =>
+  isCoreRoutineSectionId(sectionId) && !item.fixedKind;
+
+const formatRoutineNumber = (routineNumber?: number) => {
+  if (!Number.isFinite(routineNumber) || !routineNumber || routineNumber < 1) {
+    return '';
+  }
+
+  const roundedNumber = Math.floor(routineNumber);
+  const circledNumbers = [
+    '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩',
+    '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳',
+  ];
+
+  return circledNumbers[roundedNumber - 1] ?? `${roundedNumber}.`;
+};
+
+const getCoreRoutineDisplayLabel = (item: RoutineItem) => {
+  const numberLabel = formatRoutineNumber(item.routineNumber);
+
+  return numberLabel ? `${numberLabel} ${item.label}` : item.label;
+};
+
+const normalizeRoutineNumber = (value: unknown) => {
+  const numericValue = Number(value);
+
+  return Number.isFinite(numericValue) && numericValue > 0
+    ? Math.floor(numericValue)
+    : undefined;
+};
+
+const migrateRoutineNumbers = (
+  settings: RoutineTemplateSettings,
+  dateOverrides: Record<string, RoutineSection[]>,
+  dateSnapshots: Record<string, RoutineSection[]>,
+  archivedItems: Record<string, ArchivedItem>,
+) => {
+  const routineNumberById = new Map<string, number>();
+  let maxRoutineNumber = 0;
+  const registerExistingNumber = (sectionId: string, item: RoutineItem) => {
+    if (!isNumberedCoreRoutineItem(sectionId, item)) {
+      return;
+    }
+
+    const routineNumber = normalizeRoutineNumber(item.routineNumber);
+
+    if (!routineNumber) {
+      return;
+    }
+
+    const existingNumber = routineNumberById.get(item.id);
+    const nextNumber = existingNumber ? Math.min(existingNumber, routineNumber) : routineNumber;
+
+    routineNumberById.set(item.id, nextNumber);
+    maxRoutineNumber = Math.max(maxRoutineNumber, nextNumber);
+  };
+  const visitSections = (
+    sections: RoutineSection[],
+    visitor: (sectionId: string, item: RoutineItem) => void,
+  ) => {
+    sections.forEach((section) => {
+      section.items.forEach((item) => visitor(section.id, item));
+    });
+  };
+
+  Object.values(settings.templates).forEach((sections) => visitSections(sections, registerExistingNumber));
+  Object.keys(dateOverrides).sort().forEach((dateKey) =>
+    visitSections(dateOverrides[dateKey], registerExistingNumber),
+  );
+  Object.keys(dateSnapshots).sort().forEach((dateKey) =>
+    visitSections(dateSnapshots[dateKey], registerExistingNumber),
+  );
+  Object.values(archivedItems).forEach((archivedItem) =>
+    registerExistingNumber(archivedItem.sectionId, archivedItem.item),
+  );
+
+  let nextRoutineNumber = maxRoutineNumber + 1;
+  const ensureRoutineNumber = (sectionId: string, item: RoutineItem) => {
+    if (!isNumberedCoreRoutineItem(sectionId, item)) {
+      return;
+    }
+
+    if (!routineNumberById.has(item.id)) {
+      routineNumberById.set(item.id, nextRoutineNumber);
+      nextRoutineNumber += 1;
+    }
+  };
+
+  Object.values(settings.templates).forEach((sections) => visitSections(sections, ensureRoutineNumber));
+  Object.keys(dateOverrides).sort().forEach((dateKey) =>
+    visitSections(dateOverrides[dateKey], ensureRoutineNumber),
+  );
+  Object.keys(dateSnapshots).sort().forEach((dateKey) =>
+    visitSections(dateSnapshots[dateKey], ensureRoutineNumber),
+  );
+  Object.values(archivedItems).forEach((archivedItem) =>
+    ensureRoutineNumber(archivedItem.sectionId, archivedItem.item),
+  );
+
+  const applyNumbersToSections = (sections: RoutineSection[]) =>
+    sections.map((section) => ({
+      ...section,
+      items: section.items.map((item) => {
+        const routineNumber = routineNumberById.get(item.id);
+
+        return routineNumber && item.routineNumber !== routineNumber
+          ? { ...item, routineNumber }
+          : item;
+      }),
+    }));
+  const nextSettings: RoutineTemplateSettings = {
+    ...settings,
+    templates: {
+      normal: applyNumbersToSections(settings.templates.normal),
+      holiday: applyNumbersToSections(settings.templates.holiday),
+    },
+  };
+  const nextDateOverrides = Object.fromEntries(
+    Object.entries(dateOverrides).map(([dateKey, sections]) => [
+      dateKey,
+      applyNumbersToSections(sections),
+    ]),
+  );
+  const nextDateSnapshots = Object.fromEntries(
+    Object.entries(dateSnapshots).map(([dateKey, sections]) => [
+      dateKey,
+      applyNumbersToSections(sections),
+    ]),
+  );
+  const nextArchivedItems = Object.fromEntries(
+    Object.entries(archivedItems).map(([itemId, archivedItem]) => {
+      const routineNumber = routineNumberById.get(archivedItem.item.id);
+
+      return [
+        itemId,
+        routineNumber && archivedItem.item.routineNumber !== routineNumber
+          ? {
+            ...archivedItem,
+            item: {
+              ...archivedItem.item,
+              routineNumber,
+            },
+          }
+          : archivedItem,
+      ];
+    }),
+  );
+
+  return {
+    nextArchivedItems,
+    nextDateOverrides,
+    nextDateSnapshots,
+    nextRoutineNumber,
+    nextSettings,
+  };
+};
 
 const createDefaultSettings = (): RoutineTemplateSettings => ({
   templates: {
@@ -1314,6 +1520,7 @@ const normalizeDailyNudgeCandidate = (
 
   return {
     id: candidate.id,
+    masterId: typeof candidate.masterId === 'string' ? candidate.masterId : undefined,
     text: typeof candidate.text === 'string' && candidate.text.trim()
       ? candidate.text
       : '小さな一歩をひとつ選ぼう',
@@ -1331,11 +1538,27 @@ const normalizeDailyNudgeCandidate = (
     createdAt: typeof candidate.createdAt === 'string'
       ? candidate.createdAt
       : new Date().toISOString(),
+    updatedAt: typeof candidate.updatedAt === 'string' ? candidate.updatedAt : undefined,
   };
 };
 
-const loadDailyNudgeCandidates = () => {
-  const savedCandidates = localStorage.getItem(DAILY_NUDGE_CANDIDATES_STORAGE_KEY);
+const mapDailyQuestMasterRowToCandidate = (
+  row: DailyQuestMasterRow,
+  index: number,
+): DailyNudgeCandidate => ({
+  id: row.slug,
+  masterId: row.id,
+  text: row.prompt,
+  completionMessage: row.completion_message?.trim() || defaultDailyNudgeCompletionMessage,
+  category: row.category?.trim() || 'その他',
+  enabled: row.is_active ?? true,
+  order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : (index + 1) * 10,
+  createdAt: row.created_at ?? new Date().toISOString(),
+  updatedAt: row.updated_at ?? undefined,
+});
+
+const loadDailyQuestMasterCache = () => {
+  const savedCandidates = localStorage.getItem(DAILY_QUEST_MASTER_CACHE_STORAGE_KEY);
 
   if (!savedCandidates) {
     return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
@@ -1353,13 +1576,19 @@ const loadDailyNudgeCandidates = () => {
         normalizeDailyNudgeCandidate(candidate as Partial<DailyNudgeCandidate>, index),
       )
       .filter((candidate): candidate is DailyNudgeCandidate => candidate !== null)
+      .filter((candidate) => candidate.enabled)
+      .filter((candidate) => !retiredDailyNudgeCandidateIds.has(candidate.id))
       .sort((first, second) => first.order - second.order);
 
-    return normalizedCandidates;
+    return normalizedCandidates.length > 0
+      ? normalizedCandidates
+      : defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
   } catch {
     return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
   }
 };
+
+const loadDailyNudgeCandidates = () => loadDailyQuestMasterCache();
 
 const loadDailyNudgeRecords = (): DailyNudgeRecords => {
   const savedRecords = localStorage.getItem(DAILY_NUDGE_RECORDS_STORAGE_KEY);
@@ -2147,12 +2376,36 @@ const parseRhythmConfig = (settings: unknown): RhythmConfig => {
   const parsedSettings = settings as Partial<RhythmConfig> & {
     lifestyleType?: unknown;
   };
+  const parsedFixedPlacements = parsedSettings.fixedQuestPlacements &&
+    typeof parsedSettings.fixedQuestPlacements === 'object'
+    ? parsedSettings.fixedQuestPlacements
+    : {};
+  const fixedQuestPlacements = (['wake', 'sleep'] as const).reduce<NonNullable<RhythmConfig['fixedQuestPlacements']>>(
+    (placements, kind) => {
+      const placement = parsedFixedPlacements[kind];
+
+      if (
+        placement &&
+        isStartSection(placement.sectionId) &&
+        Number.isFinite(Number(placement.order))
+      ) {
+        placements[kind] = {
+          sectionId: placement.sectionId,
+          order: Number(placement.order),
+        };
+      }
+
+      return placements;
+    },
+    {},
+  );
 
   return {
     ...defaultRhythmConfig,
     wakeTime: parsedSettings.wakeTime ?? defaultRhythmConfig.wakeTime,
     sleepTime: parsedSettings.sleepTime ?? defaultRhythmConfig.sleepTime,
     startSection: getMigratedStartSection(parsedSettings),
+    fixedQuestPlacements,
   };
 };
 
@@ -3455,10 +3708,11 @@ const sectionOrderByStartSection: Record<StartSection, string[]> = {
 const createFixedRoutineItem = (
   kind: 'wake' | 'sleep',
   time: string,
+  order = kind === 'wake' ? -20 : 9990,
 ): RoutineItem => ({
   id: kind === 'wake' ? 'morning-wake-up' : 'night-sleep',
   label: kind === 'wake' ? '起床' : '就寝',
-  order: kind === 'wake' ? -20 : 9990,
+  order,
   source: 'default',
   createdAt: '2026-06-01T00:00:00.000Z',
   fixedKind: kind,
@@ -3473,19 +3727,27 @@ const buildDisplaySections = (
   const dailySectionOrder = sectionOrder.filter((sectionId) =>
     dailySectionIds.includes(sectionId as StartSection),
   );
-  const wakeSectionId = rhythmConfig.startSection;
-  const sleepSectionId = dailySectionOrder[dailySectionOrder.length - 1];
+  const defaultWakePlacement = {
+    sectionId: rhythmConfig.startSection,
+    order: -20,
+  };
+  const defaultSleepPlacement = {
+    sectionId: dailySectionOrder[dailySectionOrder.length - 1] as StartSection,
+    order: 9990,
+  };
+  const wakePlacement = rhythmConfig.fixedQuestPlacements?.wake ?? defaultWakePlacement;
+  const sleepPlacement = rhythmConfig.fixedQuestPlacements?.sleep ?? defaultSleepPlacement;
 
   return removeFixedRoutineItems(sections)
     .map((section) => {
       const fixedItems: RoutineItem[] = [];
 
-      if (section.id === wakeSectionId) {
-        fixedItems.push(createFixedRoutineItem('wake', rhythmConfig.wakeTime));
+      if (section.id === wakePlacement.sectionId) {
+        fixedItems.push(createFixedRoutineItem('wake', rhythmConfig.wakeTime, wakePlacement.order));
       }
 
-      if (section.id === sleepSectionId) {
-        fixedItems.push(createFixedRoutineItem('sleep', rhythmConfig.sleepTime));
+      if (section.id === sleepPlacement.sectionId) {
+        fixedItems.push(createFixedRoutineItem('sleep', rhythmConfig.sleepTime, sleepPlacement.order));
       }
 
       return {
@@ -3520,6 +3782,25 @@ const calculateCompletionStats = (
     completedCount,
     totalCount,
     rate: Math.round((completedCount / totalCount) * 100),
+  };
+};
+
+const addFixedRecordQuestStats = (
+  stats: ReturnType<typeof calculateCompletionStats>,
+  completion: Record<CoreRoutineId, boolean>,
+  canComplete: boolean,
+) => {
+  const fixedRecordQuestCount = coreRoutineDefinitions.length;
+  const completedFixedRecordQuestCount = canComplete
+    ? coreRoutineDefinitions.filter((definition) => completion[definition.id]).length
+    : 0;
+  const totalCount = stats.totalCount + fixedRecordQuestCount;
+  const completedCount = stats.completedCount + completedFixedRecordQuestCount;
+
+  return {
+    completedCount,
+    totalCount,
+    rate: totalCount === 0 ? null : Math.round((completedCount / totalCount) * 100),
   };
 };
 
@@ -3832,14 +4113,14 @@ const formatMasteryStars = (starCount: number, trophyCount = 0) => {
 };
 
 const getMasteryAdminRuleText = () => [
-  '対象：朝・昼・夕・夜のコアルーティン',
+  '対象：固定クエストと朝・昼・夕・夜のコアルーティン',
   `星1〜3：${MASTERY_RULES.earlyStarStreakDays}日連続達成ごとに+1`,
   `星4：星3到達後、${MASTERY_RULES.fourthStarStreakDays}日連続達成で獲得`,
   `星5：星4到達後、${MASTERY_RULES.fifthStarStreakDays}日連続達成で獲得`,
   `${MASTERY_RULES.missedDaysForStarLoss}日連続未達成で星-1`,
   '星5到達で🏆+1、その後星0へ戻る',
   `トロフィー上限：${TROPHY_RULES.maxTrophies}個`,
-  '起床・就寝・アドバンストは対象外',
+  'アドバンストは対象外',
 ];
 
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
@@ -3919,36 +4200,6 @@ const getStoredCheckDateKeys = () => {
     .sort();
 };
 
-const calculateArchivedItemMasteryStats = (
-  itemId: string,
-  todayKey: string,
-  checkOverrides: Record<string, Record<string, boolean>>,
-) => {
-  const storedDateKeys = getStoredCheckDateKeys().filter((dateKey) => dateKey <= todayKey);
-  let progress = createEmptyMasteryProgress();
-  let lastSeenDateKey = todayKey;
-
-  for (
-    let date = getDateFromKey(storedDateKeys[0] ?? todayKey);
-    getDateKey(date) <= todayKey;
-    date = addDays(date, 1)
-  ) {
-    const dateKey = getDateKey(date);
-    const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
-
-    if (itemId in checks) {
-      progress = applyMasteryDayResult(progress, Boolean(checks[itemId]));
-      lastSeenDateKey = dateKey;
-    }
-  }
-
-  return {
-    ...progress,
-    isHallOfFame: progress.trophyCount > 0,
-    lastSeenDateKey,
-  };
-};
-
 const calculateMasteryStats = (
   settings: RoutineTemplateSettings,
   dateOverrides: Record<string, RoutineSection[]>,
@@ -3963,17 +4214,23 @@ const calculateMasteryStats = (
   const currentItemIds = new Set(
     currentDisplaySections
       .filter((section) => isMasteryTargetSectionId(section.id))
-      .flatMap((section) => section.items.filter((item) => !item.fixedKind).map((item) => item.id)),
+      .flatMap((section) => section.items.map((item) => item.id)),
   );
+  coreRoutineDefinitions.forEach((definition) => {
+    currentItemIds.add(`core:${definition.id}`);
+  });
   const currentItemOrder = new Map<string, number>();
 
   currentDisplaySections
     .filter((section) => isMasteryTargetSectionId(section.id))
     .forEach((section, sectionIndex) => {
-      section.items.filter((item) => !item.fixedKind).forEach((item, itemIndex) => {
+      section.items.forEach((item, itemIndex) => {
         currentItemOrder.set(item.id, sectionIndex * 1000 + itemIndex);
       });
     });
+  coreRoutineDefinitions.forEach((definition, index) => {
+    currentItemOrder.set(`core:${definition.id}`, 100000 + index);
+  });
 
   const stats = new Map<string, MasteryStats>();
   const progressByItemId = new Map<string, MasteryProgressState>();
@@ -3995,7 +4252,7 @@ const calculateMasteryStats = (
     const checks = checkOverrides[dateKey] ?? loadCheckedItems(date);
 
     sections.forEach((section, sectionIndex) => {
-      section.items.filter((item) => !item.fixedKind).forEach((item, itemIndex) => {
+      section.items.forEach((item, itemIndex) => {
         const order = currentItemOrder.get(item.id) ?? sectionIndex * 1000 + itemIndex;
         const currentProgress = progressByItemId.get(item.id) ?? createEmptyMasteryProgress();
         const nextProgress = applyMasteryDayResult(currentProgress, Boolean(checks[item.id]));
@@ -4007,6 +4264,8 @@ const calculateMasteryStats = (
           sectionId: section.id,
           sectionTitle: section.title,
           order,
+          questKind: item.fixedKind ? 'fixed' : 'core',
+          routineNumber: item.fixedKind ? undefined : item.routineNumber,
           totalCompletions: nextProgress.totalCompletions,
           currentStreak: nextProgress.currentStreak,
           bestStreak: nextProgress.bestStreak,
@@ -4018,13 +4277,49 @@ const calculateMasteryStats = (
         });
       });
     });
+
+    const coreCompletion = getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date));
+
+    coreRoutineDefinitions.forEach((definition, index) => {
+      const itemId = `core:${definition.id}`;
+      const order = currentItemOrder.get(itemId) ?? 100000 + index;
+      const currentProgress = progressByItemId.get(itemId) ?? createEmptyMasteryProgress();
+      const nextProgress = applyMasteryDayResult(currentProgress, Boolean(coreCompletion[definition.id]));
+
+      progressByItemId.set(itemId, nextProgress);
+      stats.set(itemId, {
+        itemId,
+        label: definition.label,
+        sectionId: 'fixed-record',
+        sectionTitle: '固定クエスト',
+        order,
+        questKind: 'fixed',
+        totalCompletions: nextProgress.totalCompletions,
+        currentStreak: nextProgress.currentStreak,
+        bestStreak: nextProgress.bestStreak,
+        starCount: nextProgress.starCount,
+        trophyCount: nextProgress.trophyCount,
+        isHallOfFame: nextProgress.trophyCount > 0,
+        isCurrentItem: true,
+        lastSeenDateKey: dateKey,
+      });
+    });
   }
 
   return Array.from(stats.values())
-    .filter((itemStats) => itemStats.isCurrentItem || itemStats.totalCompletions > 0)
+    .filter((itemStats) => itemStats.questKind === 'fixed' || itemStats.isCurrentItem)
     .sort((first, second) => {
-      if (first.isCurrentItem !== second.isCurrentItem) {
-        return first.isCurrentItem ? -1 : 1;
+      if (first.questKind !== second.questKind) {
+        return first.questKind === 'fixed' ? -1 : 1;
+      }
+
+      if (first.questKind === 'core' && second.questKind === 'core') {
+        const firstNumber = first.routineNumber ?? Number.MAX_SAFE_INTEGER;
+        const secondNumber = second.routineNumber ?? Number.MAX_SAFE_INTEGER;
+
+        if (firstNumber !== secondNumber) {
+          return firstNumber - secondNumber;
+        }
       }
 
       if (first.order !== second.order) {
@@ -4111,6 +4406,13 @@ function App() {
   const [dailyNudgeCandidates, setDailyNudgeCandidates] = useState<DailyNudgeCandidate[]>(() =>
     loadDailyNudgeCandidates(),
   );
+  const [dailyQuestAdminCandidates, setDailyQuestAdminCandidates] = useState<DailyNudgeCandidate[]>([]);
+  const [dailyQuestMasterStatus, setDailyQuestMasterStatus] =
+    useState<DailyQuestMasterStatus>('idle');
+  const [dailyQuestMasterMessage, setDailyQuestMasterMessage] = useState('');
+  const [isDailyQuestMasterBusy, setIsDailyQuestMasterBusy] = useState(false);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [isAdminChecking, setIsAdminChecking] = useState(false);
   const [dailyNudgeRecords, setDailyNudgeRecords] = useState<DailyNudgeRecords>(() =>
     loadDailyNudgeRecords(),
   );
@@ -4180,9 +4482,10 @@ function App() {
 
       return window.Notification.permission;
     });
-  const [sortingSectionId, setSortingSectionId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dropRoutineSectionId, setDropRoutineSectionId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [isQuestSlotGuideOpen, setIsQuestSlotGuideOpen] = useState(false);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() =>
     loadCheckedItems(today),
   );
@@ -4304,10 +4607,14 @@ function App() {
   const usedQuestSlots = countFreeQuestItems(displaySections);
   const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
   const freeQuestCount = countFreeQuestItems(displaySections);
-  const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
-  const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const selectedCoreRoutineCompletion = getCoreRoutineCompletion(dailyMemo, dailyEvent);
   const selectedCoreRoutineCanComplete = selectedDateKey <= todayKey;
+  const selectedDateStats = addFixedRecordQuestStats(
+    calculateCompletionStats(displaySections, checkedItems),
+    selectedCoreRoutineCompletion,
+    selectedCoreRoutineCanComplete,
+  );
+  const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
   const selectedDateVisualRank = getVisualProgressRank(
     selectedDateRank,
@@ -4364,11 +4671,6 @@ function App() {
         rhythmSettings[historyDateTemplate],
       )
     : [];
-  const historyDateStats = calculateCompletionStats(
-    historyDisplaySections,
-    historyCheckedItems,
-  );
-  const historyDateRank = getCompletionRank(historyDateStats.rate);
   const historyCoreRoutineCompletion = getCoreRoutineCompletion(
     historyDailyMemo,
     historyDailyEvent,
@@ -4376,6 +4678,12 @@ function App() {
   const historyCoreRoutineCanComplete = Boolean(
     historySelectedDateKey && historySelectedDateKey <= todayKey,
   );
+  const historyDateStats = addFixedRecordQuestStats(
+    calculateCompletionStats(historyDisplaySections, historyCheckedItems),
+    historyCoreRoutineCompletion,
+    historyCoreRoutineCanComplete,
+  );
+  const historyDateRank = getCompletionRank(historyDateStats.rate);
   const masteryStats = useMemo(() => calculateMasteryStats(
     templateSettings,
     dateOverrides,
@@ -4414,31 +4722,14 @@ function App() {
     () => getPlayerRankProgress(playerEconomy.lifetimeStarsEarned, gameBalance),
     [gameBalance, playerEconomy.lifetimeStarsEarned],
   );
-  const archivedItemEntries = useMemo(() => (
-    Object.values(archivedItems)
-      .map((archivedItem) => ({
-        archivedItem,
-        stats: calculateArchivedItemMasteryStats(
-          archivedItem.item.id,
-          todayKey,
-          {
-            [selectedDateKey]: checkedItems,
-            ...(historySelectedDate ? { [historySelectedDateKey]: historyCheckedItems } : {}),
-          },
-        ),
-      }))
-      .sort((first, second) =>
-        second.archivedItem.archivedAt.localeCompare(first.archivedItem.archivedAt),
-      )
-  ), [
-    archivedItems,
-    checkedItems,
-    historyCheckedItems,
-    historySelectedDate,
-    historySelectedDateKey,
-    selectedDateKey,
-    todayKey,
-  ]);
+  const fixedQuestMasteryStats = useMemo(
+    () => masteryStats.filter((itemStats) => itemStats.questKind === 'fixed'),
+    [masteryStats],
+  );
+  const coreRoutineMasteryStats = useMemo(
+    () => masteryStats.filter((itemStats) => itemStats.questKind === 'core'),
+    [masteryStats],
+  );
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
   const scheduleMonthLabel = monthFormatter.format(scheduleMonth);
   const scheduleMonthDates = useMemo(
@@ -4606,7 +4897,11 @@ function App() {
         todayKey,
       ));
       const daySections = buildDisplaySections(sections, rhythmSettings[baseTemplate]);
-      const stats = calculateCompletionStats(daySections, loadCheckedItems(date));
+      const stats = addFixedRecordQuestStats(
+        calculateCompletionStats(daySections, loadCheckedItems(date)),
+        getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date)),
+        dateKey <= todayKey,
+      );
       const rank = getCompletionRank(stats.rate);
       const calendarRank = getVisualProgressRank(
         rank,
@@ -4703,6 +4998,31 @@ function App() {
   }, [archivedItems]);
 
   useEffect(() => {
+    const {
+      nextArchivedItems,
+      nextDateOverrides,
+      nextDateSnapshots,
+      nextSettings,
+    } = migrateRoutineNumbers(templateSettings, dateOverrides, dateSnapshots, archivedItems);
+
+    if (!areObjectsEqual(templateSettings, nextSettings)) {
+      setTemplateSettings(nextSettings);
+    }
+
+    if (!areObjectsEqual(dateOverrides, nextDateOverrides)) {
+      setDateOverrides(nextDateOverrides);
+    }
+
+    if (!areObjectsEqual(dateSnapshots, nextDateSnapshots)) {
+      setDateSnapshots(nextDateSnapshots);
+    }
+
+    if (!areObjectsEqual(archivedItems, nextArchivedItems)) {
+      setArchivedItems(nextArchivedItems);
+    }
+  }, [archivedItems, dateOverrides, dateSnapshots, templateSettings]);
+
+  useEffect(() => {
     localStorage.setItem(ITEM_NOTES_STORAGE_KEY, JSON.stringify(itemNotes));
   }, [itemNotes]);
 
@@ -4715,7 +5035,7 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem(
-      DAILY_NUDGE_CANDIDATES_STORAGE_KEY,
+      DAILY_QUEST_MASTER_CACHE_STORAGE_KEY,
       JSON.stringify(dailyNudgeCandidates),
     );
   }, [dailyNudgeCandidates]);
@@ -5644,7 +5964,109 @@ function App() {
     });
   };
 
-  const updateDailyNudgeCandidate = (
+  const getDailyQuestMasterPayload = (candidate: DailyNudgeCandidate) => ({
+    slug: candidate.id,
+    prompt: candidate.text.trim() || '小さな一歩をひとつ選ぼう',
+    completion_message: candidate.completionMessage.trim() || defaultDailyNudgeCompletionMessage,
+    category: candidate.category.trim() || 'その他',
+    is_active: candidate.enabled,
+    sort_order: candidate.order,
+  });
+
+  const refreshDailyQuestMaster = async (options: { includeInactive?: boolean } = {}) => {
+    if (!supabase) {
+      setDailyQuestMasterStatus('cache');
+      setDailyQuestMasterMessage('Supabase未設定のため、端末内キャッシュまたは予備候補を使用しています。');
+      return;
+    }
+
+    setDailyQuestMasterStatus('loading');
+
+    try {
+      let query = supabase
+        .from('daily_quest_master')
+        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .order('sort_order', { ascending: true });
+
+      if (!options.includeInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      const candidates = ((data ?? []) as DailyQuestMasterRow[])
+        .map(mapDailyQuestMasterRowToCandidate)
+        .filter((candidate) => !retiredDailyNudgeCandidateIds.has(candidate.id))
+        .sort((first, second) => first.order - second.order);
+      const activeCandidates = candidates.filter((candidate) => candidate.enabled);
+
+      if (options.includeInactive) {
+        setDailyQuestAdminCandidates(candidates);
+      }
+
+      if (activeCandidates.length > 0) {
+        setDailyNudgeCandidates(activeCandidates);
+        localStorage.setItem(DAILY_QUEST_MASTER_CACHE_STORAGE_KEY, JSON.stringify(activeCandidates));
+        setDailyQuestMasterStatus('success');
+        setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを取得しました。');
+        return;
+      }
+
+      const cachedCandidates = loadDailyQuestMasterCache();
+      setDailyNudgeCandidates(cachedCandidates);
+      setDailyQuestMasterStatus('cache');
+      setDailyQuestMasterMessage('共通候補が空のため、端末内キャッシュまたは予備候補を使用しています。');
+    } catch (error) {
+      console.warn('Daily quest master fetch failed:', error);
+      const cachedCandidates = loadDailyQuestMasterCache();
+      setDailyNudgeCandidates(cachedCandidates);
+      setDailyQuestMasterStatus('cache');
+      setDailyQuestMasterMessage('共通候補を取得できませんでした。端末内キャッシュまたは予備候補を使用しています。');
+    }
+  };
+
+  const refreshAdminStatus = async (user: User | null) => {
+    if (!supabase || !user) {
+      setIsAdminUser(false);
+      setDailyQuestAdminCandidates([]);
+      return;
+    }
+
+    setIsAdminChecking(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('admin_users')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      const nextIsAdmin = Boolean(data);
+      setIsAdminUser(nextIsAdmin);
+
+      if (nextIsAdmin) {
+        void refreshDailyQuestMaster({ includeInactive: true });
+      } else {
+        setDailyQuestAdminCandidates([]);
+      }
+    } catch (error) {
+      console.warn('Admin status check failed:', error);
+      setIsAdminUser(false);
+      setDailyQuestAdminCandidates([]);
+    } finally {
+      setIsAdminChecking(false);
+    }
+  };
+
+  const updateDailyQuestAdminCandidate = (
     candidateId: string,
     field: keyof Pick<
       DailyNudgeCandidate,
@@ -5652,7 +6074,7 @@ function App() {
     >,
     value: string | boolean,
   ) => {
-    setDailyNudgeCandidates((currentCandidates) =>
+    setDailyQuestAdminCandidates((currentCandidates) =>
       currentCandidates.map((candidate) =>
         candidate.id === candidateId
           ? { ...candidate, [field]: value }
@@ -5661,38 +6083,117 @@ function App() {
     );
   };
 
-  const moveDailyNudgeCandidate = (candidateId: string, direction: -1 | 1) => {
-    setDailyNudgeCandidates((currentCandidates) => {
-      const orderedCandidates = [...currentCandidates].sort(
-        (first, second) => first.order - second.order,
-      );
-      const currentIndex = orderedCandidates.findIndex((candidate) => candidate.id === candidateId);
-      const nextIndex = currentIndex + direction;
+  const saveDailyQuestMasterCandidate = async (candidate: DailyNudgeCandidate) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setDailyQuestMasterMessage('管理者ログインが必要です。');
+      return;
+    }
 
-      if (
-        currentIndex === -1 ||
-        nextIndex < 0 ||
-        nextIndex >= orderedCandidates.length
-      ) {
-        return currentCandidates;
+    setIsDailyQuestMasterBusy(true);
+    setDailyQuestMasterMessage('');
+
+    try {
+      const { data, error } = await supabase
+        .from('daily_quest_master')
+        .upsert(
+          {
+            ...getDailyQuestMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          },
+          { onConflict: 'slug' },
+        )
+        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .single();
+
+      if (error) {
+        throw error;
       }
 
-      const nextCandidates = [...orderedCandidates];
-      const [movedCandidate] = nextCandidates.splice(currentIndex, 1);
+      const savedCandidate = mapDailyQuestMasterRowToCandidate(data as DailyQuestMasterRow, 0);
 
-      nextCandidates.splice(nextIndex, 0, movedCandidate);
-
-      return nextCandidates.map((candidate, index) => ({
-        ...candidate,
-        order: (index + 1) * 10,
-      }));
-    });
+      setDailyQuestAdminCandidates((currentCandidates) =>
+        currentCandidates
+          .map((currentCandidate) =>
+            currentCandidate.id === candidate.id ? savedCandidate : currentCandidate,
+          )
+          .sort((first, second) => first.order - second.order),
+      );
+      await refreshDailyQuestMaster({ includeInactive: true });
+      setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを更新しました。');
+    } catch (error) {
+      console.warn('Daily quest master save failed:', error);
+      setDailyQuestMasterMessage('更新に失敗しました。変更内容を確認してください。');
+    } finally {
+      setIsDailyQuestMasterBusy(false);
+    }
   };
 
-  const addDailyNudgeCandidate = () => {
-    const newCandidateId = createRoutineId('daily-nudge');
+  const moveDailyQuestAdminCandidate = async (candidateId: string, direction: -1 | 1) => {
+    if (!supabase || !authUser || !isAdminUser || isDailyQuestMasterBusy) {
+      return;
+    }
 
-    setDailyNudgeCandidates((currentCandidates) => [
+    const previousCandidates = dailyQuestAdminCandidates;
+    const orderedCandidates = [...previousCandidates].sort(
+      (first, second) => first.order - second.order,
+    );
+    const currentIndex = orderedCandidates.findIndex((candidate) => candidate.id === candidateId);
+    const nextIndex = currentIndex + direction;
+
+    if (
+      currentIndex === -1 ||
+      nextIndex < 0 ||
+      nextIndex >= orderedCandidates.length
+    ) {
+      return;
+    }
+
+    const nextCandidates = [...orderedCandidates];
+    const [movedCandidate] = nextCandidates.splice(currentIndex, 1);
+
+    nextCandidates.splice(nextIndex, 0, movedCandidate);
+
+    const reorderedCandidates = nextCandidates.map((candidate, index) => ({
+      ...candidate,
+      order: (index + 1) * 10,
+    }));
+
+    setDailyQuestAdminCandidates(reorderedCandidates);
+    setIsDailyQuestMasterBusy(true);
+    setDailyQuestMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('daily_quest_master')
+        .upsert(
+          reorderedCandidates.map((candidate) => ({
+            ...getDailyQuestMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          })),
+          { onConflict: 'slug' },
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshDailyQuestMaster({ includeInactive: true });
+      setDailyQuestMasterMessage('並び順を保存しました。');
+    } catch (error) {
+      console.warn('Daily quest master reorder failed:', error);
+      setDailyQuestAdminCandidates(previousCandidates);
+      setDailyQuestMasterMessage('並び替えの保存に失敗しました。');
+    } finally {
+      setIsDailyQuestMasterBusy(false);
+    }
+  };
+
+  const addDailyQuestAdminCandidate = () => {
+    const newCandidateId = createRoutineId('daily-quest');
+
+    setDailyQuestAdminCandidates((currentCandidates) => [
       ...currentCandidates,
       {
         id: newCandidateId,
@@ -5709,8 +6210,13 @@ function App() {
     ]);
   };
 
-  const deleteDailyNudgeCandidate = (candidateId: string) => {
-    const candidate = dailyNudgeCandidates.find(
+  const deleteDailyQuestAdminCandidate = async (candidateId: string) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setDailyQuestMasterMessage('管理者ログインが必要です。');
+      return;
+    }
+
+    const candidate = dailyQuestAdminCandidates.find(
       (currentCandidate) => currentCandidate.id === candidateId,
     );
 
@@ -5719,21 +6225,34 @@ function App() {
     }
 
     const shouldDelete = window.confirm(
-      `「${candidate.text}」を候補一覧から削除しますか？過去の日付に保存済みの日替わりクエストは残ります。`,
+      `「${candidate.text}」を共通候補から削除しますか？過去の日付に保存済みの日替わりクエストは残ります。`,
     );
 
     if (!shouldDelete) {
       return;
     }
 
-    setDailyNudgeCandidates((currentCandidates) =>
-      currentCandidates
-        .filter((currentCandidate) => currentCandidate.id !== candidateId)
-        .map((currentCandidate, index) => ({
-          ...currentCandidate,
-          order: (index + 1) * 10,
-        })),
-    );
+    setIsDailyQuestMasterBusy(true);
+    setDailyQuestMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('daily_quest_master')
+        .delete()
+        .eq('slug', candidate.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshDailyQuestMaster({ includeInactive: true });
+      setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを更新しました。');
+    } catch (error) {
+      console.warn('Daily quest master delete failed:', error);
+      setDailyQuestMasterMessage('削除に失敗しました。');
+    } finally {
+      setIsDailyQuestMasterBusy(false);
+    }
   };
 
   const toggleItemNoteEditor = (dateKey: string, itemId: string) => {
@@ -6296,11 +6815,6 @@ function App() {
     });
   };
 
-  const startEditingItem = (item: RoutineItem) => {
-    setEditingItemId(item.id);
-    setEditingLabel(item.label);
-  };
-
   const finishEditingItem = (item: RoutineItem, sectionId: string) => {
     if (editingItemId !== item.id) {
       return;
@@ -6323,17 +6837,6 @@ function App() {
 
     setEditingItemId(null);
     setEditingLabel('');
-  };
-
-  const toggleSortingSection = (sectionId: string) => {
-    setSortingSectionId((currentSectionId) =>
-      currentSectionId === sectionId ? null : sectionId,
-    );
-    setDraggedItemId(null);
-    setEditingItemId(null);
-    setEditingLabel('');
-    setTimerSettingItemId(null);
-    setNoteEditorTarget(null);
   };
 
   const openEditMode = () => {
@@ -6365,7 +6868,6 @@ function App() {
     setIsEditMode(false);
     setEditModeStartSections(null);
     setLastCopiedSections(null);
-    setSortingSectionId(null);
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
@@ -6385,7 +6887,6 @@ function App() {
     }
 
     setSelectedDate(date);
-    setSortingSectionId(null);
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
@@ -6419,6 +6920,18 @@ function App() {
 
   const addRoutine = (sectionId: string) => {
     if (!canAddRoutineToSection(sectionId)) {
+      setIsQuestSlotGuideOpen(true);
+      setRoutineDrafts((currentDrafts) => {
+        if (!Object.prototype.hasOwnProperty.call(currentDrafts, sectionId)) {
+          return currentDrafts;
+        }
+
+        const nextDrafts = { ...currentDrafts };
+
+        delete nextDrafts[sectionId];
+
+        return nextDrafts;
+      });
       return;
     }
 
@@ -6426,10 +6939,19 @@ function App() {
       ...currentDrafts,
       [sectionId]: currentDrafts[sectionId] ?? '',
     }));
-    setSortingSectionId(null);
     setEditingItemId(null);
     setEditingLabel('');
     setTimerSettingItemId(null);
+  };
+
+  const goToQuestSlotShop = () => {
+    setIsQuestSlotGuideOpen(false);
+    setPage('shop');
+    window.setTimeout(() => {
+      document
+        .getElementById('quest-slot-shop-section')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 80);
   };
 
   const updateRoutineDraft = (sectionId: string, value: string) => {
@@ -6438,6 +6960,10 @@ function App() {
       [sectionId]: value,
     }));
   };
+
+  const getNextCoreRoutineNumber = () =>
+    migrateRoutineNumbers(templateSettings, dateOverrides, dateSnapshots, archivedItems)
+      .nextRoutineNumber;
 
   const discardRoutineDraft = (sectionId: string) => {
     routineDraftComposingSectionsRef.current.delete(sectionId);
@@ -6468,6 +6994,9 @@ function App() {
     }
 
     const newItemId = createRoutineId(sectionId);
+    const routineNumber = isCoreRoutineSectionId(sectionId)
+      ? getNextCoreRoutineNumber()
+      : undefined;
 
     updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
       currentSections.map((section) => {
@@ -6490,13 +7019,13 @@ function App() {
               order: nextOrder,
               source: 'user',
               createdAt: new Date().toISOString(),
+              routineNumber,
             },
           ],
         };
       }),
     );
     discardRoutineDraft(sectionId);
-    setSortingSectionId(null);
     setEditingItemId(null);
     setEditingLabel('');
     setTimerSettingItemId(null);
@@ -6519,12 +7048,15 @@ function App() {
         const itemToArchive = section.items.find((item) => item.id === pendingDelete.id);
 
         if (itemToArchive) {
+          const retiredAt = new Date().toISOString();
+
           archivedItem = {
-            item: { ...itemToArchive },
+            item: { ...itemToArchive, retiredAt },
             sectionId: section.id,
             sectionTitle: section.title,
             target: deleteTarget,
-            archivedAt: new Date().toISOString(),
+            archivedAt: retiredAt,
+            retiredAt,
           };
         }
 
@@ -6559,50 +7091,6 @@ function App() {
     setPendingDelete(null);
   };
 
-  const restoreArchivedItem = (itemId: string) => {
-    const archivedItem = archivedItems[itemId];
-
-    if (!archivedItem) {
-      return;
-    }
-
-    updateSectionsForTarget(archivedItem.target, (currentSections) =>
-      currentSections.map((section) => {
-        if (section.id !== archivedItem.sectionId) {
-          return section;
-        }
-
-        if (section.items.some((item) => item.id === archivedItem.item.id)) {
-          return section;
-        }
-
-        const nextOrder =
-          section.items.length > 0
-            ? Math.max(...section.items.map((item) => item.order)) + 10
-            : 10;
-
-        return {
-          ...section,
-          items: [
-            ...section.items,
-            {
-              ...archivedItem.item,
-              order: nextOrder,
-            },
-          ],
-        };
-      }),
-    );
-
-    setArchivedItems((currentItems) => {
-      const nextItems = { ...currentItems };
-
-      delete nextItems[itemId];
-
-      return nextItems;
-    });
-  };
-
   const changeWeekdayType = (weekday: WeekdayKey, nextType: TemplateKind) => {
     setTemplateSettings((currentSettings) => {
       return {
@@ -6620,10 +7108,10 @@ function App() {
     changeWeekdayType(weekday, currentType === 'normal' ? 'holiday' : 'normal');
   };
 
-  const updateRhythmConfig = (
+  const updateRhythmConfig = <K extends keyof RhythmConfig>(
     template: TemplateKind,
-    field: keyof RhythmConfig,
-    value: string,
+    field: K,
+    value: RhythmConfig[K],
   ) => {
     setRhythmSettings((currentSettings) => ({
       ...currentSettings,
@@ -7279,7 +7767,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void refreshDailyQuestMaster();
+  }, []);
+
+  useEffect(() => {
     authUserRef.current = authUser;
+    void refreshAdminStatus(authUser);
 
     if (!authUser) {
       if (cloudBackupTimerIdRef.current !== null) {
@@ -7562,7 +8055,7 @@ function App() {
     }
 
     const finalConfirmed = window.confirm(
-      '最終確認です。ルーティン、チェック履歴、記録、メモ、タイマー、実績、アーカイブを含む全データを削除します。よろしいですか？',
+      '最終確認です。ルーティン、チェック履歴、記録、メモ、タイマー、実績、削除済みクエストの内部記録を含む全データを削除します。よろしいですか？',
     );
 
     if (!finalConfirmed) {
@@ -7583,7 +8076,6 @@ function App() {
     setIsHistoryEditMode(false);
     setEditModeStartSections(null);
     setLastCopiedSections(null);
-    setSortingSectionId(null);
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
@@ -8526,9 +9018,6 @@ function App() {
     }, 0);
   };
 
-  const isPlayerModeQuestLimitReached = (sections: RoutineSection[]) =>
-    gameMode === 'player' &&
-    countFreeQuestItems(sections) >= getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
   const shopItems: ShopItem[] = [
     {
       id: 'quest-slot-total',
@@ -8565,6 +9054,46 @@ function App() {
       window.setTimeout(() => targetRef.current?.focus(), 240);
     });
   };
+  const getFixedQuestSupportLabel = (fixedKind?: RoutineItem['fixedKind']) => {
+    if (fixedKind === 'wake') {
+      return '決めた時間に起きてみよう';
+    }
+
+    if (fixedKind === 'sleep') {
+      return '決めた時間に寝てみよう';
+    }
+
+    return 'ひとことへ';
+  };
+  const renderQuestBadgeRow = ({
+    kind,
+    onSupportClick,
+    supportLabel,
+  }: {
+    kind: 'fixed' | 'core';
+    onSupportClick?: () => void;
+    supportLabel: string;
+  }) => (
+    <span className="quest-badge-row">
+      <span className="quest-kind-mini-badge" data-kind={kind}>
+        {kind === 'fixed' ? '固定クエスト' : 'コアルーティン'}
+      </span>
+      {onSupportClick ? (
+        <button
+          className="quest-support-badge"
+          onClick={(event) => {
+            event.stopPropagation();
+            onSupportClick();
+          }}
+          type="button"
+        >
+          {supportLabel}
+        </button>
+      ) : (
+        <span className="quest-support-badge">{supportLabel}</span>
+      )}
+    </span>
+  );
   const getCoreRoutineEntryKey = (coreRoutineId: CoreRoutineId) => `core:${coreRoutineId}`;
   const getSectionCoreRoutineEntries = (sectionId: string): RoutineRenderEntry[] =>
     dailySectionIds.includes(sectionId as StartSection)
@@ -8589,140 +9118,172 @@ function App() {
     })),
     ...(options.includeCoreRoutines ? getSectionCoreRoutineEntries(section.id) : []),
   ].sort((first, second) => first.order - second.order);
-  const moveCoreRoutineToSection = (
-    coreRoutineId: CoreRoutineId,
-    nextSectionId: StartSection,
-  ) => {
-    setCoreRoutinePlacements((currentPlacements) => {
-      const sectionItems = displaySections.find((section) => section.id === nextSectionId)?.items ?? [];
-      const coreOrders = coreRoutineDefinitions
-        .filter((definition) =>
-          definition.id !== coreRoutineId &&
-          currentPlacements[definition.id]?.sectionId === nextSectionId,
-        )
-        .map((definition) => currentPlacements[definition.id]?.order ?? 0);
-      const nextOrder = Math.max(
-        0,
-        ...sectionItems.filter((item) => !item.fixedKind).map((item) => item.order),
-        ...coreOrders,
-      ) + 10;
+  const getCoreRoutineIdFromEntryKey = (entryKey: string): CoreRoutineId | null => {
+    const coreRoutineId = entryKey.replace(/^core:/, '') as CoreRoutineId;
 
-      return {
+    return coreRoutineDefinitions.some((definition) => definition.id === coreRoutineId)
+      ? coreRoutineId
+      : null;
+  };
+  const getFixedQuestKindFromEntryKey = (entryKey: string): 'wake' | 'sleep' | null => {
+    if (entryKey === 'morning-wake-up') {
+      return 'wake';
+    }
+
+    if (entryKey === 'night-sleep') {
+      return 'sleep';
+    }
+
+    return null;
+  };
+  const getTargetEntryOrder = (
+    draggedKey: string,
+    targetSectionId: StartSection,
+    beforeKey: string | null,
+  ) => {
+    const targetSection = displaySections.find((section) => section.id === targetSectionId);
+
+    if (!targetSection) {
+      return 10;
+    }
+
+    const orderedKeys = getMixedRoutineEntries(targetSection, { includeCoreRoutines: true })
+      .map((entry) => entry.key)
+      .filter((entryKey) => entryKey !== draggedKey);
+    const insertIndex = beforeKey ? orderedKeys.indexOf(beforeKey) : orderedKeys.length;
+    const safeInsertIndex = insertIndex >= 0 ? insertIndex : orderedKeys.length;
+
+    orderedKeys.splice(safeInsertIndex, 0, draggedKey);
+
+    return ((orderedKeys.indexOf(draggedKey) >= 0 ? orderedKeys.indexOf(draggedKey) : safeInsertIndex) + 1) * 10;
+  };
+  const moveQuestEntry = (
+    draggedKey: string,
+    targetSectionId: string,
+    beforeKey: string | null,
+  ) => {
+    if (!dailySectionIds.includes(targetSectionId as StartSection)) {
+      return;
+    }
+
+    if (draggedKey === beforeKey) {
+      return;
+    }
+
+    const targetStartSectionId = targetSectionId as StartSection;
+    const nextOrder = getTargetEntryOrder(draggedKey, targetStartSectionId, beforeKey);
+    const coreRoutineId = getCoreRoutineIdFromEntryKey(draggedKey);
+    const fixedQuestKind = getFixedQuestKindFromEntryKey(draggedKey);
+
+    if (coreRoutineId) {
+      setCoreRoutinePlacements((currentPlacements) => ({
         ...currentPlacements,
         [coreRoutineId]: {
-          sectionId: nextSectionId,
+          sectionId: targetStartSectionId,
           order: nextOrder,
         },
-      };
-    });
-  };
-  const reorderMixedRoutineEntry = (
-    sectionId: string,
-    draggedKey: string,
-    targetKey: string,
-  ) => {
-    if (draggedKey === targetKey || !dailySectionIds.includes(sectionId as StartSection)) {
+      }));
       return;
     }
 
-    const currentSections = removeFixedRoutineItems(getSectionsForTarget(
-      templateSettings,
-      dateOverrides,
-      dateSnapshots,
-      getUpdateTargetForSection(sectionId),
-      todayKey,
-    ));
-    const section = currentSections.find((currentSection) => currentSection.id === sectionId);
+    if (fixedQuestKind) {
+      const targetTemplate = page === 'today' ? selectedDateTemplate : editTargetKey;
 
-    if (!section) {
+      setRhythmSettings((currentSettings) => ({
+        ...currentSettings,
+        [targetTemplate]: {
+          ...currentSettings[targetTemplate],
+          fixedQuestPlacements: {
+            ...currentSettings[targetTemplate].fixedQuestPlacements,
+            [fixedQuestKind]: {
+              sectionId: targetStartSectionId,
+              order: nextOrder,
+            },
+          },
+        },
+      }));
       return;
     }
 
-    const orderedEntries = getMixedRoutineEntries(section, { includeCoreRoutines: true });
-    const draggedIndex = orderedEntries.findIndex((entry) => entry.key === draggedKey);
-    const targetIndex = orderedEntries.findIndex((entry) => entry.key === targetKey);
+    updateSectionsForTarget(getUpdateTargetForSection(targetSectionId), (currentSections) => {
+      const draggedItem = currentSections
+        .flatMap((section) => section.items)
+        .find((item) => item.id === draggedKey);
 
-    if (draggedIndex === -1 || targetIndex === -1) {
-      return;
-    }
+      if (!draggedItem) {
+        return currentSections;
+      }
 
-    const nextEntries = [...orderedEntries];
-    const [draggedEntry] = nextEntries.splice(draggedIndex, 1);
+      const targetSection = currentSections.find((section) => section.id === targetSectionId);
 
-    nextEntries.splice(targetIndex, 0, draggedEntry);
+      if (!targetSection) {
+        return currentSections;
+      }
 
-    const nextOrders = new Map(nextEntries.map((entry, index) => [
-      entry.key,
-      (index + 1) * 10,
-    ]));
+      const nextSections = currentSections.map((section) => ({
+        ...section,
+        items: section.items.filter((item) => item.id !== draggedKey),
+      }));
 
-    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentTargetSections) =>
-      currentTargetSections.map((currentSection) => {
-        if (currentSection.id !== sectionId) {
-          return currentSection;
+      return nextSections.map((section) => {
+        const nextItems = [...section.items];
+
+        if (section.id === targetSectionId) {
+          const insertIndex = beforeKey
+            ? nextItems.findIndex((item) => item.id === beforeKey)
+            : nextItems.length;
+          const safeInsertIndex = insertIndex >= 0 ? insertIndex : nextItems.length;
+
+          nextItems.splice(safeInsertIndex, 0, draggedItem);
         }
 
         return {
-          ...currentSection,
-          items: currentSection.items.map((item) => ({
+          ...section,
+          items: nextItems.map((item, index) => ({
             ...item,
-            order: nextOrders.get(item.id) ?? item.order,
+            order: (index + 1) * 10,
           })),
         };
-      }),
-    );
-
-    setCoreRoutinePlacements((currentPlacements) => {
-      const nextPlacements = { ...currentPlacements };
-
-      coreRoutineDefinitions.forEach((definition) => {
-        const entryKey = getCoreRoutineEntryKey(definition.id);
-        const nextOrder = nextOrders.get(entryKey);
-
-        if (nextOrder !== undefined) {
-          nextPlacements[definition.id] = {
-            sectionId: sectionId as StartSection,
-            order: nextOrder,
-          };
-        }
       });
-
-      return nextPlacements;
     });
   };
+  const moveQuestEntryAtPoint = (
+    draggedKey: string,
+    clientX: number,
+    clientY: number,
+    shouldCommit = false,
+  ) => {
+    const targetElement = document.elementFromPoint(clientX, clientY);
+    const targetItem = targetElement?.closest<HTMLElement>(
+      '.routine-item[data-routine-kind="quest"]',
+    );
+    const targetItemId = targetItem?.dataset.routineId;
+    const targetSectionId =
+      targetItem?.dataset.sectionId ??
+      targetElement?.closest<HTMLElement>('.routine-section')?.dataset.sectionId;
 
-  const wakeRoutineItem = displaySections
-    .flatMap((section) => section.items)
-    .find((item) => item.fixedKind === 'wake');
-  const sleepRoutineItem = displaySections
-    .flatMap((section) => section.items)
-    .find((item) => item.fixedKind === 'sleep');
-  const activitySections = displaySections.map((section) => ({
-    ...section,
-    items: section.items.filter((item) => !item.fixedKind),
-  }));
-  const bonusSection = activitySections.find((section) => section.id === bonusSectionId);
-  const dailyActivitySections = activitySections.filter((section) => section.id !== bonusSectionId);
-  const routineRenderSections: RoutineSection[] = [
-    ...(wakeRoutineItem
-      ? [{
-          id: 'wake-milestone',
-          title: '起床',
-          order: -100,
-          items: [wakeRoutineItem],
-        }]
-      : []),
-    ...dailyActivitySections,
-    ...(sleepRoutineItem
-      ? [{
-          id: 'sleep-milestone',
-          title: '就寝',
-          order: 10000,
-          items: [sleepRoutineItem],
-        }]
-      : []),
-    ...(bonusSection ? [bonusSection] : []),
-  ];
+    if (
+      !targetSectionId ||
+      !dailySectionIds.includes(targetSectionId as StartSection)
+    ) {
+      return false;
+    }
+
+    setDropRoutineSectionId(targetSectionId);
+    if (!shouldCommit || targetItemId === draggedKey) {
+      return true;
+    }
+
+    moveQuestEntry(
+      draggedKey,
+      targetSectionId,
+      targetItemId && targetItemId !== draggedKey ? targetItemId : null,
+    );
+
+    return true;
+  };
+
+  const routineRenderSections = displaySections;
   const activeRecordViewOption =
     recordViewOptions.find((option) => option.key === recordView) ?? recordViewOptions[0];
   const activeRecordHeading = recordViewHeadings[recordView];
@@ -9206,6 +9767,10 @@ function App() {
                     <dt>状態</dt>
                     <dd>アカウント接続中</dd>
                   </div>
+                  <div>
+                    <dt>管理者</dt>
+                    <dd>{isAdminChecking ? '確認中…' : isAdminUser ? '有効' : '通常ユーザー'}</dd>
+                  </div>
                 </dl>
                 <button
                   disabled={isAuthBusy}
@@ -9267,6 +9832,145 @@ function App() {
               </div>
             )}
             {authMessage && <p className="account-message">{authMessage}</p>}
+          </section>
+        )}
+
+        {page === 'settings' && isAdminUser && (
+          <section className="daily-nudge-admin-settings" aria-label="管理">
+            <div className="settings-header">
+              <div>
+                <h2>管理</h2>
+                <p>全プレイヤー共通のhibitin設定を管理します。</p>
+              </div>
+              <button
+                disabled={isDailyQuestMasterBusy}
+                onClick={() => void refreshDailyQuestMaster({ includeInactive: true })}
+                type="button"
+              >
+                再取得
+              </button>
+            </div>
+            <div className="supabase-connection-status" data-status={dailyQuestMasterStatus}>
+              <span>日替わりクエスト共通マスター</span>
+              <strong>{dailyQuestMasterStatusLabels[dailyQuestMasterStatus]}</strong>
+            </div>
+            <div className="settings-header compact-settings-header">
+              <div>
+                <h3>日替わりクエスト管理</h3>
+                <p>
+                  ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
+                </p>
+              </div>
+            </div>
+            <div className="daily-nudge-admin-list">
+              {[...dailyQuestAdminCandidates]
+                .sort((first, second) => first.order - second.order)
+                .map((candidate, index, orderedCandidates) => (
+                  <article className="daily-nudge-admin-card" key={candidate.id}>
+                    <div className="daily-nudge-admin-card-header">
+                      <label>
+                        <input
+                          checked={candidate.enabled}
+                          disabled={isDailyQuestMasterBusy}
+                          onChange={(event) => {
+                            updateDailyQuestAdminCandidate(
+                              candidate.id,
+                              'enabled',
+                              event.target.checked,
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{candidate.enabled ? '有効' : '無効'}</span>
+                      </label>
+                      <div className="daily-nudge-admin-card-actions">
+                        <button
+                          disabled={isDailyQuestMasterBusy || index === 0}
+                          onClick={() => void moveDailyQuestAdminCandidate(candidate.id, -1)}
+                          type="button"
+                        >
+                          上へ
+                        </button>
+                        <button
+                          disabled={isDailyQuestMasterBusy || index === orderedCandidates.length - 1}
+                          onClick={() => void moveDailyQuestAdminCandidate(candidate.id, 1)}
+                          type="button"
+                        >
+                          下へ
+                        </button>
+                        <button
+                          disabled={isDailyQuestMasterBusy}
+                          onClick={() => void deleteDailyQuestAdminCandidate(candidate.id)}
+                          type="button"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                    <label>
+                      <span>提案文</span>
+                      <textarea
+                        disabled={isDailyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateDailyQuestAdminCandidate(candidate.id, 'text', event.target.value)
+                        }
+                        rows={2}
+                        value={candidate.text}
+                      />
+                    </label>
+                    <label>
+                      <span>完了メッセージ</span>
+                      <input
+                        disabled={isDailyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateDailyQuestAdminCandidate(
+                            candidate.id,
+                            'completionMessage',
+                            event.target.value,
+                          )
+                        }
+                        type="text"
+                        value={candidate.completionMessage}
+                      />
+                    </label>
+                    <label>
+                      <span>カテゴリ</span>
+                      <input
+                        disabled={isDailyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateDailyQuestAdminCandidate(candidate.id, 'category', event.target.value)
+                        }
+                        type="text"
+                        value={candidate.category}
+                      />
+                    </label>
+                    <p className="daily-nudge-admin-id">
+                      slug: {candidate.id}
+                      {candidate.masterId ? ` / id: ${candidate.masterId}` : ' / 未保存'}
+                    </p>
+                    <div className="daily-nudge-admin-card-actions">
+                      <button
+                        disabled={isDailyQuestMasterBusy}
+                        onClick={() => void saveDailyQuestMasterCandidate(candidate)}
+                        type="button"
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </article>
+                ))}
+            </div>
+            <button
+              className="daily-nudge-add-button"
+              disabled={isDailyQuestMasterBusy}
+              onClick={addDailyQuestAdminCandidate}
+              type="button"
+            >
+              候補追加
+            </button>
+            {dailyQuestMasterMessage && (
+              <p className="account-message">{dailyQuestMasterMessage}</p>
+            )}
           </section>
         )}
 
@@ -9501,107 +10205,6 @@ function App() {
                 初期値に戻す
               </button>
             </div>
-          </section>
-        )}
-
-        {page === 'settings' && gameMode === 'developer' && (
-          <section className="daily-nudge-admin-settings" aria-label="日替わりクエスト管理">
-            <div className="settings-header">
-              <div>
-                <h2>日替わりクエスト管理</h2>
-                <p>
-                  毎日ひとつだけ表示する小さな日替わりクエストを管理します。保存済みの日付記録は候補を編集・削除しても変わりません。
-                </p>
-              </div>
-            </div>
-            <div className="daily-nudge-admin-list">
-              {[...dailyNudgeCandidates]
-                .sort((first, second) => first.order - second.order)
-                .map((candidate, index, orderedCandidates) => (
-                  <article className="daily-nudge-admin-card" key={candidate.id}>
-                    <div className="daily-nudge-admin-card-header">
-                      <label>
-                        <input
-                          checked={candidate.enabled}
-                          onChange={(event) =>
-                            updateDailyNudgeCandidate(
-                              candidate.id,
-                              'enabled',
-                              event.target.checked,
-                            )
-                          }
-                          type="checkbox"
-                        />
-                        <span>{candidate.enabled ? '有効' : '無効'}</span>
-                      </label>
-                      <div className="daily-nudge-admin-card-actions">
-                        <button
-                          disabled={index === 0}
-                          onClick={() => moveDailyNudgeCandidate(candidate.id, -1)}
-                          type="button"
-                        >
-                          上へ
-                        </button>
-                        <button
-                          disabled={index === orderedCandidates.length - 1}
-                          onClick={() => moveDailyNudgeCandidate(candidate.id, 1)}
-                          type="button"
-                        >
-                          下へ
-                        </button>
-                        <button
-                          onClick={() => deleteDailyNudgeCandidate(candidate.id)}
-                          type="button"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </div>
-                    <label>
-                      <span>提案文</span>
-                      <textarea
-                        onChange={(event) =>
-                          updateDailyNudgeCandidate(candidate.id, 'text', event.target.value)
-                        }
-                        rows={2}
-                        value={candidate.text}
-                      />
-                    </label>
-                    <label>
-                      <span>完了メッセージ</span>
-                      <input
-                        onChange={(event) =>
-                          updateDailyNudgeCandidate(
-                            candidate.id,
-                            'completionMessage',
-                            event.target.value,
-                          )
-                        }
-                        type="text"
-                        value={candidate.completionMessage}
-                      />
-                    </label>
-                    <label>
-                      <span>カテゴリ</span>
-                      <input
-                        onChange={(event) =>
-                          updateDailyNudgeCandidate(candidate.id, 'category', event.target.value)
-                        }
-                        type="text"
-                        value={candidate.category}
-                      />
-                    </label>
-                    <p className="daily-nudge-admin-id">ID: {candidate.id}</p>
-                  </article>
-                ))}
-            </div>
-            <button
-              className="daily-nudge-add-button"
-              onClick={addDailyNudgeCandidate}
-              type="button"
-            >
-              候補追加
-            </button>
           </section>
         )}
 
@@ -9857,36 +10460,54 @@ function App() {
           )}
           {routineRenderSections.map((section) => {
             const isBonusSection = section.id === bonusSectionId;
-            const isMilestoneSection =
-              section.id === 'wake-milestone' || section.id === 'sleep-milestone';
             const canEditSection =
-              !isMilestoneSection && (canEditRoutines || (page === 'today' && isBonusSection));
-            const isPlayerLimitReached =
-              !isBonusSection && isPlayerModeQuestLimitReached(displaySections);
-
+              canEditRoutines || (page === 'today' && isBonusSection);
             return (
             <section
               className="routine-section"
               data-bonus={isBonusSection ? 'true' : 'false'}
-              data-milestone={isMilestoneSection ? 'true' : 'false'}
-              data-milestone-kind={
-                section.id === 'wake-milestone'
-                  ? 'wake'
-                  : section.id === 'sleep-milestone'
-                  ? 'sleep'
-                  : undefined
-              }
+              data-drop-target={dropRoutineSectionId === section.id ? 'true' : 'false'}
+              data-section-id={section.id}
               key={section.id}
+              onDragEnter={(event) => {
+                if (
+                  draggedItemId &&
+                  canEditRoutines &&
+                  dailySectionIds.includes(section.id as StartSection)
+                ) {
+                  event.preventDefault();
+                  setDropRoutineSectionId(section.id);
+                }
+              }}
+              onDragOver={(event) => {
+                if (
+                  draggedItemId &&
+                  canEditRoutines &&
+                  dailySectionIds.includes(section.id as StartSection)
+                ) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }
+              }}
+              onDrop={(event) => {
+                if (
+                  draggedItemId &&
+                  canEditRoutines &&
+                  dailySectionIds.includes(section.id as StartSection)
+                ) {
+                  event.preventDefault();
+                  moveQuestEntry(draggedItemId, section.id, null);
+                }
+
+                setDraggedItemId(null);
+                setDropRoutineSectionId(null);
+              }}
             >
               <div className="section-header">
                 <div>
                   <h2>
                     <span aria-hidden="true">
-                      {section.id === 'wake-milestone'
-                        ? '⏰'
-                        : section.id === 'sleep-milestone'
-                        ? '🛌'
-                        : sectionIconLabels[section.id]}
+                      {sectionIconLabels[section.id]}
                     </span>
                     {section.title}
                   </h2>
@@ -9894,21 +10515,10 @@ function App() {
                     <p className="section-note">追加でやったこと</p>
                   )}
                 </div>
-                {canEditRoutines && !isMilestoneSection && (
-                  <div className="section-actions">
-                    <button
-                      className="sort-button"
-                      onClick={() => toggleSortingSection(section.id)}
-                      type="button"
-                    >
-                      {sortingSectionId === section.id ? '完了' : '並び替え'}
-                    </button>
-                  </div>
-              )}
               </div>
               <div className="routine-items">
                 {getMixedRoutineEntries(section, {
-                  includeCoreRoutines: page === 'today' && !isMilestoneSection && !isBonusSection,
+                  includeCoreRoutines: page === 'today' && !isBonusSection,
                 }).map((entry) => {
                   if (entry.kind === 'core') {
                     const coreRoutine = entry.coreRoutine;
@@ -9926,12 +10536,12 @@ function App() {
                         data-checked={isCompleted ? 'true' : 'false'}
                         data-core-routine="true"
                         data-dragging={draggedItemId === entry.key ? 'true' : 'false'}
+                        data-routine-kind="quest"
                         data-routine-id={entry.key}
                         data-section-id={section.id}
-                        draggable={canEditCoreRoutine && sortingSectionId === section.id}
                         key={entry.key}
                         onClick={(event) => {
-                          if ((event.target as HTMLElement).closest('select')) {
+                          if ((event.target as HTMLElement).closest('.drag-handle')) {
                             return;
                           }
 
@@ -9939,7 +10549,7 @@ function App() {
                         }}
                         onDragEnd={() => setDraggedItemId(null)}
                         onDragOver={(event) => {
-                          if (canEditCoreRoutine && sortingSectionId === section.id) {
+                          if (canEditCoreRoutine) {
                             event.preventDefault();
                           }
                         }}
@@ -9953,41 +10563,46 @@ function App() {
                           const draggedId =
                             draggedItemId || event.dataTransfer.getData('text/plain');
 
-                          if (sortingSectionId === section.id && draggedId) {
-                            reorderMixedRoutineEntry(section.id, draggedId, entry.key);
+                          if (draggedId) {
+                            moveQuestEntry(draggedId, section.id, entry.key);
                           }
 
                           setDraggedItemId(null);
+                          setDropRoutineSectionId(null);
                         }}
                       >
-                        {canEditCoreRoutine && sortingSectionId === section.id && (
+                        {canEditCoreRoutine && (
                           <span
                             className="drag-handle"
-                            aria-hidden="true"
+                            aria-label={`${coreRoutineLabel}を移動`}
+                            role="button"
+                            tabIndex={0}
                             onPointerDown={(event) => {
+                              event.preventDefault();
                               setDraggedItemId(entry.key);
                               event.currentTarget.setPointerCapture(event.pointerId);
                             }}
                             onPointerMove={(event) => {
-                              if (sortingSectionId !== section.id) {
-                                return;
+                              if (event.clientY < 90) {
+                                window.scrollBy({ top: -12, behavior: 'auto' });
+                              } else if (window.innerHeight - event.clientY < 120) {
+                                window.scrollBy({ top: 12, behavior: 'auto' });
                               }
 
-                              const targetElement = document.elementFromPoint(
-                                event.clientX,
-                                event.clientY,
-                              );
-                              const targetItem = targetElement?.closest<HTMLElement>(
-                                `.routine-item[data-section-id="${section.id}"]`,
-                              );
-                              const targetItemId = targetItem?.dataset.routineId;
+                              moveQuestEntryAtPoint(entry.key, event.clientX, event.clientY);
+                            }}
+                            onPointerCancel={(event) => {
+                              setDraggedItemId(null);
+                              setDropRoutineSectionId(null);
 
-                              if (targetItemId && targetItemId !== entry.key) {
-                                reorderMixedRoutineEntry(section.id, entry.key, targetItemId);
+                              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                event.currentTarget.releasePointerCapture(event.pointerId);
                               }
                             }}
                             onPointerUp={(event) => {
+                              moveQuestEntryAtPoint(entry.key, event.clientX, event.clientY, true);
                               setDraggedItemId(null);
+                              setDropRoutineSectionId(null);
 
                               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                                 event.currentTarget.releasePointerCapture(event.pointerId);
@@ -10016,37 +10631,12 @@ function App() {
                             <span aria-hidden="true">{coreRoutine.icon}</span>
                             {coreRoutineLabel}
                           </button>
-                          <span className="quest-kind-mini-badge" data-kind="fixed">
-                            固定クエスト
-                          </span>
+                          {renderQuestBadgeRow({
+                            kind: 'fixed',
+                            onSupportClick: () => focusDailyRecordField(coreRoutine.kind),
+                            supportLabel: 'ひとことへ',
+                          })}
                         </div>
-                        {canEditCoreRoutine && (
-                          <label className="core-routine-section-select">
-                            <span>場所</span>
-                            <select
-                              aria-label={`${coreRoutineLabel}の時間帯`}
-                              onChange={(event) =>
-                                moveCoreRoutineToSection(
-                                  coreRoutine.id,
-                                  event.target.value as StartSection,
-                                )
-                              }
-                              value={coreRoutinePlacements[coreRoutine.id].sectionId}
-                            >
-                              {dailySectionIds.map((sectionId) => (
-                                <option key={sectionId} value={sectionId}>
-                                  {sectionId === 'morning'
-                                    ? '朝'
-                                    : sectionId === 'noon'
-                                    ? '昼'
-                                    : sectionId === 'evening'
-                                    ? '夕'
-                                    : '夜'}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
                       </div>
                     );
                   }
@@ -10055,6 +10645,9 @@ function App() {
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = fixedRoutineIds.has(item.id);
+                  const canDragQuest =
+                    canEditRoutines &&
+                    isCoreRoutineSectionId(section.id);
                   const canConfigureTimer =
                     !isFixedItem &&
                     (page === 'settings' || (page === 'today' && isToday && isEditMode));
@@ -10080,69 +10673,67 @@ function App() {
                       data-fixed={isFixedItem ? 'true' : 'false'}
                       data-checked={isCheckMode && checkedItems[item.id] ? 'true' : 'false'}
                       data-dragging={draggedItemId === item.id ? 'true' : 'false'}
+                      data-routine-kind={canDragQuest ? 'quest' : undefined}
                       data-routine-id={item.id}
                       data-section-id={section.id}
-                      draggable={canEditRoutines && sortingSectionId === section.id && !isFixedItem}
                       onDragEnd={() => setDraggedItemId(null)}
                       onDragOver={(event) => {
-                        if (canEditRoutines && sortingSectionId === section.id && !isFixedItem) {
+                        if (canDragQuest && draggedItemId) {
                           event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
                         }
-                      }}
-                      onDragStart={(event) => {
-                        if (isFixedItem) {
-                          return;
-                        }
-
-                        setDraggedItemId(item.id);
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', item.id);
                       }}
                       onDrop={(event) => {
-                        if (isFixedItem) {
+                        if (!canDragQuest) {
                           return;
                         }
 
                         event.preventDefault();
+                        event.stopPropagation();
                         const draggedId =
                           draggedItemId || event.dataTransfer.getData('text/plain');
 
-                        if (sortingSectionId === section.id && draggedId) {
-                          reorderMixedRoutineEntry(section.id, draggedId, item.id);
+                        if (draggedId) {
+                          moveQuestEntry(draggedId, section.id, item.id);
                         }
 
                         setDraggedItemId(null);
+                        setDropRoutineSectionId(null);
                       }}
                       key={item.id}
                     >
-                      {canEditRoutines && sortingSectionId === section.id && !isFixedItem && (
+                      {canDragQuest && (
                         <span
                           className="drag-handle"
-                          aria-hidden="true"
+                          aria-label={`${item.label}を移動`}
+                          role="button"
+                          tabIndex={0}
                           onPointerDown={(event) => {
+                            event.preventDefault();
                             setDraggedItemId(item.id);
                             event.currentTarget.setPointerCapture(event.pointerId);
                           }}
                           onPointerMove={(event) => {
-                            if (sortingSectionId !== section.id) {
-                              return;
+                            if (event.clientY < 90) {
+                              window.scrollBy({ top: -12, behavior: 'auto' });
+                            } else if (window.innerHeight - event.clientY < 120) {
+                              window.scrollBy({ top: 12, behavior: 'auto' });
                             }
 
-                            const targetElement = document.elementFromPoint(
-                              event.clientX,
-                              event.clientY,
-                            );
-                            const targetItem = targetElement?.closest<HTMLElement>(
-                              `.routine-item[data-section-id="${section.id}"]`,
-                            );
-                            const targetItemId = targetItem?.dataset.routineId;
+                            moveQuestEntryAtPoint(item.id, event.clientX, event.clientY);
+                          }}
+                          onPointerCancel={(event) => {
+                            setDraggedItemId(null);
+                            setDropRoutineSectionId(null);
 
-                            if (targetItemId && targetItemId !== item.id) {
-                              reorderMixedRoutineEntry(section.id, item.id, targetItemId);
+                            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                              event.currentTarget.releasePointerCapture(event.pointerId);
                             }
                           }}
                           onPointerUp={(event) => {
+                            moveQuestEntryAtPoint(item.id, event.clientX, event.clientY, true);
                             setDraggedItemId(null);
+                            setDropRoutineSectionId(null);
 
                             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                               event.currentTarget.releasePointerCapture(event.pointerId);
@@ -10198,23 +10789,25 @@ function App() {
                         ) : (
                           <button
                             className="routine-name-button"
-                            disabled={isFixedItem || !canEditSection}
-                            onClick={() => {
-                              if (!isFixedItem && canEditSection) {
-                                startEditingItem(item);
-                              }
-                            }}
+                            disabled
                             type="button"
                           >
-                            {item.label}
+                            {getCoreRoutineDisplayLabel(item)}
                           </button>
                         )}
-                        <span
-                          className="quest-kind-mini-badge"
-                          data-kind={isFixedItem ? 'fixed' : 'core'}
-                        >
-                          {isFixedItem ? '固定クエスト' : 'コアルーティン'}
-                        </span>
+                        {renderQuestBadgeRow({
+                          kind: isFixedItem ? 'fixed' : 'core',
+                          onSupportClick:
+                            !isFixedItem && canEditRoutines && canEditSection
+                              ? () => {
+                                setEditingItemId(item.id);
+                                setEditingLabel(item.label);
+                              }
+                              : undefined,
+                          supportLabel: isFixedItem
+                            ? getFixedQuestSupportLabel(item.fixedKind)
+                            : '変更可能',
+                        })}
                       </div>
                       {page === 'today' &&
                         !isEditMode &&
@@ -10369,7 +10962,7 @@ function App() {
                   </div>
                 )}
               </div>
-              {canEditSection && !isPlayerLimitReached && !Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
+              {canEditSection && !Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
                 <button
                   className="add-button section-add-button"
                   onClick={() => addRoutine(section.id)}
@@ -10377,9 +10970,6 @@ function App() {
                 >
                   ＋追加
                 </button>
-              )}
-              {canEditSection && isPlayerLimitReached && (
-                <p className="quest-limit-note">ショップでコアルーティン枠を増やせます</p>
               )}
             </section>
             );
@@ -11503,7 +12093,6 @@ function App() {
                         currentDate && getDateKey(currentDate) === day.dateKey ? null : day.date,
                       );
                       setIsHistoryEditMode(false);
-                      setSortingSectionId(null);
                       setDraggedItemId(null);
                       setEditingItemId(null);
                       setEditingLabel('');
@@ -11548,7 +12137,6 @@ function App() {
                       onClick={() => {
                         setHistorySelectedDate(null);
                         setIsHistoryEditMode(false);
-                        setSortingSectionId(null);
                         setDraggedItemId(null);
                         setEditingItemId(null);
                         setEditingLabel('');
@@ -11563,7 +12151,6 @@ function App() {
                       className="edit-mode-button history-edit-button"
                       onClick={() => {
                         setIsHistoryEditMode((current) => !current);
-                        setSortingSectionId(null);
                         setDraggedItemId(null);
                         setEditingItemId(null);
                         setEditingLabel('');
@@ -11720,9 +12307,6 @@ function App() {
                 <div className="history-routine-list">
                   {historyDisplaySections.map((section) => {
                     const isBonusSection = section.id === bonusSectionId;
-                    const isPlayerLimitReached =
-                      !isBonusSection && isPlayerModeQuestLimitReached(historyDisplaySections);
-
                     return (
                     <section
                       className="history-routine-section"
@@ -11739,15 +12323,6 @@ function App() {
                           <p className="section-note">ボーナスログ</p>
                         )}
                       </div>
-                      {isHistoryEditMode && (
-                        <button
-                          className="sort-button"
-                          onClick={() => toggleSortingSection(section.id)}
-                          type="button"
-                        >
-                          {sortingSectionId === section.id ? '完了' : '並び替え'}
-                        </button>
-                      )}
                     </div>
                     <div className="history-routine-items">
                       {getMixedRoutineEntries(section, {
@@ -11785,9 +12360,11 @@ function App() {
                                   <span aria-hidden="true">{coreRoutine.icon}</span>
                                   {coreRoutine.label.replace('今日', 'その日')}
                                 </button>
-                                <span className="quest-kind-mini-badge" data-kind="fixed">
-                                  固定クエスト
-                                </span>
+                                {renderQuestBadgeRow({
+                                  kind: 'fixed',
+                                  onSupportClick: () => focusDailyRecordField(coreRoutine.kind, 'history'),
+                                  supportLabel: 'ひとことへ',
+                                })}
                               </span>
                             </div>
                           );
@@ -11811,52 +12388,8 @@ function App() {
                           data-dragging={draggedItemId === item.id ? 'true' : 'false'}
                           data-routine-id={item.id}
                           data-section-id={section.id}
-                          draggable={
-                            isHistoryEditMode &&
-                            sortingSectionId === section.id &&
-                            !isFixedItem
-                          }
                           key={item.id}
-                          onDragEnd={() => setDraggedItemId(null)}
-                          onDragOver={(event) => {
-                            if (
-                              isHistoryEditMode &&
-                              sortingSectionId === section.id &&
-                              !isFixedItem
-                            ) {
-                              event.preventDefault();
-                            }
-                          }}
-                          onDragStart={(event) => {
-                            if (isFixedItem) {
-                              return;
-                            }
-
-                            setDraggedItemId(item.id);
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('text/plain', item.id);
-                          }}
-                          onDrop={(event) => {
-                            if (isFixedItem) {
-                              return;
-                            }
-
-                            event.preventDefault();
-                            const draggedId =
-                              draggedItemId || event.dataTransfer.getData('text/plain');
-
-                            if (sortingSectionId === section.id && draggedId) {
-                              reorderMixedRoutineEntry(section.id, draggedId, item.id);
-                            }
-
-                            setDraggedItemId(null);
-                          }}
                         >
-                          {isHistoryEditMode && sortingSectionId === section.id && !isFixedItem && (
-                            <span className="drag-handle" aria-hidden="true">
-                              ☰
-                            </span>
-                          )}
                           <input
                             aria-label={`${item.label}のチェック状態`}
                             checked={Boolean(historyCheckedItems[item.id])}
@@ -11885,26 +12418,28 @@ function App() {
                             ) : (
                               <button
                                 className="history-routine-name-button"
-                                disabled={isFixedItem || !isHistoryEditMode}
-                                onClick={() => {
-                                  if (!isFixedItem && isHistoryEditMode) {
-                                    startEditingItem(item);
-                                  }
-                                }}
+                                disabled
                                 type="button"
                               >
-                                {item.label}
+                                {getCoreRoutineDisplayLabel(item)}
                               </button>
                             )}
                             {item.time && (
                               <span className="fixed-time-display">{item.time}</span>
                             )}
-                            <span
-                              className="quest-kind-mini-badge"
-                              data-kind={isFixedItem ? 'fixed' : 'core'}
-                            >
-                              {isFixedItem ? '固定クエスト' : 'コアルーティン'}
-                            </span>
+                            {renderQuestBadgeRow({
+                              kind: isFixedItem ? 'fixed' : 'core',
+                              onSupportClick:
+                                !isFixedItem && isHistoryEditMode
+                                  ? () => {
+                                    setEditingItemId(item.id);
+                                    setEditingLabel(item.label);
+                                  }
+                                  : undefined,
+                              supportLabel: isFixedItem
+                                ? getFixedQuestSupportLabel(item.fixedKind)
+                                : '変更可能',
+                            })}
                           </span>
                           {historyItemTimerSeconds && !isHistoryEditMode && (
                             <span className="timer-badge">
@@ -12032,7 +12567,6 @@ function App() {
                       )}
                     </div>
                     {isHistoryEditMode &&
-                      !isPlayerLimitReached &&
                       !Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
                       <button
                         className="add-button section-add-button"
@@ -12041,9 +12575,6 @@ function App() {
                       >
                         ＋追加
                       </button>
-                    )}
-                    {isHistoryEditMode && isPlayerLimitReached && (
-                      <p className="quest-limit-note">ショップでコアルーティン枠を増やせます</p>
                     )}
                     </section>
                     );
@@ -12103,114 +12634,117 @@ function App() {
                 まずは今日のルーティンをチェックすると、ここに実績が育っていきます。
               </p>
             ) : (
-              <div className="mastery-list">
-                {masteryStats.map((itemStats) => (
-                  <article
-                    className="mastery-card"
-                    data-current={itemStats.isCurrentItem ? 'true' : 'false'}
-                    data-hall-of-fame={itemStats.isHallOfFame ? 'true' : 'false'}
-                    key={itemStats.itemId}
-                  >
-                    <div className="mastery-card-title">
-                      <div>
-                        <p className="mastery-section-name">
-                          {sectionIconLabels[itemStats.sectionId]} {itemStats.sectionTitle}
+              <>
+                <section className="mastery-section-group" aria-label="固定クエスト実績">
+                  <h3>固定クエスト実績</h3>
+                  <div className="mastery-list">
+                    {fixedQuestMasteryStats.map((itemStats) => (
+                      <article
+                        className="mastery-card"
+                        data-current={itemStats.isCurrentItem ? 'true' : 'false'}
+                        data-hall-of-fame={itemStats.isHallOfFame ? 'true' : 'false'}
+                        key={itemStats.itemId}
+                      >
+                        <div className="mastery-card-title">
+                          <div>
+                            <p className="mastery-section-name">
+                              <span className="quest-kind-mini-badge" data-kind="fixed">
+                                固定クエスト
+                              </span>
+                            </p>
+                            <h3>{itemStats.label}</h3>
+                          </div>
+                          {itemStats.isHallOfFame && (
+                            <span className="hall-of-fame-badge">
+                              {formatMasteryStars(0, itemStats.trophyCount)}
+                            </span>
+                          )}
+                        </div>
+                        <p
+                          className="mastery-stars"
+                          data-empty={
+                            itemStats.starCount === 0 && itemStats.trophyCount === 0
+                              ? 'true'
+                              : 'false'
+                          }
+                        >
+                          {formatMasteryStars(itemStats.starCount, itemStats.trophyCount) || '星はこれから'}
                         </p>
-                        <h3>{itemStats.label}</h3>
-                      </div>
-                      {itemStats.isHallOfFame && (
-                        <span className="hall-of-fame-badge">
-                          {formatMasteryStars(0, itemStats.trophyCount)}
-                        </span>
-                      )}
-                    </div>
-                    <p
-                      className="mastery-stars"
-                      data-empty={
-                        itemStats.starCount === 0 && itemStats.trophyCount === 0
-                          ? 'true'
-                          : 'false'
-                      }
-                    >
-                      {formatMasteryStars(itemStats.starCount, itemStats.trophyCount) || '星はこれから'}
-                    </p>
-                    <dl className="mastery-metrics">
-                      <div>
-                        <dt>現在連続</dt>
-                        <dd>{itemStats.currentStreak}日</dd>
-                      </div>
-                      <div>
-                        <dt>最高連続</dt>
-                        <dd>{itemStats.bestStreak}日</dd>
-                      </div>
-                      <div>
-                        <dt>累計達成</dt>
-                        <dd>{itemStats.totalCompletions}回</dd>
-                      </div>
-                    </dl>
-                  </article>
-                ))}
-              </div>
+                        <dl className="mastery-metrics">
+                          <div>
+                            <dt>現在連続</dt>
+                            <dd>{itemStats.currentStreak}日</dd>
+                          </div>
+                          <div>
+                            <dt>最高連続</dt>
+                            <dd>{itemStats.bestStreak}日</dd>
+                          </div>
+                          <div>
+                            <dt>累計達成</dt>
+                            <dd>{itemStats.totalCompletions}回</dd>
+                          </div>
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+                <section className="mastery-section-group" aria-label="コアルーティン実績">
+                  <h3>コアルーティン実績</h3>
+                  <div className="mastery-list">
+                    {coreRoutineMasteryStats.map((itemStats) => (
+                      <article
+                        className="mastery-card"
+                        data-current={itemStats.isCurrentItem ? 'true' : 'false'}
+                        data-hall-of-fame={itemStats.isHallOfFame ? 'true' : 'false'}
+                        key={itemStats.itemId}
+                      >
+                        <div className="mastery-card-title">
+                          <div>
+                            <p className="mastery-section-name">
+                              {sectionIconLabels[itemStats.sectionId]} {itemStats.sectionTitle}
+                            </p>
+                            <h3>
+                              {formatRoutineNumber(itemStats.routineNumber)}
+                              {formatRoutineNumber(itemStats.routineNumber) ? ' ' : ''}
+                              {itemStats.label}
+                            </h3>
+                          </div>
+                          {itemStats.isHallOfFame && (
+                            <span className="hall-of-fame-badge">
+                              {formatMasteryStars(0, itemStats.trophyCount)}
+                            </span>
+                          )}
+                        </div>
+                        <p
+                          className="mastery-stars"
+                          data-empty={
+                            itemStats.starCount === 0 && itemStats.trophyCount === 0
+                              ? 'true'
+                              : 'false'
+                          }
+                        >
+                          {formatMasteryStars(itemStats.starCount, itemStats.trophyCount) || '星はこれから'}
+                        </p>
+                        <dl className="mastery-metrics">
+                          <div>
+                            <dt>現在連続</dt>
+                            <dd>{itemStats.currentStreak}日</dd>
+                          </div>
+                          <div>
+                            <dt>最高連続</dt>
+                            <dd>{itemStats.bestStreak}日</dd>
+                          </div>
+                          <div>
+                            <dt>累計達成</dt>
+                            <dd>{itemStats.totalCompletions}回</dd>
+                          </div>
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </>
             )}
-            <section className="archive-panel" aria-label="過去のアイテム">
-              <div className="archive-header">
-                <div>
-                  <h3>過去のアイテム</h3>
-                  <p>削除したアイテムはここに残り、あとから復元できます。</p>
-                </div>
-                <span>{archivedItemEntries.length}件</span>
-              </div>
-              {archivedItemEntries.length === 0 ? (
-                <p className="archive-empty">アーカイブ済みアイテムはありません。</p>
-              ) : (
-                <div className="archive-list">
-                  {archivedItemEntries.map(({ archivedItem, stats }) => (
-                    <article className="archive-card" key={archivedItem.item.id}>
-                      <div>
-                        <p className="mastery-section-name">
-                          {sectionIconLabels[archivedItem.sectionId]} {archivedItem.sectionTitle}
-                        </p>
-                        <h4>{archivedItem.item.label}</h4>
-                        <p className="archive-date">
-                          削除日: {questDateFormatter.format(new Date(archivedItem.archivedAt))}
-                        </p>
-                      </div>
-                      <p
-                        className="mastery-stars"
-                        data-empty={
-                          stats.starCount === 0 && stats.trophyCount === 0
-                            ? 'true'
-                            : 'false'
-                        }
-                      >
-                        {formatMasteryStars(stats.starCount, stats.trophyCount) || '星はこれから'}
-                      </p>
-                      <dl className="mastery-metrics">
-                        <div>
-                          <dt>累計</dt>
-                          <dd>{stats.totalCompletions}回</dd>
-                        </div>
-                        <div>
-                          <dt>最高</dt>
-                          <dd>{stats.bestStreak}日連続</dd>
-                        </div>
-                        <div>
-                          <dt>現在</dt>
-                          <dd>{stats.currentStreak}日連続</dd>
-                        </div>
-                      </dl>
-                      <button
-                        className="restore-button"
-                        onClick={() => restoreArchivedItem(archivedItem.item.id)}
-                        type="button"
-                      >
-                        復元
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
           </section>
         )}
 
@@ -12239,7 +12773,11 @@ function App() {
                 const isQuestSlotCategory = category === 'questSlot';
 
                 return (
-                  <section className="shop-category-card" key={category}>
+                  <section
+                    className="shop-category-card"
+                    id={isQuestSlotCategory ? 'quest-slot-shop-section' : undefined}
+                    key={category}
+                  >
                     <div className="shop-category-header">
                       <h3>{shopCategoryLabels[category]}</h3>
                       {!isQuestSlotCategory && <span>準備中</span>}
@@ -12727,13 +13265,35 @@ function App() {
             className="delete-dialog"
             role="dialog"
           >
-            <h2 id="delete-dialog-title">アーカイブしますか？</h2>
-            <p>「{pendingDelete.label}」を画面から外し、過去のアイテムに保存します。</p>
+            <h2 id="delete-dialog-title">削除しますか？</h2>
+            <p>「{pendingDelete.label}」を今日のクエスト一覧から削除します。</p>
             <div className="dialog-actions">
               <button onClick={deleteRoutine} type="button">
-                アーカイブする
+                削除する
               </button>
               <button onClick={() => setPendingDelete(null)} type="button">
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isQuestSlotGuideOpen && (
+        <div className="dialog-backdrop" role="presentation">
+          <div
+            aria-labelledby="quest-slot-guide-title"
+            aria-modal="true"
+            className="delete-dialog quest-slot-guide-dialog"
+            role="dialog"
+          >
+            <h2 id="quest-slot-guide-title">枠がいっぱいです</h2>
+            <p>コアルーティン枠を使い切っています。ショップで枠を増やしてください。</p>
+            <div className="dialog-actions">
+              <button onClick={goToQuestSlotShop} type="button">
+                ショップへ
+              </button>
+              <button onClick={() => setIsQuestSlotGuideOpen(false)} type="button">
                 キャンセル
               </button>
             </div>
