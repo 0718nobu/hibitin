@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
 } from 'react';
 import type { User } from '@supabase/supabase-js';
 import {
@@ -26,10 +27,15 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' | 'settings';
-type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'achievements';
-type ScheduleViewName = 'schedule';
+type PageName = 'today' | 'history' | 'records' | 'shop' | 'settings';
+type TodayViewName = 'quests' | 'schedule' | 'todos' | 'notes' | 'status';
+type ScheduleViewName = 'today' | 'month';
+type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
+type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
+type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
+type TodoViewName = 'overview' | TodoStatus;
+type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
 type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'failed';
@@ -104,11 +110,16 @@ const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] 
   { key: 'memo', icon: '✍️', label: 'ひとこと' },
   { key: 'events', icon: '📅', label: 'できごと' },
   { key: 'anyMemo', icon: '📝', label: 'メモ' },
+  { key: 'advanced', icon: '⚙️', label: 'アドバンスト' },
   { key: 'achievements', icon: '🏆', label: '実績' },
 ];
 
-const scheduleViewOptions: { key: ScheduleViewName; icon: string; label: string }[] = [
-  { key: 'schedule', icon: '📅', label: '予定' },
+const todayViewOptions: { key: TodayViewName; icon: string; label: string }[] = [
+  { key: 'quests', icon: '🎮', label: 'クエスト' },
+  { key: 'schedule', icon: '🗓️', label: 'スケジュール' },
+  { key: 'todos', icon: '☑️', label: 'やること' },
+  { key: 'notes', icon: '✍️', label: 'ひとこと' },
+  { key: 'status', icon: '🏅', label: 'ステータス' },
 ];
 
 const todoStatusOptions: { key: TodoStatus; icon: string; label: string; title: string }[] = [
@@ -119,15 +130,22 @@ const todoStatusOptions: { key: TodoStatus; icon: string; label: string; title: 
   { key: 'completed', icon: '✅', label: '完了', title: 'やり終えたこと' },
 ];
 
+const activeTodoStatusOptions = todoStatusOptions.filter(
+  (option): option is { key: ActiveTodoStatus; icon: string; label: string; title: string } =>
+    option.key !== 'completed',
+);
+
+const todoViewOptions: { key: TodoViewName; icon: string; label: string; title: string }[] = [
+  { key: 'overview', icon: '📋', label: '一覧', title: 'やること一覧' },
+  ...todoStatusOptions,
+];
+
 const recordViewHeadings: Record<RecordViewName, string> = {
   memo: '今日のひとこと',
   events: '今日のできごと',
   anyMemo: 'なんでもメモ',
+  advanced: 'アドバンスト',
   achievements: '実績',
-};
-
-const scheduleViewHeadings: Record<ScheduleViewName, string> = {
-  schedule: 'スケジュール',
 };
 
 const todoStatusHeadings: Record<TodoStatus, string> = {
@@ -141,8 +159,6 @@ const todoStatusHeadings: Record<TodoStatus, string> = {
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'today', icon: '🎮', label: '今日' },
   { key: 'history', icon: '📅', label: 'スタンプ帳' },
-  { key: 'schedule', icon: '🗓️', label: 'スケジュール' },
-  { key: 'todos', icon: '☑️', label: 'やること' },
   { key: 'records', icon: '📖', label: '記録' },
   { key: 'shop', icon: '🎁', label: 'ショップ' },
   { key: 'settings', icon: '⚙️', label: '設定' },
@@ -166,6 +182,8 @@ type RoutineSection = {
   order: number;
   items: RoutineItem[];
 };
+
+type RoutineDrafts = Record<string, string>;
 
 type RoutineTemplateSettings = {
   templates: {
@@ -240,7 +258,20 @@ type ShopItem = {
   maxPurchases?: number;
 };
 
-type PlayerIconId = 'smile' | 'cool' | 'chick' | 'cat' | 'dog' | 'fox' | 'bear' | 'sprout';
+type PlayerIconId =
+  | 'smile'
+  | 'cool'
+  | 'chick'
+  | 'cat'
+  | 'dog'
+  | 'fox'
+  | 'bear'
+  | 'sprout'
+  | 'robot'
+  | 'alien'
+  | 'wizard'
+  | 'ninja'
+  | 'hero';
 
 type PlayerIconOption = {
   id: PlayerIconId;
@@ -251,6 +282,24 @@ type PlayerIconOption = {
 type PlayerProfile = {
   displayName: string;
   iconId: PlayerIconId;
+  oneLineProfile: string;
+  favoriteThings: string;
+  currentGoal: string;
+};
+
+type BadgeCategory = 'quest' | 'streak' | 'record' | 'cloud';
+
+type BadgeDefinition = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: BadgeCategory;
+};
+
+type PlayerBadgeState = {
+  earned: Record<string, string>;
+  favoriteBadgeIds: string[];
 };
 
 type LegacyPointSettings = {
@@ -512,10 +561,12 @@ const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
 const GAME_BALANCE_STORAGE_KEY = 'hibitin:gameBalance:v1';
 const PLAYER_ECONOMY_STORAGE_KEY = 'hibitin:playerEconomy:v1';
 const PLAYER_PROFILE_STORAGE_KEY = 'hibitin:playerProfile:v1';
+const PLAYER_BADGES_STORAGE_KEY = 'hibitin:playerBadges:v1';
 const PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v2';
 const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 const TODO_ITEMS_STORAGE_KEY = 'hibitin:todos:v2';
 const TODO_ROLLOVER_STORAGE_KEY = 'hibitin:todos:lastRolloverDate:v1';
+const RECORD_DISPLAY_MODE_STORAGE_KEY = 'hibitin:recordDisplayMode:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -833,7 +884,7 @@ const sectionIconLabels: Record<string, string> = {
 };
 
 const shopCategoryLabels: Record<ShopCategory, string> = {
-  questSlot: 'フリークエスト枠',
+  questSlot: 'コアルーティン枠',
   feature: '機能',
   customize: 'カスタマイズ',
   item: 'アイテム',
@@ -997,46 +1048,19 @@ const defaultRoutineSections: RoutineSection[] = [
     id: 'noon',
     title: '昼',
     order: 20,
-    items: [
-      {
-        id: 'noon-chores',
-        label: '雑務',
-        order: 10,
-        source: 'default',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        timerSeconds: 600,
-      },
-    ],
+    items: [],
   },
   {
     id: 'evening',
     title: '夕',
     order: 30,
-    items: [
-      {
-        id: 'evening-workout-or-stretch',
-        label: '筋トレ or ストレッチ',
-        order: 10,
-        source: 'default',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        timerSeconds: 300,
-      },
-    ],
+    items: [],
   },
   {
     id: 'night',
     title: '夜',
     order: 40,
-    items: [
-      {
-        id: 'night-reading',
-        label: '読書',
-        order: 10,
-        source: 'default',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        timerSeconds: 600,
-      },
-    ],
+    items: [],
   },
   {
     id: 'advanced',
@@ -1411,6 +1435,11 @@ const playerIconOptions: PlayerIconOption[] = [
   { id: 'fox', emoji: '🦊', label: 'きつね' },
   { id: 'bear', emoji: '🐻', label: 'くま' },
   { id: 'sprout', emoji: '🌱', label: '芽' },
+  { id: 'robot', emoji: '🤖', label: 'ロボット' },
+  { id: 'alien', emoji: '👾', label: 'スペース' },
+  { id: 'wizard', emoji: '🧙', label: 'まほうつかい' },
+  { id: 'ninja', emoji: '🥷', label: 'にんじゃ' },
+  { id: 'hero', emoji: '🦸', label: 'ヒーロー' },
 ];
 
 const defaultPlayerIconId: PlayerIconId = 'smile';
@@ -1421,9 +1450,74 @@ const isPlayerIconId = (value: unknown): value is PlayerIconId =>
 const getPlayerIconOption = (iconId: PlayerIconId) =>
   playerIconOptions.find((option) => option.id === iconId) ?? playerIconOptions[0];
 
+const defaultPlayerProfile: PlayerProfile = {
+  displayName: '',
+  iconId: defaultPlayerIconId,
+  oneLineProfile: '',
+  favoriteThings: '',
+  currentGoal: '',
+};
+
+const basicBadgeDefinitions: BadgeDefinition[] = [
+  {
+    id: 'first-step',
+    name: 'はじめの一歩',
+    description: '初めてクエストを1件達成',
+    icon: '👟',
+    category: 'quest',
+  },
+  {
+    id: 'three-day-streak',
+    name: '三日坊主を越えた',
+    description: '3日連続でクエスト達成',
+    icon: '🔥',
+    category: 'streak',
+  },
+  {
+    id: 'seven-day-traveler',
+    name: '一週間の旅人',
+    description: '7日連続でクエスト達成',
+    icon: '🧭',
+    category: 'streak',
+  },
+  {
+    id: 'perfect-day',
+    name: 'PERFECT DAY',
+    description: '初めてPERFECTを達成',
+    icon: '🏆',
+    category: 'quest',
+  },
+  {
+    id: 'memo-writer',
+    name: 'ひとこと作家',
+    description: '今日のひとことを初めて記録',
+    icon: '✍️',
+    category: 'record',
+  },
+  {
+    id: 'event-sprout',
+    name: '記録の芽',
+    description: '今日のできごとを初めて記録',
+    icon: '🌱',
+    category: 'record',
+  },
+  {
+    id: 'cloud-departure',
+    name: 'クラウド旅立ち',
+    description: '初めてクラウドバックアップ成功',
+    icon: '☁️',
+    category: 'cloud',
+  },
+];
+
+const defaultPlayerBadgeState: PlayerBadgeState = {
+  earned: {},
+  favoriteBadgeIds: [],
+};
+
 const normalizePlayerProfile = (value: unknown): PlayerProfile => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { displayName: '', iconId: defaultPlayerIconId };
+    return defaultPlayerProfile;
   }
 
   const parsedProfile = value as Partial<PlayerProfile>;
@@ -1433,6 +1527,15 @@ const normalizePlayerProfile = (value: unknown): PlayerProfile => {
       ? parsedProfile.displayName.trim().slice(0, 20)
       : '',
     iconId: isPlayerIconId(parsedProfile.iconId) ? parsedProfile.iconId : defaultPlayerIconId,
+    oneLineProfile: typeof parsedProfile.oneLineProfile === 'string'
+      ? parsedProfile.oneLineProfile.slice(0, 120)
+      : '',
+    favoriteThings: typeof parsedProfile.favoriteThings === 'string'
+      ? parsedProfile.favoriteThings.slice(0, 200)
+      : '',
+    currentGoal: typeof parsedProfile.currentGoal === 'string'
+      ? parsedProfile.currentGoal.slice(0, 200)
+      : '',
   };
 };
 
@@ -1442,14 +1545,60 @@ const loadPlayerProfile = () => {
 
     return savedProfile
       ? normalizePlayerProfile(JSON.parse(savedProfile) as unknown)
-      : { displayName: '', iconId: defaultPlayerIconId };
+      : defaultPlayerProfile;
   } catch {
-    return { displayName: '', iconId: defaultPlayerIconId };
+    return defaultPlayerProfile;
+  }
+};
+
+const normalizePlayerBadgeState = (value: unknown): PlayerBadgeState => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return defaultPlayerBadgeState;
+  }
+
+  const parsedState = value as Partial<PlayerBadgeState>;
+  const validBadgeIds = new Set(basicBadgeDefinitions.map((badge) => badge.id));
+  const earned: Record<string, string> = {};
+
+  if (
+    parsedState.earned &&
+    typeof parsedState.earned === 'object' &&
+    !Array.isArray(parsedState.earned)
+  ) {
+    Object.entries(parsedState.earned).forEach(([badgeId, earnedAt]) => {
+      if (validBadgeIds.has(badgeId) && typeof earnedAt === 'string' && !Number.isNaN(Date.parse(earnedAt))) {
+        earned[badgeId] = earnedAt;
+      }
+    });
+  }
+
+  const favoriteBadgeIds = Array.isArray(parsedState.favoriteBadgeIds)
+    ? parsedState.favoriteBadgeIds
+        .filter((badgeId): badgeId is string =>
+          typeof badgeId === 'string' && validBadgeIds.has(badgeId) && Boolean(earned[badgeId]))
+        .slice(0, 3)
+    : [];
+
+  return {
+    earned,
+    favoriteBadgeIds,
+  };
+};
+
+const loadPlayerBadgeState = () => {
+  try {
+    const savedBadges = localStorage.getItem(PLAYER_BADGES_STORAGE_KEY);
+
+    return savedBadges
+      ? normalizePlayerBadgeState(JSON.parse(savedBadges) as unknown)
+      : defaultPlayerBadgeState;
+  } catch {
+    return defaultPlayerBadgeState;
   }
 };
 
 const createDefaultPlayerUnlocks = (): PlayerUnlocks => ({
-  totalQuestSlots: 4,
+  totalQuestSlots: 1,
 });
 
 const normalizePlayerUnlocks = (value: unknown): PlayerUnlocks => {
@@ -1463,7 +1612,7 @@ const normalizePlayerUnlocks = (value: unknown): PlayerUnlocks => {
 
   if (Number.isFinite(Number(parsedUnlocks.totalQuestSlots))) {
     return {
-      totalQuestSlots: Math.max(4, Math.floor(Number(parsedUnlocks.totalQuestSlots))),
+      totalQuestSlots: Math.max(1, Math.floor(Number(parsedUnlocks.totalQuestSlots))),
     };
   }
 
@@ -1522,8 +1671,6 @@ const countFreeQuestItems = (sections: RoutineSection[]) =>
     .reduce((total, section) =>
       total + section.items.filter((item) => !item.fixedKind).length,
     0);
-
-const countCoreRoutineItems = () => fixedRoutineIds.size + coreRoutineDefinitions.length;
 
 const normalizePointSettings = (settings: unknown): PointSettings => {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
@@ -1831,6 +1978,127 @@ const getPlayerRankProgress = (
     starsUntilNextRank: nextRule ? Math.max(nextRule.requiredLifetimeStars - safeStars, 0) : 0,
   };
 };
+
+type PlayerStatusCardProps = {
+  freeQuestCount: number;
+  isDetailOpen: boolean;
+  onCloseDetail: () => void;
+  onToggleDetail: () => void;
+  playerDisplayName: string;
+  playerEconomy: PlayerEconomy;
+  playerIconEmoji: string;
+  playerRankProgress: ReturnType<typeof getPlayerRankProgress>;
+  selectedDateEarnedPoints: number;
+  selectedDateEarnedPointsLabel: string;
+};
+
+function PlayerStatusCard({
+  freeQuestCount,
+  isDetailOpen,
+  onCloseDetail,
+  onToggleDetail,
+  playerDisplayName,
+  playerEconomy,
+  playerIconEmoji,
+  playerRankProgress,
+  selectedDateEarnedPoints,
+  selectedDateEarnedPointsLabel,
+}: PlayerStatusCardProps) {
+  return (
+    <section
+      className="economy-status"
+      aria-label="プレイヤーランクとPT"
+      data-popup-ui="true"
+    >
+      <button
+        aria-expanded={isDetailOpen}
+        className="rank-status-button"
+        onClick={onToggleDetail}
+        type="button"
+      >
+        <span className="rank-status-hero">
+          <span className="rank-status-avatar" aria-hidden="true">
+            {playerIconEmoji}
+          </span>
+          <span className="rank-status-identity">
+            <span className="rank-status-name">{playerDisplayName}</span>
+            <span className="rank-status-main">🏅 Rank {playerRankProgress.rank}</span>
+          </span>
+        </span>
+        <span className="rank-status-pt">
+          <span className="rank-status-pt-main">💰 {playerEconomy.currentPoints}PT</span>
+          <span className="rank-status-multiplier">
+            ×{playerRankProgress.multiplier.toFixed(2)}
+          </span>
+        </span>
+        <span className="rank-status-routines" aria-label="コアルーティン数">
+          <span>🎯 コアルーティン {freeQuestCount}個</span>
+        </span>
+        <span
+          className="rank-status-earned"
+          data-empty={selectedDateEarnedPoints === 0 ? 'true' : 'false'}
+        >
+          ✨ {selectedDateEarnedPointsLabel} +{selectedDateEarnedPoints}PT
+        </span>
+        <span className="rank-status-caret" aria-hidden="true">
+          {isDetailOpen ? '▲' : '▼'}
+        </span>
+      </button>
+      {isDetailOpen && (
+        <div className="rank-detail-panel" role="dialog" aria-label="プレイヤー成長詳細">
+          <div className="rank-detail-header">
+            <span aria-hidden="true">🏅</span>
+            <div>
+              <h2>Rank {playerRankProgress.rank}</h2>
+              <p>
+                {playerRankProgress.nextRank
+                  ? `次のランクまであと${playerRankProgress.starsUntilNextRank}★`
+                  : '現在の最高ランクです'}
+              </p>
+            </div>
+            <button
+              aria-label="ランク詳細を閉じる"
+              onClick={onCloseDetail}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+          <dl className="rank-detail-stats">
+            <div>
+              <dt>累計獲得スター</dt>
+              <dd>{playerEconomy.lifetimeStarsEarned}★</dd>
+            </div>
+            <div>
+              <dt>所持PT</dt>
+              <dd>{playerEconomy.currentPoints}PT</dd>
+            </div>
+            <div>
+              <dt>累計獲得PT</dt>
+              <dd>{playerEconomy.lifetimeEarnedPoints}PT</dd>
+            </div>
+            <div>
+              <dt>PTボーナス倍率</dt>
+              <dd>×{playerRankProgress.multiplier.toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>次ランク必要</dt>
+              <dd>
+                {playerRankProgress.nextRank
+                  ? `${playerEconomy.lifetimeStarsEarned + playerRankProgress.starsUntilNextRank}★`
+                  : '達成済み'}
+              </dd>
+            </div>
+            <div>
+              <dt>あと</dt>
+              <dd>{playerRankProgress.starsUntilNextRank}★</dd>
+            </div>
+          </dl>
+        </div>
+      )}
+    </section>
+  );
+}
 
 const roundPoints = (points: number, rounding: PointSettings['rounding']) => {
   if (rounding === 'floor') {
@@ -2271,6 +2539,10 @@ type ManagedTodoItem = {
   updatedAt: string;
   completedAt?: string;
   originalStatus?: Exclude<TodoStatus, 'completed'>;
+  pendingReview?: {
+    originDate: string;
+    fromStatus: Exclude<TodoStatus, 'completed'>;
+  };
 };
 
 type ManagedTodos = ManagedTodoItem[];
@@ -2381,13 +2653,13 @@ const todoStatusKeys: TodoStatus[] = ['today', 'tomorrow', 'soon', 'someday', 'c
 const isTodoStatus = (value: unknown): value is TodoStatus =>
   typeof value === 'string' && todoStatusKeys.includes(value as TodoStatus);
 
-const isActiveTodoStatus = (value: TodoStatus): value is Exclude<TodoStatus, 'completed'> =>
+const isActiveTodoStatus = (value: TodoStatus): value is ActiveTodoStatus =>
   value !== 'completed';
 
 const createManagedTodoItem = (
   text = '',
   status: TodoStatus = 'today',
-  options: Partial<Pick<ManagedTodoItem, 'id' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus'>> = {},
+  options: Partial<Pick<ManagedTodoItem, 'id' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus' | 'pendingReview'>> = {},
 ): ManagedTodoItem => {
   const timestamp = new Date().toISOString();
   const completed = status === 'completed' || Boolean(options.completed);
@@ -2409,6 +2681,7 @@ const createManagedTodoItem = (
       ? { completedAt: options.completedAt ?? timestamp }
       : {}),
     ...(originalStatus ? { originalStatus } : {}),
+    ...(options.pendingReview ? { pendingReview: options.pendingReview } : {}),
   };
 };
 
@@ -2446,6 +2719,19 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
           : status === 'completed'
             ? 'today'
             : undefined;
+      const pendingReview =
+        parsedTodo.pendingReview &&
+        typeof parsedTodo.pendingReview === 'object' &&
+        !Array.isArray(parsedTodo.pendingReview) &&
+        typeof parsedTodo.pendingReview.originDate === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(parsedTodo.pendingReview.originDate) &&
+        isTodoStatus(parsedTodo.pendingReview.fromStatus) &&
+        isActiveTodoStatus(parsedTodo.pendingReview.fromStatus)
+          ? {
+              originDate: parsedTodo.pendingReview.originDate,
+              fromStatus: parsedTodo.pendingReview.fromStatus,
+            }
+          : undefined;
 
       return createManagedTodoItem(text, status, {
         id:
@@ -2457,6 +2743,7 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
         updatedAt,
         completedAt,
         originalStatus,
+        pendingReview,
       });
     })
     .filter((todo): todo is ManagedTodoItem => Boolean(todo))
@@ -2510,6 +2797,13 @@ const migrateLegacyDailyTodos = (todayDate: Date): ManagedTodos => {
   });
 };
 
+const getEndOfDateIso = (dateKey: string) => {
+  const date = getDateFromKey(dateKey);
+  date.setHours(23, 59, 0, 0);
+
+  return date.toISOString();
+};
+
 const applyTodoRollover = (todos: ManagedTodos, todayDate: Date) => {
   const todayDateKey = getDateKey(todayDate);
   const lastRolloverDateKey = localStorage.getItem(TODO_ROLLOVER_STORAGE_KEY);
@@ -2533,16 +2827,24 @@ const applyTodoRollover = (todos: ManagedTodos, todayDate: Date) => {
         ...todo,
         status: 'completed' as const,
         completed: true,
-        completedAt: todo.completedAt ?? rolloverTimestamp,
+        completedAt: todo.completedAt ?? getEndOfDateIso(lastRolloverDateKey),
         originalStatus: isActiveTodoStatus(todo.status) ? todo.status : 'today',
+        pendingReview: undefined,
         updatedAt: rolloverTimestamp,
       };
     }
 
-    if (todo.status === 'tomorrow') {
+    if (todo.pendingReview) {
+      return todo;
+    }
+
+    if (todo.status === 'today' || todo.status === 'tomorrow') {
       return {
         ...todo,
-        status: 'today' as const,
+        pendingReview: {
+          originDate: lastRolloverDateKey,
+          fromStatus: todo.status,
+        },
         updatedAt: rolloverTimestamp,
       };
     }
@@ -2570,7 +2872,17 @@ const loadManagedTodos = (todayDate: Date): ManagedTodos => {
 };
 
 const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
-  const filteredTodos = todos.filter((todo) => todo.status === status && hasManagedTodoText(todo));
+  const filteredTodos = todos.filter((todo) => {
+    if (!hasManagedTodoText(todo) || todo.pendingReview) {
+      return false;
+    }
+
+    if (status === 'completed') {
+      return todo.status === 'completed' || todo.completed;
+    }
+
+    return todo.status === status && !todo.completed;
+  });
 
   return {
     completedCount: filteredTodos.filter((todo) => todo.completed).length,
@@ -2578,8 +2890,10 @@ const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
   };
 };
 
-const getManagedTodoRows = (todos: ManagedTodos, status: Exclude<TodoStatus, 'completed'>) => {
-  const statusTodos = todos.filter((todo) => todo.status === status);
+const getManagedTodoRows = (todos: ManagedTodos, status: ActiveTodoStatus) => {
+  const statusTodos = todos.filter(
+    (todo) => todo.status === status && !todo.completed && !todo.pendingReview,
+  );
 
   if (statusTodos.some((todo) => !hasManagedTodoText(todo))) {
     return statusTodos;
@@ -2596,6 +2910,18 @@ const getManagedTodoRows = (todos: ManagedTodos, status: Exclude<TodoStatus, 'co
 
 const getTodoStatusLabel = (status: TodoStatus) =>
   todoStatusOptions.find((option) => option.key === status)?.title ?? status;
+
+const getActiveTodoStatusOption = (status: ActiveTodoStatus) =>
+  activeTodoStatusOptions.find((option) => option.key === status) ?? activeTodoStatusOptions[0];
+
+const getVisibleManagedTodosByStatus = (todos: ManagedTodos, status: ActiveTodoStatus) =>
+  todos.filter(
+    (todo) =>
+      todo.status === status &&
+      hasManagedTodoText(todo) &&
+      !todo.completed &&
+      !todo.pendingReview,
+  );
 
 const hasScheduleValue = (scheduleItem: DailyScheduleItem) =>
   scheduleItem.time.trim().length > 0 || scheduleItem.text.trim().length > 0;
@@ -2871,6 +3197,22 @@ const loadDailyEvent = (date: Date) =>
 const loadDailyAnyMemo = (date: Date) =>
   localStorage.getItem(getDailyAnyMemoStorageKey(date)) ?? '';
 
+const loadRecordDisplayMode = (): RecordDisplayMode => {
+  const savedMode = localStorage.getItem(RECORD_DISPLAY_MODE_STORAGE_KEY);
+
+  if (savedMode === 'all' || savedMode === 'withRecords') {
+    return savedMode;
+  }
+
+  try {
+    const parsedMode = JSON.parse(savedMode ?? 'null') as unknown;
+
+    return parsedMode === 'all' || parsedMode === 'withRecords' ? parsedMode : 'withRecords';
+  } catch {
+    return 'withRecords';
+  }
+};
+
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
 
@@ -3033,6 +3375,11 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
 const bonusSectionId = 'advanced';
+const getAdvancedEntriesFromSections = (sections: RoutineSection[]) =>
+  sections
+    .find((section) => section.id === bonusSectionId)
+    ?.items
+    .filter((item) => hasMeaningfulText(item.label)) ?? [];
 const GAME_BALANCE_SCHEMA_VERSION = 3;
 const defaultPointSettings: PointSettings = {
   rounding: 'round',
@@ -3076,7 +3423,7 @@ const defaultRankRules: RankRule[] = [
 ];
 const defaultQuestSlotExchangeSettings: QuestSlotExchangeRule = {
   enabled: true,
-  initialTotalSlots: 4,
+  initialTotalSlots: 1,
   maxTotalSlots: 10,
   price: 100,
 };
@@ -3485,7 +3832,7 @@ const formatMasteryStars = (starCount: number, trophyCount = 0) => {
 };
 
 const getMasteryAdminRuleText = () => [
-  '対象：朝・昼・夕・夜のフリークエスト',
+  '対象：朝・昼・夕・夜のコアルーティン',
   `星1〜3：${MASTERY_RULES.earlyStarStreakDays}日連続達成ごとに+1`,
   `星4：星3到達後、${MASTERY_RULES.fourthStarStreakDays}日連続達成で獲得`,
   `星5：星4到達後、${MASTERY_RULES.fifthStarStreakDays}日連続達成で獲得`,
@@ -3713,17 +4060,27 @@ function App() {
   const todayKey = getDateKey(today);
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
+  const [todayView, setTodayView] = useState<TodayViewName>('quests');
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
-  const scheduleView: ScheduleViewName = 'schedule';
+  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('today');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
+  const [recordDisplayMode, setRecordDisplayMode] =
+    useState<RecordDisplayMode>(() => loadRecordDisplayMode());
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
-  const [todoView, setTodoView] = useState<TodoStatus>('today');
+  const [todoView, setTodoView] = useState<TodoViewName>('overview');
+  const [managedTodoDrafts, setManagedTodoDrafts] = useState<Record<ActiveTodoStatus, string>>({
+    today: '',
+    tomorrow: '',
+    soon: '',
+    someday: '',
+  });
+  const managedTodoDraftComposingStatusesRef = useRef(new Set<ActiveTodoStatus>());
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
@@ -3759,6 +4116,11 @@ function App() {
   );
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
+  const [playerBadges, setPlayerBadges] = useState<PlayerBadgeState>(() => loadPlayerBadgeState());
+  const [isStatusProfileEditing, setIsStatusProfileEditing] = useState(false);
+  const [statusProfileDraft, setStatusProfileDraft] = useState<PlayerProfile>(() => playerProfile);
+  const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
+  const [selectedBadgeId, setSelectedBadgeId] = useState<string | null>(null);
   const [playerUnlocks, setPlayerUnlocks] = useState<PlayerUnlocks>(() => loadPlayerUnlocks());
   const dailyMessage = getDailyMessage(selectedDateKey, playerProfile.displayName);
   const dailyOneLineExample = getDailyOneLineExample(selectedDateKey);
@@ -3798,6 +4160,8 @@ function App() {
     useState<RoutineSection[] | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [routineDrafts, setRoutineDrafts] = useState<RoutineDrafts>({});
+  const routineDraftComposingSectionsRef = useRef(new Set<string>());
   const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
   const [timerDraftParts, setTimerDraftParts] = useState(() => getTimerParts(300));
   const [noteEditorTarget, setNoteEditorTarget] = useState<NoteEditorTarget | null>(null);
@@ -3859,6 +4223,9 @@ function App() {
   const [dailyTodos, setDailyTodos] = useState(() => loadDailyTodos(today));
   const [dailyTodosDateKey, setDailyTodosDateKey] = useState(() => todayKey);
   const [managedTodos, setManagedTodos] = useState<ManagedTodos>(() => loadManagedTodos(today));
+  const [isTodoReviewOpen, setIsTodoReviewOpen] = useState(false);
+  const [todoReviewActions, setTodoReviewActions] = useState<Record<string, TodoReviewAction>>({});
+  const [todoReviewDismissed, setTodoReviewDismissed] = useState(false);
   const [dailyAnyMemo, setDailyAnyMemo] = useState(() => loadDailyAnyMemo(today));
   const [dailyAnyMemoDateKey, setDailyAnyMemoDateKey] = useState(() => todayKey);
   const [historyDailyEvent, setHistoryDailyEvent] = useState<DailyRecordEntries>([
@@ -3875,7 +4242,15 @@ function App() {
   const [historyDailyTodosDateKey, setHistoryDailyTodosDateKey] = useState('');
   const [historyDailyAnyMemo, setHistoryDailyAnyMemo] = useState('');
   const [historyDailyAnyMemoDateKey, setHistoryDailyAnyMemoDateKey] = useState('');
-  const dailyTodoStats = getManagedTodoStats(managedTodos, 'today');
+  const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null);
+  const [todoDropTarget, setTodoDropTarget] = useState<{
+    status: ActiveTodoStatus;
+    beforeId: string | null;
+  } | null>(null);
+  const pendingTodoReviews = useMemo(
+    () => managedTodos.filter((todo) => todo.pendingReview && hasManagedTodoText(todo)),
+    [managedTodos],
+  );
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -3890,6 +4265,11 @@ function App() {
     selectedDate,
     todayKey,
   );
+  const isTodayQuestView = page === 'today' && todayView === 'quests';
+  const isTodayScheduleView = page === 'today' && todayView === 'schedule';
+  const isTodayTodoView = page === 'today' && todayView === 'todos';
+  const isTodayNotesView = page === 'today' && todayView === 'notes';
+  const isTodayStatusView = page === 'today' && todayView === 'status';
   const displayedTarget =
     page === 'today'
       ? isEditMode
@@ -3923,7 +4303,6 @@ function App() {
   const totalQuestSlotLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
   const usedQuestSlots = countFreeQuestItems(displaySections);
   const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
-  const coreRoutineCount = countCoreRoutineItems();
   const freeQuestCount = countFreeQuestItems(displaySections);
   const selectedDateStats = calculateCompletionStats(displaySections, checkedItems);
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
@@ -4071,12 +4450,108 @@ function App() {
     () => getMonthDateCells(recordMonth).filter((date): date is Date => Boolean(date)),
     [recordMonth, recordRevision],
   );
+  const recordDaySummaries = useMemo(() => (
+    recordMonthDates.map((recordDate) => {
+      const dateKey = getDateKey(recordDate);
+      const holidayName = getHolidayName(recordDate);
+      const dayKind = getDateDisplayKind(recordDate);
+      const memoEntries = dateKey === selectedDateKey
+        ? dailyMemo
+        : dateKey === historySelectedDateKey
+          ? historyDailyMemo
+          : loadDailyMemo(recordDate);
+      const eventEntries = dateKey === selectedDateKey
+        ? dailyEvent
+        : dateKey === historySelectedDateKey
+          ? historyDailyEvent
+          : loadDailyEvent(recordDate);
+      const anyMemoValue = dateKey === selectedDateKey
+        ? dailyAnyMemo
+        : dateKey === historySelectedDateKey
+          ? historyDailyAnyMemo
+          : loadDailyAnyMemo(recordDate);
+      const advancedEntries = getAdvancedEntriesFromSections(
+        removeFixedRoutineItems(getSectionsForTarget(
+          templateSettings,
+          dateOverrides,
+          dateSnapshots,
+          resolveDateTarget(
+            templateSettings,
+            dateOverrides,
+            dateSnapshots,
+            recordDate,
+            todayKey,
+          ),
+          todayKey,
+        )),
+      );
+      const savedMemoEntries = memoEntries.filter(
+        (entry) => entry.saved && hasMeaningfulText(entry.text),
+      );
+      const savedEventEntries = eventEntries.filter(
+        (entry) => entry.saved && hasMeaningfulText(entry.text),
+      );
+      const anyMemoText = anyMemoValue.trim();
+      const recordContentCount =
+        recordView === 'memo'
+          ? savedMemoEntries.length
+          : recordView === 'events'
+            ? savedEventEntries.length
+            : recordView === 'anyMemo'
+              ? anyMemoText.length > 0
+                ? 1
+                : 0
+              : recordView === 'advanced'
+                ? advancedEntries.length
+                : 0;
+      const hasRecordContent = recordContentCount > 0;
+      const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
+        weekdayShortLabels[recordDate.getDay()]
+      }${holidayName ? `・${holidayName}` : ''}）`;
+
+      return {
+        advancedEntries,
+        anyMemoText,
+        dateKey,
+        dateTitle,
+        dayKind,
+        hasRecordContent,
+        recordContentCount,
+        recordDate,
+        savedEventEntries,
+        savedMemoEntries,
+      };
+    })
+  ), [
+    dailyAnyMemo,
+    dailyEvent,
+    dailyMemo,
+    dateOverrides,
+    dateSnapshots,
+    historyDailyAnyMemo,
+    historyDailyEvent,
+    historyDailyMemo,
+    historySelectedDateKey,
+    recordMonthDates,
+    recordRevision,
+    recordView,
+    selectedDateKey,
+    templateSettings,
+    todayKey,
+  ]);
+  const visibleRecordDaySummaries = recordDisplayMode === 'withRecords'
+    ? recordDaySummaries.filter((summary) => summary.hasRecordContent)
+    : recordDaySummaries;
   useEffect(() => {
-    if (page !== 'schedule' || getDateKey(scheduleMonth) !== getDateKey(getMonthStart(today))) {
+    if (
+      !isTodayScheduleView ||
+      scheduleView !== 'month' ||
+      getDateKey(scheduleMonth) !== getDateKey(getMonthStart(today))
+    ) {
       return;
     }
 
-    const scrollKey = `${page}:${getDateKey(scheduleMonth)}`;
+    const scrollKey = `today-schedule:${getDateKey(scheduleMonth)}`;
 
     if (scheduleTodayScrollMonthRef.current === scrollKey) {
       return;
@@ -4088,7 +4563,7 @@ function App() {
         .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${todayKey}"]`)
         ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-  }, [page, scheduleMonth, today, todayKey]);
+  }, [isTodayScheduleView, scheduleMonth, scheduleView, today, todayKey]);
   useEffect(() => {
     if (page !== 'records' || getDateKey(recordMonth) !== getDateKey(getMonthStart(today))) {
       return;
@@ -4281,6 +4756,55 @@ function App() {
   }, [playerProfile]);
 
   useEffect(() => {
+    localStorage.setItem(PLAYER_BADGES_STORAGE_KEY, JSON.stringify(playerBadges));
+  }, [playerBadges]);
+
+  useEffect(() => {
+    localStorage.setItem(RECORD_DISPLAY_MODE_STORAGE_KEY, JSON.stringify(recordDisplayMode));
+  }, [recordDisplayMode]);
+
+  useEffect(() => {
+    const hasAnyCompletedQuest = getStoredCheckDateKeys().some((dateKey) =>
+      Object.values(loadCheckedItems(getDateFromKey(dateKey))).some(Boolean),
+    );
+    const hasSavedDailyRecord = (kind: 'memo' | 'events') => {
+      const prefix = `hibitin:${kind}:`;
+
+      return Object.keys(localStorage)
+        .filter((key) => key.startsWith(prefix))
+        .some((key) => {
+          const dateKey = key.slice(prefix.length);
+
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+            return false;
+          }
+
+          const entries = kind === 'memo'
+            ? loadDailyMemo(getDateFromKey(dateKey))
+            : loadDailyEvent(getDateFromKey(dateKey));
+
+          return entries.some((entry) => entry.saved && hasMeaningfulText(entry.text));
+        });
+    };
+
+    if (hasAnyCompletedQuest) {
+      earnPlayerBadge('first-step');
+    }
+
+    if (hasSavedDailyRecord('memo')) {
+      earnPlayerBadge('memo-writer');
+    }
+
+    if (hasSavedDailyRecord('events')) {
+      earnPlayerBadge('event-sprout');
+    }
+
+    if (cloudBackupInfo?.updatedAt || lastCloudBackupAt) {
+      earnPlayerBadge('cloud-departure', cloudBackupInfo?.updatedAt ?? lastCloudBackupAt ?? undefined);
+    }
+  }, [checkedItems, cloudBackupInfo?.updatedAt, dailyEvent, dailyMemo, lastCloudBackupAt]);
+
+  useEffect(() => {
     localStorage.setItem(PLAYER_UNLOCKS_STORAGE_KEY, JSON.stringify(playerUnlocks));
     localStorage.removeItem(LEGACY_PLAYER_UNLOCKS_STORAGE_KEY);
   }, [playerUnlocks]);
@@ -4421,6 +4945,37 @@ function App() {
   useEffect(() => {
     localStorage.setItem(TODO_ITEMS_STORAGE_KEY, serializeManagedTodos(managedTodos));
   }, [managedTodos]);
+
+  useEffect(() => {
+    if (pendingTodoReviews.length === 0) {
+      setIsTodoReviewOpen(false);
+      setTodoReviewActions({});
+      setTodoReviewDismissed(false);
+      return;
+    }
+
+    setTodoReviewActions((currentActions) => {
+      const nextActions = { ...currentActions };
+
+      pendingTodoReviews.forEach((todo) => {
+        if (!nextActions[todo.id]) {
+          nextActions[todo.id] = 'today';
+        }
+      });
+
+      Object.keys(nextActions).forEach((todoId) => {
+        if (!pendingTodoReviews.some((todo) => todo.id === todoId)) {
+          delete nextActions[todoId];
+        }
+      });
+
+      return nextActions;
+    });
+
+    if (!todoReviewDismissed) {
+      setIsTodoReviewOpen(true);
+    }
+  }, [pendingTodoReviews, todoReviewDismissed]);
 
   useEffect(() => {
     if (dailyAnyMemoDateKey !== selectedDateKey) {
@@ -5070,7 +5625,7 @@ function App() {
         basePoints: existingAward.basePoints,
         multiplier: existingAward.multiplier,
         createdAt: now,
-        reason: '本文削除によるコアルーティン未達成',
+        reason: '本文削除による固定クエスト未達成',
       };
 
       return {
@@ -5814,6 +6369,8 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setRoutineDrafts({});
+    routineDraftComposingSectionsRef.current.clear();
     setTimerSettingItemId(null);
     setIsRankPanelOpen(false);
   };
@@ -5832,10 +6389,12 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setRoutineDrafts({});
+    routineDraftComposingSectionsRef.current.clear();
     setTimerSettingItemId(null);
   };
 
-  const addRoutine = (sectionId: string) => {
+  const canAddRoutineToSection = (sectionId: string) => {
     if (
       gameMode === 'player' &&
       dailySectionIds.includes(sectionId as StartSection)
@@ -5851,12 +6410,64 @@ function App() {
       const questLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
 
       if (questCount >= questLimit) {
-        return;
+        return false;
       }
     }
 
+    return true;
+  };
+
+  const addRoutine = (sectionId: string) => {
+    if (!canAddRoutineToSection(sectionId)) {
+      return;
+    }
+
+    setRoutineDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [sectionId]: currentDrafts[sectionId] ?? '',
+    }));
+    setSortingSectionId(null);
+    setEditingItemId(null);
+    setEditingLabel('');
+    setTimerSettingItemId(null);
+  };
+
+  const updateRoutineDraft = (sectionId: string, value: string) => {
+    setRoutineDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [sectionId]: value,
+    }));
+  };
+
+  const discardRoutineDraft = (sectionId: string) => {
+    routineDraftComposingSectionsRef.current.delete(sectionId);
+    setRoutineDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+
+      delete nextDrafts[sectionId];
+
+      return nextDrafts;
+    });
+  };
+
+  const commitRoutineDraft = (sectionId: string, rawValue = routineDrafts[sectionId] ?? '') => {
+    if (routineDraftComposingSectionsRef.current.has(sectionId)) {
+      return;
+    }
+
+    const nextItemLabel = rawValue.trim();
+
+    if (!nextItemLabel) {
+      discardRoutineDraft(sectionId);
+      return;
+    }
+
+    if (!canAddRoutineToSection(sectionId)) {
+      discardRoutineDraft(sectionId);
+      return;
+    }
+
     const newItemId = createRoutineId(sectionId);
-    const newItemLabel = '新しいルーティン';
 
     updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
       currentSections.map((section) => {
@@ -5875,7 +6486,7 @@ function App() {
             ...section.items,
             {
               id: newItemId,
-              label: newItemLabel,
+              label: nextItemLabel,
               order: nextOrder,
               source: 'user',
               createdAt: new Date().toISOString(),
@@ -5884,9 +6495,10 @@ function App() {
         };
       }),
     );
+    discardRoutineDraft(sectionId);
     setSortingSectionId(null);
-    setEditingItemId(newItemId);
-    setEditingLabel(newItemLabel);
+    setEditingItemId(null);
+    setEditingLabel('');
     setTimerSettingItemId(null);
   };
 
@@ -6975,6 +7587,8 @@ function App() {
     setDraggedItemId(null);
     setEditingItemId(null);
     setEditingLabel('');
+    setRoutineDrafts({});
+    routineDraftComposingSectionsRef.current.clear();
     setTimerSettingItemId(null);
   };
 
@@ -7189,24 +7803,14 @@ function App() {
 
   const updateManagedTodoText = (
     id: string,
-    status: Exclude<TodoStatus, 'completed'>,
+    _status: ActiveTodoStatus,
     text: string,
   ) => {
     setManagedTodos((currentTodos) => {
       const timestamp = new Date().toISOString();
 
       if (id.startsWith('new-')) {
-        if (!text.trim()) {
-          return currentTodos;
-        }
-
-        return [
-          ...currentTodos,
-          createManagedTodoItem(text, status, {
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          }),
-        ];
+        return currentTodos;
       }
 
       return currentTodos.map((todo) =>
@@ -7221,6 +7825,52 @@ function App() {
           : todo,
       );
     });
+  };
+
+  const updateManagedTodoDraft = (status: ActiveTodoStatus, text: string) => {
+    setManagedTodoDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [status]: text,
+    }));
+  };
+
+  const commitManagedTodoDraft = (status: ActiveTodoStatus, text?: string) => {
+    if (managedTodoDraftComposingStatusesRef.current.has(status)) {
+      return;
+    }
+
+    const draftText = text ?? managedTodoDrafts[status] ?? '';
+
+    if (!draftText.trim()) {
+      setManagedTodoDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [status]: '',
+      }));
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+
+    setManagedTodos((currentTodos) => [
+      ...currentTodos,
+      createManagedTodoItem(draftText, status, {
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    ]);
+    setManagedTodoDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [status]: '',
+    }));
+  };
+
+  const startManagedTodoDraftComposition = (status: ActiveTodoStatus) => {
+    managedTodoDraftComposingStatusesRef.current.add(status);
+  };
+
+  const endManagedTodoDraftComposition = (status: ActiveTodoStatus, text: string) => {
+    managedTodoDraftComposingStatusesRef.current.delete(status);
+    updateManagedTodoDraft(status, text);
   };
 
   const cleanupManagedTodos = () => {
@@ -7246,16 +7896,6 @@ function App() {
           };
         }
 
-        if (todo.status === 'today') {
-          return {
-            ...todo,
-            completed: true,
-            completedAt: timestamp,
-            originalStatus: 'today',
-            updatedAt: timestamp,
-          };
-        }
-
         return {
           ...todo,
           status: 'completed' as const,
@@ -7268,7 +7908,7 @@ function App() {
     });
   };
 
-  const moveManagedTodo = (id: string, status: Exclude<TodoStatus, 'completed'>) => {
+  const moveManagedTodo = (id: string, status: ActiveTodoStatus) => {
     setManagedTodos((currentTodos) =>
       currentTodos.map((todo) =>
         todo.id === id && todo.status !== 'completed'
@@ -7285,13 +7925,223 @@ function App() {
     );
   };
 
+  const restoreManagedTodo = (id: string, status: ActiveTodoStatus) => {
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.id === id && (todo.status === 'completed' || todo.completed)
+          ? {
+              ...todo,
+              status,
+              completed: false,
+              completedAt: undefined,
+              originalStatus: undefined,
+              pendingReview: undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          : todo,
+      ),
+    );
+  };
+
+  const reorderManagedTodo = (
+    id: string,
+    targetStatus: ActiveTodoStatus,
+    beforeId: string | null,
+  ) => {
+    setManagedTodos((currentTodos) => {
+      const movingTodo = currentTodos.find((todo) => todo.id === id);
+
+      if (
+        !movingTodo ||
+        movingTodo.status === 'completed' ||
+        movingTodo.completed ||
+        !hasManagedTodoText(movingTodo)
+      ) {
+        return currentTodos;
+      }
+
+      if (beforeId === id) {
+        return currentTodos;
+      }
+
+      const timestamp = new Date().toISOString();
+      const remainingTodos = currentTodos.filter((todo) => todo.id !== id);
+      const movedTodo: ManagedTodoItem = {
+        ...movingTodo,
+        status: targetStatus,
+        completed: false,
+        completedAt: undefined,
+        originalStatus: undefined,
+        pendingReview: undefined,
+        updatedAt: timestamp,
+      };
+      const beforeIndex = beforeId
+        ? remainingTodos.findIndex((todo) => todo.id === beforeId)
+        : -1;
+      const insertIndex = beforeIndex >= 0
+        ? beforeIndex
+        : remainingTodos.reduce(
+            (lastIndex, todo, index) => (todo.status === targetStatus ? index + 1 : lastIndex),
+            remainingTodos.length,
+          );
+
+      return [
+        ...remainingTodos.slice(0, insertIndex),
+        movedTodo,
+        ...remainingTodos.slice(insertIndex),
+      ];
+    });
+  };
+
+  const startManagedTodoDrag = (
+    event: DragEvent<HTMLButtonElement>,
+    todo: ManagedTodoItem,
+  ) => {
+    if (todo.status === 'completed' || todo.completed || !hasManagedTodoText(todo)) {
+      event.preventDefault();
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', todo.id);
+    setDraggedTodoId(todo.id);
+  };
+
+  const updateManagedTodoDropTarget = (
+    event: DragEvent<HTMLElement>,
+    status: ActiveTodoStatus,
+    beforeId: string | null,
+  ) => {
+    if (!draggedTodoId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setTodoDropTarget((currentTarget) =>
+      currentTarget?.status === status && currentTarget.beforeId === beforeId
+        ? currentTarget
+        : { status, beforeId },
+    );
+  };
+
+  const dropManagedTodo = (
+    event: DragEvent<HTMLElement>,
+    status: ActiveTodoStatus,
+    beforeId: string | null,
+  ) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggedTodoId;
+
+    if (draggedId) {
+      reorderManagedTodo(draggedId, status, beforeId);
+    }
+
+    setDraggedTodoId(null);
+    setTodoDropTarget(null);
+  };
+
+  const endManagedTodoDrag = () => {
+    setDraggedTodoId(null);
+    setTodoDropTarget(null);
+  };
+
   const deleteManagedTodo = (id: string) => {
     setManagedTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== id));
+  };
+
+  const applyTodoReviewActions = (actions: Record<string, TodoReviewAction>) => {
+    const hasCompletionAction = pendingTodoReviews.some(
+      (todo) => (actions[todo.id] ?? 'today') === 'completed',
+    );
+
+    if (
+      hasCompletionAction &&
+      !window.confirm('完了にする項目があります。完了日時を昨日として記録してよいですか？')
+    ) {
+      return;
+    }
+
+    setManagedTodos((currentTodos) =>
+      currentTodos.flatMap((todo) => {
+        if (!todo.pendingReview) {
+          return [todo];
+        }
+
+        const action = actions[todo.id] ?? 'today';
+        const timestamp = new Date().toISOString();
+
+        if (action === 'delete') {
+          return [];
+        }
+
+        if (action === 'completed') {
+          return [{
+            ...todo,
+            status: 'completed' as const,
+            completed: true,
+            completedAt: getEndOfDateIso(todo.pendingReview.originDate),
+            originalStatus: todo.pendingReview.fromStatus,
+            pendingReview: undefined,
+            updatedAt: timestamp,
+          }];
+        }
+
+        return [{
+          ...todo,
+          status: action,
+          completed: false,
+          completedAt: undefined,
+          originalStatus: undefined,
+          pendingReview: undefined,
+          updatedAt: timestamp,
+        }];
+      }),
+    );
+    setIsTodoReviewOpen(false);
+    setTodoReviewDismissed(false);
+  };
+
+  const applyTodoReviewBulkAction = (action: TodoReviewAction) => {
+    applyTodoReviewActions(
+      Object.fromEntries(pendingTodoReviews.map((todo) => [todo.id, action])),
+    );
+  };
+
+  const deferTodoReview = () => {
+    setIsTodoReviewOpen(false);
+    setTodoReviewDismissed(true);
   };
 
   const updateRecordAnyMemo = (date: Date, value: string) => {
     localStorage.setItem(getDailyAnyMemoStorageKey(date), value);
     syncRecordAnyMemoToActiveDates(date, value);
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const updateRecordAdvancedEntry = (date: Date, itemId: string, value: string) => {
+    const target = resolveDateTarget(
+      templateSettings,
+      dateOverrides,
+      dateSnapshots,
+      date,
+      todayKey,
+    );
+
+    updateSectionsForTarget(target, (currentSections) =>
+      currentSections.map((section) =>
+        section.id === bonusSectionId
+          ? {
+            ...section,
+            items: section.items.map((item) =>
+              item.id === itemId
+                ? { ...item, label: value }
+                : item,
+            ),
+          }
+          : section,
+      ),
+    );
     setRecordRevision((revision) => revision + 1);
   };
 
@@ -7426,7 +8276,8 @@ function App() {
 
   const showScheduleToday = () => {
     setScheduleMonth(getMonthStart(today));
-    setSelectedScheduleDate(today);
+    setSelectedScheduleDate(null);
+    setScheduleView('today');
   };
 
   const moveScheduleMonth = (months: number) => {
@@ -7447,12 +8298,93 @@ function App() {
 
   const changePage = (nextPage: PageName) => {
     resetEditUiState();
+    if (nextPage === 'today') {
+      setTodayView('quests');
+    }
     setPage(nextPage);
+  };
+
+  const selectTodayView = (nextView: TodayViewName) => {
+    resetEditUiState();
+    if (nextView === 'schedule') {
+      setScheduleView('today');
+    }
+    setTodayView(nextView);
   };
 
   const selectRecordView = (nextView: RecordViewName) => {
     setRecordView(nextView);
     setSelectedRecordDate(null);
+  };
+
+  const startStatusProfileEditing = () => {
+    setStatusProfileDraft(playerProfile);
+    setIsStatusProfileEditing(true);
+    setIsIconPickerOpen(false);
+  };
+
+  const cancelStatusProfileEditing = () => {
+    setStatusProfileDraft(playerProfile);
+    setIsStatusProfileEditing(false);
+    setIsIconPickerOpen(false);
+  };
+
+  const saveStatusProfileEditing = () => {
+    const nextDisplayName = statusProfileDraft.displayName.trim().slice(0, 20);
+
+    if (!nextDisplayName) {
+      return;
+    }
+
+    setPlayerProfile({
+      displayName: nextDisplayName,
+      iconId: statusProfileDraft.iconId,
+      oneLineProfile: statusProfileDraft.oneLineProfile.trim().slice(0, 120),
+      favoriteThings: statusProfileDraft.favoriteThings.trim().slice(0, 200),
+      currentGoal: statusProfileDraft.currentGoal.trim().slice(0, 200),
+    });
+    setIsStatusProfileEditing(false);
+    setIsIconPickerOpen(false);
+  };
+
+  const earnPlayerBadge = (badgeId: string, earnedAt = new Date().toISOString()) => {
+    setPlayerBadges((currentBadges) => {
+      if (currentBadges.earned[badgeId]) {
+        return currentBadges;
+      }
+
+      return {
+        ...currentBadges,
+        earned: {
+          ...currentBadges.earned,
+          [badgeId]: earnedAt,
+        },
+      };
+    });
+  };
+
+  const toggleFavoriteBadge = (badgeId: string) => {
+    setPlayerBadges((currentBadges) => {
+      if (!currentBadges.earned[badgeId]) {
+        return currentBadges;
+      }
+
+      if (currentBadges.favoriteBadgeIds.includes(badgeId)) {
+        return {
+          ...currentBadges,
+          favoriteBadgeIds: currentBadges.favoriteBadgeIds.filter((currentBadgeId) => currentBadgeId !== badgeId),
+        };
+      }
+
+      if (currentBadges.favoriteBadgeIds.length >= 3) {
+        return currentBadges;
+      }
+
+      return {
+        ...currentBadges,
+        favoriteBadgeIds: [...currentBadges.favoriteBadgeIds, badgeId],
+      };
+    });
   };
 
   const updateQuestSlotExchangeRule = (
@@ -7533,7 +8465,7 @@ function App() {
     }
 
     const confirmed = window.confirm(
-      `${exchangeRule.price}PTを使って、フリークエスト枠を1つ増やしますか？`,
+      `${exchangeRule.price}PTを使って、コアルーティン枠を1つ増やしますか？`,
     );
 
     if (!confirmed) {
@@ -7542,7 +8474,7 @@ function App() {
 
     exchangeLockRef.current = true;
     const now = new Date().toISOString();
-    const reason = 'フリークエスト枠 +1';
+    const reason = 'コアルーティン枠 +1';
 
     setPlayerEconomy((currentEconomy) => {
       if (currentEconomy.currentPoints < exchangeRule.price) {
@@ -7587,7 +8519,7 @@ function App() {
     });
     setExchangeToast({
       id: `exchange-toast:quest-slot:${now}`,
-      message: `フリークエスト枠が${nextSlots}個に増えました！`,
+      message: `コアルーティン枠が${nextSlots}個に増えました！`,
     });
     window.setTimeout(() => {
       exchangeLockRef.current = false;
@@ -7601,7 +8533,7 @@ function App() {
     {
       id: 'quest-slot-total',
       category: 'questSlot',
-      label: 'フリークエスト枠 +1',
+      label: 'コアルーティン枠 +1',
       price: gameBalance.questSlotExchange.price,
       enabled: gameBalance.questSlotExchange.enabled,
       maxPurchases: Math.max(
@@ -7615,6 +8547,10 @@ function App() {
     kind: CoreRoutineKind,
     context: 'today' | 'history' = 'today',
   ) => {
+    if (context === 'today') {
+      setTodayView('notes');
+    }
+
     const targetRef =
       context === 'history'
         ? kind === 'memo'
@@ -7624,8 +8560,10 @@ function App() {
         ? dailyMemoTextareaRef
         : dailyEventTextareaRef;
 
-    targetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    window.setTimeout(() => targetRef.current?.focus(), 240);
+    window.requestAnimationFrame(() => {
+      targetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      window.setTimeout(() => targetRef.current?.focus(), 240);
+    });
   };
   const getCoreRoutineEntryKey = (coreRoutineId: CoreRoutineId) => `core:${coreRoutineId}`;
   const getSectionCoreRoutineEntries = (sectionId: string): RoutineRenderEntry[] =>
@@ -7788,19 +8726,14 @@ function App() {
   const activeRecordViewOption =
     recordViewOptions.find((option) => option.key === recordView) ?? recordViewOptions[0];
   const activeRecordHeading = recordViewHeadings[recordView];
-  const activeScheduleViewOption =
-    scheduleViewOptions.find((option) => option.key === scheduleView) ?? scheduleViewOptions[0];
-  const activeScheduleHeading = scheduleViewHeadings[scheduleView];
-  const activeTodoStatusOption =
-    todoStatusOptions.find((option) => option.key === todoView) ?? todoStatusOptions[0];
-  const activeTodoHeading = todoStatusHeadings[todoView];
 
   return (
     <main
       className="app"
       data-page={page}
+      data-today-view={page === 'today' ? todayView : undefined}
       data-record-view={page === 'records' ? recordView : undefined}
-      data-schedule-view={page === 'schedule' ? scheduleView : undefined}
+      data-schedule-view={isTodayScheduleView ? scheduleView : undefined}
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
       <div className="app-content">
@@ -7816,19 +8749,15 @@ function App() {
               </>
             )}
             {page === 'history' && 'スタンプ帳'}
-            {page === 'schedule' && `${activeScheduleViewOption.icon} ${activeScheduleHeading}`}
-            {page === 'todos' && `☑️ やること`}
             {page === 'records' && `${activeRecordViewOption.icon} ${activeRecordHeading}`}
             {page === 'shop' && 'ショップ'}
             {page === 'settings' && '設定'}
           </h1>
-          {page === 'schedule' && <p className="record-header-kicker">スケジュール</p>}
-          {page === 'todos' && <p className="record-header-kicker">{activeTodoStatusOption.icon} {activeTodoHeading}</p>}
           {page === 'records' && <p className="record-header-kicker">記録</p>}
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
-        {page === 'today' && (
+        {page === 'today' && (todayView === 'quests' || todayView === 'notes') && (
           <div className="quest-date-switch" aria-label="クエストの日付切り替え">
             <button
               data-active={!isToday ? 'true' : 'false'}
@@ -7847,106 +8776,6 @@ function App() {
           </div>
         )}
 
-        {page === 'today' && (
-          <section
-            className="economy-status"
-            aria-label="プレイヤーランクとPT"
-            data-popup-ui="true"
-          >
-            <button
-              aria-expanded={isRankPanelOpen}
-              className="rank-status-button"
-              onClick={() => {
-                setNoteEditorTarget(null);
-                setTimerSettingItemId(null);
-                setIsRankPanelOpen((current) => !current);
-              }}
-              type="button"
-            >
-              <span className="rank-status-hero">
-                <span className="rank-status-avatar" aria-hidden="true">
-                  {playerIcon.emoji}
-                </span>
-                <span className="rank-status-identity">
-                  <span className="rank-status-name">{playerDisplayName}</span>
-                  <span className="rank-status-main">🏅 Rank {playerRankProgress.rank}</span>
-                </span>
-              </span>
-              <span className="rank-status-pt">
-                <span className="rank-status-pt-main">💰 {playerEconomy.currentPoints}PT</span>
-                <span className="rank-status-multiplier">
-                  ×{playerRankProgress.multiplier.toFixed(2)}
-                </span>
-              </span>
-              <span className="rank-status-routines" aria-label="ルーティン数">
-                <span>📜 コアルーティン {coreRoutineCount}個</span>
-                <span>🎯 フリークエスト {freeQuestCount}個</span>
-              </span>
-              <span
-                className="rank-status-earned"
-                data-empty={selectedDateEarnedPoints === 0 ? 'true' : 'false'}
-              >
-                ✨ {selectedDateEarnedPointsLabel} +{selectedDateEarnedPoints}PT
-              </span>
-              <span className="rank-status-caret" aria-hidden="true">
-                {isRankPanelOpen ? '▲' : '▼'}
-              </span>
-            </button>
-            {isRankPanelOpen && (
-              <div className="rank-detail-panel" role="dialog" aria-label="プレイヤー成長詳細">
-                <div className="rank-detail-header">
-                  <span aria-hidden="true">🏅</span>
-                  <div>
-                    <h2>Rank {playerRankProgress.rank}</h2>
-                    <p>
-                      {playerRankProgress.nextRank
-                        ? `次のランクまであと${playerRankProgress.starsUntilNextRank}★`
-                        : '現在の最高ランクです'}
-                    </p>
-                  </div>
-                  <button
-                    aria-label="ランク詳細を閉じる"
-                    onClick={() => setIsRankPanelOpen(false)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </div>
-                <dl className="rank-detail-stats">
-                  <div>
-                    <dt>累計スター</dt>
-                    <dd>{playerEconomy.lifetimeStarsEarned}★</dd>
-                  </div>
-                  <div>
-                    <dt>所持PT</dt>
-                    <dd>{playerEconomy.currentPoints}PT</dd>
-                  </div>
-                  <div>
-                    <dt>累計獲得PT</dt>
-                    <dd>{playerEconomy.lifetimeEarnedPoints}PT</dd>
-                  </div>
-                  <div>
-                    <dt>獲得倍率</dt>
-                    <dd>×{playerRankProgress.multiplier.toFixed(2)}</dd>
-                  </div>
-                  <div>
-                    <dt>次ランク必要</dt>
-                    <dd>
-                      {playerRankProgress.nextRank
-                        ? `${playerEconomy.lifetimeStarsEarned + playerRankProgress.starsUntilNextRank}★`
-                        : '達成済み'}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>あと</dt>
-                    <dd>{playerRankProgress.starsUntilNextRank}★</dd>
-                  </div>
-                </dl>
-              </div>
-            )}
-          </section>
-        )}
-
         {pointToast && (
           <div
             className="point-toast"
@@ -7962,6 +8791,284 @@ function App() {
               <span className="point-toast-points">+{pointToast.points}PT</span>
             </span>
           </div>
+        )}
+
+        {isTodayStatusView && (
+          <section className="player-status-page" aria-label="ステータス">
+            <div className="player-status-page-header">
+              <p>STATUS</p>
+              <h2>🏅 ステータス</h2>
+            </div>
+            <div className="player-status-block">
+              <div className="player-status-block-header">
+                <h3>プレイヤー基本情報</h3>
+                {isStatusProfileEditing ? (
+                  <div className="player-status-actions">
+                    <button
+                      disabled={!statusProfileDraft.displayName.trim()}
+                      onClick={saveStatusProfileEditing}
+                      type="button"
+                    >
+                      保存
+                    </button>
+                    <button onClick={cancelStatusProfileEditing} type="button">
+                      キャンセル
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={startStatusProfileEditing} type="button">
+                    編集
+                  </button>
+                )}
+              </div>
+              <PlayerStatusCard
+                freeQuestCount={freeQuestCount}
+                isDetailOpen={isRankPanelOpen}
+                onCloseDetail={() => setIsRankPanelOpen(false)}
+                onToggleDetail={() => {
+                  setNoteEditorTarget(null);
+                  setTimerSettingItemId(null);
+                  setIsRankPanelOpen((current) => !current);
+                }}
+                playerDisplayName={playerDisplayName}
+                playerEconomy={playerEconomy}
+                playerIconEmoji={playerIcon.emoji}
+                playerRankProgress={playerRankProgress}
+                selectedDateEarnedPoints={selectedDateEarnedPoints}
+                selectedDateEarnedPointsLabel={selectedDateEarnedPointsLabel}
+              />
+              {isStatusProfileEditing && (
+                <div className="player-status-edit-panel">
+                  <label>
+                    <span>プレイヤー名</span>
+                    <input
+                      maxLength={20}
+                      onChange={(event) =>
+                        setStatusProfileDraft((currentDraft) => ({
+                          ...currentDraft,
+                          displayName: event.target.value.slice(0, 20),
+                        }))
+                      }
+                      placeholder="名前を入力"
+                      type="text"
+                      value={statusProfileDraft.displayName}
+                    />
+                  </label>
+                  <div className="player-status-icon-edit">
+                    <button
+                      className="player-status-icon-button"
+                      onClick={() => setIsIconPickerOpen((current) => !current)}
+                      type="button"
+                    >
+                      <span aria-hidden="true">{getPlayerIconOption(statusProfileDraft.iconId).emoji}</span>
+                      アイコンを選ぶ
+                    </button>
+                    {isIconPickerOpen && (
+                      <div className="player-status-icon-grid" role="radiogroup" aria-label="ステータス用アイコン">
+                        {playerIconOptions.map((option) => (
+                          <button
+                            aria-checked={statusProfileDraft.iconId === option.id}
+                            aria-label={option.label}
+                            data-active={statusProfileDraft.iconId === option.id ? 'true' : 'false'}
+                            key={option.id}
+                            onClick={() =>
+                              setStatusProfileDraft((currentDraft) => ({
+                                ...currentDraft,
+                                iconId: option.id,
+                              }))
+                            }
+                            role="radio"
+                            type="button"
+                          >
+                            <span aria-hidden="true">{option.emoji}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="player-status-block player-status-favorite-badges">
+              <h3>お気に入りバッジ</h3>
+              <div className="favorite-badge-list">
+                {playerBadges.favoriteBadgeIds.length > 0 ? (
+                  playerBadges.favoriteBadgeIds.map((badgeId) => {
+                    const badge = basicBadgeDefinitions.find((definition) => definition.id === badgeId);
+
+                    if (!badge) {
+                      return null;
+                    }
+
+                    return (
+                      <button
+                        className="favorite-badge-chip"
+                        key={badge.id}
+                        onClick={() => setSelectedBadgeId(badge.id)}
+                        type="button"
+                      >
+                        <span aria-hidden="true">{badge.icon}</span>
+                        {badge.name}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p>取得済みバッジから最大3個まで選べます。</p>
+                )}
+              </div>
+            </div>
+            <div className="player-status-block player-status-growth-block">
+              <h3>成長情報</h3>
+              <div className="player-status-summary-grid">
+                <div>
+                  <span>Rank</span>
+                  <strong>{playerRankProgress.rank}</strong>
+                </div>
+                <div>
+                  <span>累計獲得スター</span>
+                  <strong>{playerEconomy.lifetimeStarsEarned}★</strong>
+                </div>
+                <div>
+                  <span>✨ PTボーナス倍率</span>
+                  <strong>×{playerRankProgress.multiplier.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="player-status-block player-status-holdings-block">
+              <h3>所持情報</h3>
+              <div className="player-status-summary-grid">
+                <div>
+                  <span>所持PT</span>
+                  <strong>{playerEconomy.currentPoints}PT</strong>
+                </div>
+                <div>
+                  <span>コアルーティン数</span>
+                  <strong>{freeQuestCount}個</strong>
+                </div>
+                <div>
+                  <span>獲得バッジ</span>
+                  <strong>{Object.keys(playerBadges.earned).length}個</strong>
+                </div>
+              </div>
+            </div>
+            <div className="player-status-block player-status-profile-block">
+              <div className="player-status-block-header">
+                <h3>プロフィール</h3>
+                {!isStatusProfileEditing && (
+                  <button onClick={startStatusProfileEditing} type="button">
+                    編集
+                  </button>
+                )}
+              </div>
+              {isStatusProfileEditing ? (
+                <div className="player-status-profile-edit">
+                  {([
+                    ['oneLineProfile', 'ひとことプロフィール', '今日も、ゆるく一歩。', 120],
+                    ['favoriteThings', '好きなこと', 'ランニング、ゲーム、まちづくり', 200],
+                    ['currentGoal', '今の目標', '毎日少しずつ前へ進む', 200],
+                  ] as const).map(([field, label, placeholder, maxLength]) => (
+                    <label key={field}>
+                      <span>{label}</span>
+                      <textarea
+                        maxLength={maxLength}
+                        onChange={(event) => {
+                          adjustTextareaHeight(event.currentTarget);
+                          setStatusProfileDraft((currentDraft) => ({
+                            ...currentDraft,
+                            [field]: event.target.value.slice(0, maxLength),
+                          }));
+                        }}
+                        placeholder={placeholder}
+                        ref={adjustTextareaHeight}
+                        rows={1}
+                        value={statusProfileDraft[field]}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <dl className="player-status-profile-read">
+                  <div>
+                    <dt>ひとことプロフィール</dt>
+                    <dd>{playerProfile.oneLineProfile || '未入力'}</dd>
+                  </div>
+                  <div>
+                    <dt>好きなこと</dt>
+                    <dd>{playerProfile.favoriteThings || '未入力'}</dd>
+                  </div>
+                  <div>
+                    <dt>今の目標</dt>
+                    <dd>{playerProfile.currentGoal || '未入力'}</dd>
+                  </div>
+                </dl>
+              )}
+            </div>
+            <div className="player-status-block player-status-badge-block">
+              <h3>バッジ一覧</h3>
+              <div className="badge-grid">
+                {basicBadgeDefinitions.map((badge) => {
+                  const earnedAt = playerBadges.earned[badge.id];
+                  const isEarned = Boolean(earnedAt);
+                  const isFavorite = playerBadges.favoriteBadgeIds.includes(badge.id);
+
+                  return (
+                    <article
+                      className="badge-card"
+                      data-earned={isEarned ? 'true' : 'false'}
+                      key={badge.id}
+                    >
+                      <button
+                        className="badge-card-main"
+                        onClick={() => setSelectedBadgeId(badge.id)}
+                        type="button"
+                      >
+                        <span className="badge-card-icon" aria-hidden="true">{badge.icon}</span>
+                        <span>
+                          <strong>{badge.name}</strong>
+                          <small>
+                            {isEarned && earnedAt
+                              ? `${getDateFromKey(getDateKey(new Date(earnedAt))).getMonth() + 1}月${getDateFromKey(getDateKey(new Date(earnedAt))).getDate()}日 獲得`
+                              : '未獲得'}
+                          </small>
+                        </span>
+                      </button>
+                      <button
+                        className="badge-favorite-button"
+                        disabled={!isEarned || (!isFavorite && playerBadges.favoriteBadgeIds.length >= 3)}
+                        onClick={() => toggleFavoriteBadge(badge.id)}
+                        type="button"
+                      >
+                        {isFavorite ? '★' : '☆'}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+              {selectedBadgeId && (() => {
+                const badge = basicBadgeDefinitions.find((definition) => definition.id === selectedBadgeId);
+
+                if (!badge) {
+                  return null;
+                }
+
+                const earnedAt = playerBadges.earned[badge.id];
+
+                return (
+                  <div className="badge-detail-panel" role="status">
+                    <span aria-hidden="true">{badge.icon}</span>
+                    <div>
+                      <strong>{badge.name}</strong>
+                      <p>{badge.description}</p>
+                      <small>{earnedAt ? `${backupDateTimeFormatter.format(new Date(earnedAt))} 獲得` : 'まだ獲得していません'}</small>
+                    </div>
+                    <button onClick={() => setSelectedBadgeId(null)} type="button">
+                      ×
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          </section>
         )}
 
         {page === 'settings' && (
@@ -8204,7 +9311,7 @@ function App() {
                 <div className="admin-point-targets">
                   {([
                     ['wake', '起床'],
-                    ['normal', 'フリークエスト'],
+                    ['normal', 'コアルーティン'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
                     ['dailyNudge', '本日の日替わりクエスト'],
@@ -8270,7 +9377,7 @@ function App() {
                       />
                     </label>
                     <label>
-                      <span>PT倍率</span>
+                      <span>PTボーナス倍率</span>
                       <input
                         min="0.1"
                         onChange={(event) =>
@@ -8290,19 +9397,19 @@ function App() {
                   <div>
                     <h4>実装済み</h4>
                     <ul>
-                      <li>フリークエスト完了によるPT獲得</li>
+                      <li>コアルーティン完了によるPT獲得</li>
                       <li>チェック解除によるPT取消</li>
                       <li>二重獲得防止</li>
                       <li>累計星によるランク計算</li>
-                      <li>ランクによるPT倍率</li>
+                      <li>ランクによるPTボーナス倍率</li>
                       <li>PTおよびランクの表示</li>
                       <li>本日の日替わりクエスト完了によるPT獲得</li>
                       <li>本日の日替わりクエスト連続記録</li>
-                      <li>記憶系コアルーティン完了によるPT獲得</li>
-                      <li>記憶系コアルーティン本文削除によるPT取消</li>
+                      <li>記憶系固定クエスト完了によるPT獲得</li>
+                      <li>記憶系固定クエスト本文削除によるPT取消</li>
                       <li>ショップタブ</li>
                       <li>所持PT表示</li>
-                      <li>PTによるフリークエスト枠購入</li>
+                      <li>PTによるコアルーティン枠購入</li>
                       <li>PT支出履歴</li>
                       <li>所持PT不足判定</li>
                       <li>最大枠判定</li>
@@ -8323,9 +9430,9 @@ function App() {
                 </div>
               </div>
               <div className="admin-balance-block admin-slot-exchange-settings">
-                <h3>フリークエスト枠交換設定</h3>
+                <h3>コアルーティン枠交換設定</h3>
                 <div className="admin-slot-row">
-                  <h4>フリークエスト枠 +1</h4>
+                  <h4>コアルーティン枠 +1</h4>
                   <p>
                     利用可能：{getEffectiveQuestSlotLimit(playerUnlocks, gameBalanceDraft)}枠 /
                     使用中：{countFreeQuestItems(displaySections)}枠
@@ -8381,7 +9488,7 @@ function App() {
                   </label>
                 </div>
                 <p className="admin-balance-note">
-                  プレイヤーモードでは、朝・昼・夕・夜のフリークエスト合計数が追加上限になります。
+                  プレイヤーモードでは、朝・昼・夕・夜のコアルーティン合計数が追加上限になります。
                   開発者モードでは枠制限はありません。
                 </p>
               </div>
@@ -8513,7 +9620,11 @@ function App() {
                   <button
                     className="template-tab-button"
                     data-active={editTargetKey === template ? 'true' : 'false'}
-                    onClick={() => setEditTargetKey(template)}
+                    onClick={() => {
+                      setEditTargetKey(template);
+                      setRoutineDrafts({});
+                      routineDraftComposingSectionsRef.current.clear();
+                    }}
                     type="button"
                   >
                     {getTemplateLabel(template)}
@@ -8567,7 +9678,7 @@ function App() {
           </section>
         )}
 
-        {(page === 'today' || page === 'settings') && (
+        {(isTodayQuestView || page === 'settings') && (
         <div
           className="routine-list"
           data-progress-level={page === 'today' ? selectedDateVisualRank.level : undefined}
@@ -8738,8 +9849,8 @@ function App() {
             </div>
           )}
           {canEditRoutines && gameMode === 'player' && (
-            <div className="quest-slot-usage" aria-label="フリークエスト枠">
-              <strong>フリークエスト枠</strong>
+            <div className="quest-slot-usage" aria-label="コアルーティン枠">
+              <strong>コアルーティン枠</strong>
               <span>{usedQuestSlots} / {totalQuestSlotLimit} 使用中</span>
               <span>残り{remainingQuestSlots}枠</span>
             </div>
@@ -8905,7 +10016,9 @@ function App() {
                             <span aria-hidden="true">{coreRoutine.icon}</span>
                             {coreRoutineLabel}
                           </button>
-                          <span className="core-routine-mini-badge">コアルーティン</span>
+                          <span className="quest-kind-mini-badge" data-kind="fixed">
+                            固定クエスト
+                          </span>
                         </div>
                         {canEditCoreRoutine && (
                           <label className="core-routine-section-select">
@@ -9055,7 +10168,7 @@ function App() {
                             onBlur={() => finishEditingItem(item, section.id)}
                             onChange={(event) => setEditingLabel(event.target.value)}
                             onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
+                              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                                 event.currentTarget.blur();
                               }
 
@@ -9096,6 +10209,12 @@ function App() {
                             {item.label}
                           </button>
                         )}
+                        <span
+                          className="quest-kind-mini-badge"
+                          data-kind={isFixedItem ? 'fixed' : 'core'}
+                        >
+                          {isFixedItem ? '固定クエスト' : 'コアルーティン'}
+                        </span>
                       </div>
                       {page === 'today' &&
                         !isEditMode &&
@@ -9213,8 +10332,44 @@ function App() {
                     </div>
                   );
                 })}
+                {canEditSection && Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
+                  <div
+                    className="routine-item routine-draft-item"
+                    data-section-id={section.id}
+                    data-routine-draft="true"
+                  >
+                    <span className="routine-check routine-draft-check" aria-hidden="true" />
+                    <div className="routine-name">
+                      <input
+                        aria-label={`${section.title}へ追加するコアルーティン`}
+                        autoFocus
+                        onBlur={(event) => commitRoutineDraft(section.id, event.currentTarget.value)}
+                        onChange={(event) => updateRoutineDraft(section.id, event.target.value)}
+                        onCompositionEnd={(event) => {
+                          routineDraftComposingSectionsRef.current.delete(section.id);
+                          updateRoutineDraft(section.id, event.currentTarget.value);
+                        }}
+                        onCompositionStart={() =>
+                          routineDraftComposingSectionsRef.current.add(section.id)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                            event.currentTarget.blur();
+                          }
+
+                          if (event.key === 'Escape') {
+                            discardRoutineDraft(section.id);
+                          }
+                        }}
+                        placeholder={isBonusSection ? '追加でやったこと' : 'クエスト名を入力'}
+                        type="text"
+                        value={routineDrafts[section.id] ?? ''}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              {canEditSection && !isPlayerLimitReached && (
+              {canEditSection && !isPlayerLimitReached && !Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
                 <button
                   className="add-button section-add-button"
                   onClick={() => addRoutine(section.id)}
@@ -9224,12 +10379,12 @@ function App() {
                 </button>
               )}
               {canEditSection && isPlayerLimitReached && (
-                <p className="quest-limit-note">ショップでフリークエスト枠を増やせます</p>
+                <p className="quest-limit-note">ショップでコアルーティン枠を増やせます</p>
               )}
             </section>
             );
           })}
-          {page === 'today' && !isEditMode && (
+          {isTodayQuestView && !isEditMode && (
             <div className="quest-edit-action">
               <button
                 className="edit-mode-button"
@@ -9243,7 +10398,7 @@ function App() {
         </div>
         )}
 
-        {page === 'today' && !isEditMode && (
+        {isTodayNotesView && !isEditMode && (
           <section className="daily-memo daily-record-card" aria-label="日付別記録">
             <div className="daily-record-field daily-record-field-one-line">
               <label htmlFor="daily-memo">
@@ -9345,65 +10500,7 @@ function App() {
           </section>
         )}
 
-        {page === 'today' && !isEditMode && (
-          <section className="daily-todo-card" aria-label="今日のやること">
-            <div className="daily-todo-header">
-              <h2>☑️ 今日のやること</h2>
-              <span>
-                {dailyTodoStats.completedCount} / {dailyTodoStats.totalCount}
-              </span>
-            </div>
-            <div className="daily-todo-list">
-              {getManagedTodoRows(managedTodos, 'today').map((todo, index) => {
-                const isFilledTodo = hasManagedTodoText(todo);
-
-                return (
-                  <div
-                    className="daily-todo-row"
-                    data-completed={todo.completed ? 'true' : 'false'}
-                    data-empty={!isFilledTodo ? 'true' : 'false'}
-                    key={todo.id}
-                  >
-                    <input
-                      aria-label={`今日のやること ${index + 1}を完了`}
-                      checked={todo.completed}
-                      disabled={!isFilledTodo}
-                      onChange={(event) =>
-                        toggleManagedTodo(todo.id, event.target.checked)
-                      }
-                      type="checkbox"
-                    />
-                    <input
-                      aria-label={`今日のやること ${index + 1}`}
-                      onBlur={cleanupManagedTodos}
-                      onChange={(event) =>
-                        updateManagedTodoText(todo.id, 'today', event.target.value)
-                      }
-                      onCompositionEnd={(event) =>
-                        updateManagedTodoText(todo.id, 'today', event.currentTarget.value)
-                      }
-                      placeholder="やることをメモ"
-                      type="text"
-                      value={todo.text}
-                    />
-                    {isFilledTodo && (
-                      <button
-                        aria-label={`今日のやること ${index + 1}を削除`}
-                        className="daily-todo-delete-button"
-                        onClick={() => deleteManagedTodo(todo.id)}
-                        type="button"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {page === 'today' && !isEditMode && (
+        {isTodayNotesView && !isEditMode && (
           <section className="daily-any-memo-card" aria-label={dailyAnyMemoLabel}>
             <div className="daily-any-memo-header">
               <h2>🗒️ {dailyAnyMemoLabel}</h2>
@@ -9422,86 +10519,166 @@ function App() {
           </section>
         )}
 
-        {page === 'schedule' && (
+        {isTodayScheduleView && (
           <section
             className="schedule-page records-page record-view-content"
-            aria-label="月間スケジュール"
+            aria-label="スケジュール"
             key="schedule"
           >
-            <div className="records-month-header">
+            <div className="schedule-view-tabs" aria-label="スケジュール表示切り替え">
               <button
-                aria-label="前の月のスケジュールへ"
-                onClick={() => moveScheduleMonth(-1)}
+                aria-current={scheduleView === 'today' ? 'page' : undefined}
+                data-active={scheduleView === 'today' ? 'true' : 'false'}
+                onClick={() => setScheduleView('today')}
                 type="button"
               >
-                ‹
-              </button>
-              <h2>{scheduleMonthLabel}</h2>
-              <button
-                aria-label="次の月のスケジュールへ"
-                onClick={() => moveScheduleMonth(1)}
-                type="button"
-              >
-                ›
+                今日
               </button>
               <button
-                className="records-today-button"
-                onClick={showScheduleToday}
+                aria-current={scheduleView === 'month' ? 'page' : undefined}
+                data-active={scheduleView === 'month' ? 'true' : 'false'}
+                onClick={() => setScheduleView('month')}
                 type="button"
               >
-                今日へ
+                今月
               </button>
             </div>
-            <div className="records-day-list schedule-day-list">
-              {scheduleMonthDates.map((scheduleDate) => {
-                const dateKey = getDateKey(scheduleDate);
-                const holidayName = getHolidayName(scheduleDate);
-                const dayKind = getDateDisplayKind(scheduleDate);
-                const scheduleItems = loadDailySchedule(scheduleDate);
-                const hasSchedule = scheduleItems.length > 0;
-                const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
-                  weekdayShortLabels[scheduleDate.getDay()]
-                }${holidayName ? `・${holidayName}` : ''}）`;
+            {scheduleView === 'today' && (() => {
+              const todayScheduleItems = loadDailySchedule(today);
+              const todayHolidayName = getHolidayName(today);
+              const todayScheduleTitle = `${today.getMonth() + 1}月${today.getDate()}日（${
+                weekdayShortLabels[today.getDay()]
+              }${todayHolidayName ? `・${todayHolidayName}` : ''}）`;
 
-                return (
-                  <article
-                    className="record-day-card schedule-day-card"
-                    data-date-key={dateKey}
-                    data-day-kind={dayKind}
-                    data-empty={!hasSchedule ? 'true' : 'false'}
-                    data-today={dateKey === todayKey ? 'true' : 'false'}
-                    key={dateKey}
-                  >
+              return (
+                <section className="schedule-today-panel" aria-label="今日のスケジュール">
+                  <div className="schedule-today-header">
+                    <div>
+                      <p>今日のスケジュール</p>
+                      <h2>🗓️ {todayScheduleTitle}</h2>
+                    </div>
                     <button
-                      className="record-day-toggle"
-                      onClick={() => setSelectedScheduleDate(scheduleDate)}
+                      aria-label="今日のスケジュールを追加"
+                      className="schedule-floating-add-button"
+                      onClick={() => {
+                        setScheduleMonth(getMonthStart(today));
+                        setSelectedScheduleDate(today);
+                      }}
                       type="button"
                     >
-                      <span className="record-day-date">
-                        🗓️ {dateTitle}
-                      </span>
-                      <span className="record-day-meta">
-                        {dateKey === todayKey && <strong>今日</strong>}
-                        {hasSchedule ? `${scheduleItems.length}件` : '予定なし'}
-                      </span>
+                      ＋
                     </button>
+                  </div>
+                  {todayScheduleItems.length > 0 ? (
+                    <div className="schedule-read-list schedule-today-list">
+                      {todayScheduleItems.map((scheduleItem) => (
+                        <button
+                          className="schedule-today-item"
+                          key={scheduleItem.id}
+                          onClick={() => {
+                            setScheduleMonth(getMonthStart(today));
+                            setSelectedScheduleDate(today);
+                          }}
+                          type="button"
+                        >
+                          <time>{scheduleItem.time || '--:--'}</time>
+                          <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="schedule-today-empty">スケジュールなし</p>
+                  )}
+                </section>
+              );
+            })()}
+            {scheduleView === 'month' && (
+              <>
+                <div className="records-month-header">
+                  <button
+                    aria-label="前の月のスケジュールへ"
+                    onClick={() => moveScheduleMonth(-1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <h2>{scheduleMonthLabel}</h2>
+                  <button
+                    aria-label="次の月のスケジュールへ"
+                    onClick={() => moveScheduleMonth(1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                  <button
+                    aria-label="今日のスケジュールへ"
+                    className="records-today-button"
+                    onClick={showScheduleToday}
+                    type="button"
+                  >
+                    今日のスケジュール
+                  </button>
+                </div>
+                <div className="records-day-list schedule-day-list">
+                  {scheduleMonthDates.map((scheduleDate) => {
+                    const dateKey = getDateKey(scheduleDate);
+                    const holidayName = getHolidayName(scheduleDate);
+                    const dayKind = getDateDisplayKind(scheduleDate);
+                    const scheduleItems = loadDailySchedule(scheduleDate);
+                    const hasSchedule = scheduleItems.length > 0;
+                    const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
+                      weekdayShortLabels[scheduleDate.getDay()]
+                    }${holidayName ? `・${holidayName}` : ''}）`;
 
-                    {hasSchedule && (
-                      <div className="record-day-body schedule-day-body">
-                        <div className="schedule-read-list">
-                          {scheduleItems.map((scheduleItem) => (
-                            <p key={scheduleItem.id}>
-                              <time>{scheduleItem.time || '--:--'}</time>
-                              <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
+                    return (
+                      <article
+                        className="record-day-card schedule-day-card"
+                        data-date-key={dateKey}
+                        data-day-kind={dayKind}
+                        data-empty={!hasSchedule ? 'true' : 'false'}
+                        data-today={dateKey === todayKey ? 'true' : 'false'}
+                        key={dateKey}
+                      >
+                        <button
+                          aria-label={`${dateTitle}のスケジュールを開く`}
+                          className="schedule-floating-add-button schedule-day-add-button"
+                          onClick={() => setSelectedScheduleDate(scheduleDate)}
+                          type="button"
+                        >
+                          ＋
+                        </button>
+                        <button
+                          className="record-day-toggle"
+                          onClick={() => setSelectedScheduleDate(scheduleDate)}
+                          type="button"
+                        >
+                          <span className="record-day-date">
+                            🗓️ {dateTitle}
+                          </span>
+                          <span className="record-day-meta">
+                            {dateKey === todayKey && <strong>今日</strong>}
+                            {hasSchedule ? `${scheduleItems.length}件` : 'スケジュールなし'}
+                          </span>
+                        </button>
+
+                        {hasSchedule && (
+                          <div className="record-day-body schedule-day-body">
+                            <div className="schedule-read-list">
+                              {scheduleItems.map((scheduleItem) => (
+                                <p key={scheduleItem.id}>
+                                  <time>{scheduleItem.time || '--:--'}</time>
+                                  <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
             {selectedScheduleDate && (() => {
               const scheduleDate = selectedScheduleDate;
               const dateKey = getDateKey(scheduleDate);
@@ -9542,14 +10719,14 @@ function App() {
                     </div>
                     <div className="record-field schedule-field">
                       <label>
-                        🗓️ 予定
+                        🗓️ スケジュール
                         <span>{scheduleItems.length}件</span>
                       </label>
                       <div className="schedule-editor-list">
                         {visibleScheduleItems.map((scheduleItem, index) => (
                           <div className="schedule-editor-row" key={scheduleItem.id}>
                             <input
-                              aria-label={`${dateTitle}の予定 ${index + 1}の時間`}
+                              aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
                               onChange={(event) =>
                                 updateScheduleItem(
                                   scheduleDate,
@@ -9570,7 +10747,7 @@ function App() {
                               value={scheduleItem.time}
                             />
                             <input
-                              aria-label={`${dateTitle}の予定 ${index + 1}の内容`}
+                              aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
                               onCompositionEnd={(event) =>
                                 endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
                               }
@@ -9583,12 +10760,12 @@ function App() {
                                   event.target.value,
                                 )
                               }
-                              placeholder="予定内容"
+                              placeholder="スケジュール内容"
                               type="text"
                               value={scheduleItem.text}
                             />
                             <button
-                              aria-label={`${dateTitle}の予定 ${index + 1}を削除`}
+                              aria-label={`${dateTitle}のスケジュール ${index + 1}を削除`}
                               className="schedule-delete-button"
                               onClick={() => removeScheduleItem(scheduleDate, scheduleItem.id)}
                               type="button"
@@ -9604,7 +10781,7 @@ function App() {
                             key={scheduleDraft.id}
                           >
                             <input
-                              aria-label={`${dateTitle}の新しい予定 ${index + 1}の時間`}
+                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}の時間`}
                               onChange={(event) =>
                                 updateScheduleDraft(
                                   scheduleDate,
@@ -9625,7 +10802,7 @@ function App() {
                               value={scheduleDraft.time}
                             />
                             <input
-                              aria-label={`${dateTitle}の新しい予定 ${index + 1}の内容`}
+                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}の内容`}
                               onCompositionEnd={(event) =>
                                 endScheduleDraftComposition(
                                   scheduleDate,
@@ -9642,13 +10819,13 @@ function App() {
                                   event.target.value,
                                 )
                               }
-                              placeholder="予定を追加"
+                              placeholder="スケジュールを追加"
                               type="text"
                               value={scheduleDraft.text}
                             />
                             {hasScheduleDraftValue(scheduleDraft) ? (
                               <button
-                                aria-label={`${dateTitle}の新しい予定 ${index + 1}を削除`}
+                                aria-label={`${dateTitle}の新しいスケジュール ${index + 1}を削除`}
                                 className="schedule-delete-button"
                                 onClick={() => removeScheduleDraft(scheduleDate, scheduleDraft.id)}
                                 type="button"
@@ -9666,7 +10843,7 @@ function App() {
                             onClick={() => addScheduleDraftRow(scheduleDate)}
                             type="button"
                           >
-                            ＋ 予定を追加
+                            ＋ スケジュールを追加
                           </button>
                         )}
                       </div>
@@ -9678,144 +10855,302 @@ function App() {
           </section>
         )}
 
-        {page === 'todos' && (
-          <section className="todo-manager-page record-view-content" aria-label="やること管理">
-            <div className="todo-manager-intro">
-              <p>予定は日時、やることは今の置き場所で整理します。</p>
-            </div>
-            <div className="todo-status-tabs" aria-label="やることの区分切り替え">
-              {todoStatusOptions.map((option) => (
-                <button
-                  aria-current={todoView === option.key ? 'page' : undefined}
-                  data-active={todoView === option.key ? 'true' : 'false'}
-                  key={option.key}
-                  onClick={() => setTodoView(option.key)}
-                  type="button"
-                >
-                  <span aria-hidden="true">{option.icon}</span>
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            {todoView !== 'completed' ? (() => {
-              const currentStatus = todoView;
-              const rows = getManagedTodoRows(managedTodos, currentStatus);
-              const stats = getManagedTodoStats(managedTodos, currentStatus);
+        {isTodayTodoView && (() => {
+          const completedTodos = managedTodos
+            .filter((todo) =>
+              hasManagedTodoText(todo) &&
+              !todo.pendingReview &&
+              (todo.status === 'completed' || todo.completed),
+            )
+            .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''));
+          const renderManagedTodoRows = (
+            status: ActiveTodoStatus,
+            rows: ManagedTodoItem[],
+            options: { compactEmpty?: boolean; placeholder?: string } = {},
+          ) => (
+            <div
+              className="daily-todo-list"
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  return;
+                }
 
-              return (
-                <section className="daily-todo-card todo-manager-card" aria-label={todoStatusHeadings[currentStatus]}>
-                  <div className="daily-todo-header">
-                    <h2>{activeTodoStatusOption.icon} {todoStatusHeadings[currentStatus]}</h2>
-                    <span>{stats.totalCount}件</span>
-                  </div>
-                  <div className="daily-todo-list">
-                    {rows.map((todo, index) => {
-                      const isFilledTodo = hasManagedTodoText(todo);
+                setTodoDropTarget(null);
+              }}
+            >
+              {rows.map((todo, index) => {
+                const isDraftTodo = todo.id.startsWith('new-');
+                const todoText = isDraftTodo ? managedTodoDrafts[status] ?? '' : todo.text;
+                const hasRowText = todoText.trim().length > 0;
+                const isFilledTodo = !isDraftTodo && hasManagedTodoText(todo);
+                const isMovableTodo = isFilledTodo && !todo.completed && todo.status !== 'completed';
+                const isDropTarget =
+                  todoDropTarget?.status === status && todoDropTarget.beforeId === todo.id;
 
-                      return (
-                        <div
-                          className="daily-todo-row todo-manager-row"
-                          data-completed={todo.completed ? 'true' : 'false'}
-                          data-empty={!isFilledTodo ? 'true' : 'false'}
-                          key={todo.id}
-                        >
-                          <input
-                            aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}を完了`}
-                            checked={todo.completed}
-                            disabled={!isFilledTodo}
-                            onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
-                            type="checkbox"
-                          />
-                          <input
-                            aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}`}
-                            onBlur={cleanupManagedTodos}
+                return (
+                  <div
+                    className="daily-todo-row todo-manager-row"
+                    data-compact={options.compactEmpty ? 'true' : 'false'}
+                    data-completed={todo.completed ? 'true' : 'false'}
+                    data-dragging={draggedTodoId === todo.id ? 'true' : 'false'}
+                    data-drop-target={isDropTarget ? 'true' : 'false'}
+                    data-empty={!hasRowText ? 'true' : 'false'}
+                    key={todo.id}
+                    onDragOver={isMovableTodo
+                      ? (event) => updateManagedTodoDropTarget(event, status, todo.id)
+                      : undefined}
+                    onDrop={isMovableTodo
+                      ? (event) => dropManagedTodo(event, status, todo.id)
+                      : undefined}
+                  >
+                    {isMovableTodo ? (
+                      <button
+                        aria-label={`${todo.text}をドラッグして移動`}
+                        className="todo-drag-handle"
+                        draggable
+                        onDragEnd={endManagedTodoDrag}
+                        onDragStart={(event) => startManagedTodoDrag(event, todo)}
+                        type="button"
+                      >
+                        ≡
+                      </button>
+                    ) : (
+                      <span className="todo-drag-spacer" aria-hidden="true" />
+                    )}
+                    <input
+                      aria-label={`${todoStatusHeadings[status]} ${index + 1}を完了`}
+                      checked={todo.completed}
+                      disabled={!isFilledTodo}
+                      onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <textarea
+                      aria-label={`${todoStatusHeadings[status]} ${index + 1}`}
+                      onBlur={(event) => {
+                        if (isDraftTodo) {
+                          commitManagedTodoDraft(status, event.currentTarget.value);
+                        } else {
+                          cleanupManagedTodos();
+                        }
+                      }}
+                      onCompositionStart={() => {
+                        if (isDraftTodo) {
+                          startManagedTodoDraftComposition(status);
+                        }
+                      }}
+                      onChange={(event) => {
+                        adjustTextareaHeight(event.currentTarget);
+                        if (isDraftTodo) {
+                          updateManagedTodoDraft(status, event.target.value);
+                        } else {
+                          updateManagedTodoText(todo.id, status, event.target.value);
+                        }
+                      }}
+                      onCompositionEnd={(event) => {
+                        adjustTextareaHeight(event.currentTarget);
+                        if (isDraftTodo) {
+                          endManagedTodoDraftComposition(status, event.currentTarget.value);
+                        } else {
+                          updateManagedTodoText(todo.id, status, event.currentTarget.value);
+                        }
+                      }}
+                      placeholder={options.placeholder ?? 'やることをメモ'}
+                      ref={adjustTextareaHeight}
+                      rows={1}
+                      value={todoText}
+                    />
+                    {isFilledTodo && (
+                      <>
+                        {!todo.completed && (
+                          <select
+                            aria-label={`${todo.text}の区分を変更`}
                             onChange={(event) =>
-                              updateManagedTodoText(todo.id, currentStatus, event.target.value)
+                              moveManagedTodo(todo.id, event.target.value as ActiveTodoStatus)
                             }
-                            onCompositionEnd={(event) =>
-                              updateManagedTodoText(todo.id, currentStatus, event.currentTarget.value)
-                            }
-                            placeholder="やることをメモ"
-                            type="text"
-                            value={todo.text}
-                          />
-                          {isFilledTodo && (
-                            <>
-                              <select
-                                aria-label={`${todo.text}の区分を変更`}
-                                onChange={(event) =>
-                                  moveManagedTodo(
-                                    todo.id,
-                                    event.target.value as Exclude<TodoStatus, 'completed'>,
-                                  )
-                                }
-                                value={todo.status}
-                              >
-                                {todoStatusOptions
-                                  .filter((option) => option.key !== 'completed')
-                                  .map((option) => (
-                                    <option key={option.key} value={option.key}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                              </select>
-                              <button
-                                aria-label={`${todoStatusHeadings[currentStatus]} ${index + 1}を削除`}
-                                className="daily-todo-delete-button"
-                                onClick={() => deleteManagedTodo(todo.id)}
-                                type="button"
-                              >
-                                ×
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
+                            value={todo.status}
+                          >
+                            {activeTodoStatusOptions.map((option) => (
+                              <option key={option.key} value={option.key}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <button
+                          aria-label={`${todoStatusHeadings[status]} ${index + 1}を削除`}
+                          className="daily-todo-delete-button"
+                          onClick={() => deleteManagedTodo(todo.id)}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
                   </div>
-                </section>
-              );
-            })() : (
-              <section className="daily-todo-card todo-manager-card" aria-label="やり終えたこと">
-                <div className="daily-todo-header">
-                  <h2>✅ やり終えたこと</h2>
-                  <span>{getManagedTodoStats(managedTodos, 'completed').totalCount}件</span>
+                );
+              })}
+              {!options.compactEmpty && (
+                <div
+                  className="todo-drop-zone"
+                  data-active={
+                    todoDropTarget?.status === status && todoDropTarget.beforeId === null
+                      ? 'true'
+                      : 'false'
+                  }
+                  onDragOver={(event) => updateManagedTodoDropTarget(event, status, null)}
+                  onDrop={(event) => dropManagedTodo(event, status, null)}
+                >
+                  ここへ移動
                 </div>
-                <div className="todo-completed-list">
-                  {managedTodos.filter((todo) => todo.status === 'completed').length > 0 ? (
-                    managedTodos
-                      .filter((todo) => todo.status === 'completed')
-                      .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''))
-                      .map((todo) => (
+              )}
+            </div>
+          );
+
+          return (
+            <section className="todo-manager-page record-view-content" aria-label="やること管理">
+              <div className="todo-manager-intro">
+                <p>予定は日時、やることは今の置き場所で整理します。</p>
+              </div>
+              <div className="todo-status-tabs" aria-label="やることの区分切り替え">
+                {todoViewOptions.map((option) => (
+                  <button
+                    aria-current={todoView === option.key ? 'page' : undefined}
+                    data-active={todoView === option.key ? 'true' : 'false'}
+                    key={option.key}
+                    onClick={() => setTodoView(option.key)}
+                    type="button"
+                  >
+                    <span aria-hidden="true">{option.icon}</span>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {todoView === 'overview' ? (
+                <section className="todo-overview-list" aria-label="やること一覧">
+                  {activeTodoStatusOptions.map((option) => {
+                    const rows = getVisibleManagedTodosByStatus(managedTodos, option.key);
+                    const rowsWithDraft = [
+                      ...rows,
+                      createManagedTodoItem('', option.key, {
+                        id: `new-${option.key}`,
+                        completed: false,
+                      }),
+                    ];
+                    const isDropTarget =
+                      todoDropTarget?.status === option.key && todoDropTarget.beforeId === null;
+
+                    return (
+                      <article
+                        className="todo-overview-section"
+                        data-drop-target={isDropTarget ? 'true' : 'false'}
+                        data-status={option.key}
+                        key={option.key}
+                        onDragOver={(event) =>
+                          updateManagedTodoDropTarget(event, option.key, null)
+                        }
+                        onDrop={(event) => dropManagedTodo(event, option.key, null)}
+                      >
+                        <div className="todo-overview-header">
+                          <h2>{option.icon} {option.title}</h2>
+                          <span>{rows.length}件</span>
+                        </div>
+                        {renderManagedTodoRows(option.key, rowsWithDraft, {
+                          compactEmpty: true,
+                          placeholder: '＋追加',
+                        })}
+                      </article>
+                    );
+                  })}
+                </section>
+              ) : todoView === 'completed' ? (
+                <section className="daily-todo-card todo-manager-card" aria-label="やり終えたこと">
+                  <div className="daily-todo-header">
+                    <h2>✅ やり終えたこと</h2>
+                    <span>{completedTodos.length}件</span>
+                  </div>
+                  <div className="todo-completed-list">
+                    {completedTodos.length > 0 ? (
+                      completedTodos.map((todo) => (
                         <article className="todo-completed-item" key={todo.id}>
                           <div>
                             <p>{todo.text}</p>
                             <span>
                               {todo.completedAt
-                                ? backupDateTimeFormatter.format(new Date(todo.completedAt))
-                                : '完了日時なし'}
+                                ? `${backupDateTimeFormatter.format(new Date(todo.completedAt))} 完了`
+                                : '完了日時不明'}
                               {' / '}
-                              元の区分: {getTodoStatusLabel(todo.originalStatus ?? 'today')}
+                              元の区分: {getTodoStatusLabel(todo.originalStatus ?? (
+                                isActiveTodoStatus(todo.status) ? todo.status : 'today'
+                              ))}
+                              {todo.createdAt && (
+                                <>
+                                  {' / '}
+                                  作成: {backupDateTimeFormatter.format(new Date(todo.createdAt))}
+                                </>
+                              )}
                             </span>
                           </div>
-                          <button
-                            aria-label={`${todo.text}を履歴から削除`}
-                            className="daily-todo-delete-button"
-                            onClick={() => deleteManagedTodo(todo.id)}
-                            type="button"
-                          >
-                            ×
-                          </button>
+                          <div className="todo-completed-actions">
+                            <select
+                              aria-label={`${todo.text}を未完了へ戻す`}
+                              onChange={(event) => {
+                                const nextStatus = event.target.value as ActiveTodoStatus;
+
+                                if (nextStatus) {
+                                  restoreManagedTodo(todo.id, nextStatus);
+                                }
+                              }}
+                              value=""
+                            >
+                              <option value="" disabled>
+                                戻す先
+                              </option>
+                              {activeTodoStatusOptions.map((option) => (
+                                <option key={option.key} value={option.key}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              aria-label={`${todo.text}を履歴から削除`}
+                              className="daily-todo-delete-button"
+                              onClick={() => deleteManagedTodo(todo.id)}
+                              type="button"
+                            >
+                              ×
+                            </button>
+                          </div>
                         </article>
                       ))
-                  ) : (
-                    <p className="todo-completed-empty">やり終えたことはまだありません。</p>
-                  )}
-                </div>
-              </section>
-            )}
-          </section>
-        )}
+                    ) : (
+                      <p className="todo-completed-empty">やり終えたことはまだありません。</p>
+                    )}
+                  </div>
+                </section>
+              ) : (() => {
+                const currentStatus = todoView;
+                const rows = getManagedTodoRows(managedTodos, currentStatus);
+                const stats = getManagedTodoStats(managedTodos, currentStatus);
+                const statusOption = getActiveTodoStatusOption(currentStatus);
+
+                return (
+                  <section
+                    className="daily-todo-card todo-manager-card"
+                    aria-label={todoStatusHeadings[currentStatus]}
+                  >
+                    <div className="daily-todo-header">
+                      <h2>{statusOption.icon} {todoStatusHeadings[currentStatus]}</h2>
+                      <span>{stats.totalCount}件</span>
+                    </div>
+                    {renderManagedTodoRows(currentStatus, rows, {
+                      placeholder: '＋追加',
+                    })}
+                  </section>
+                );
+              })()}
+            </section>
+          );
+        })()}
 
         {page === 'records' && recordView !== 'achievements' && (
           <section
@@ -9846,47 +11181,39 @@ function App() {
               >
                 今日へ
               </button>
+              <div className="records-display-toggle" aria-label="記録一覧の表示モード">
+                {([
+                  ['all', '一覧'],
+                  ['withRecords', '記録あり'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    aria-pressed={recordDisplayMode === mode}
+                    data-active={recordDisplayMode === mode ? 'true' : 'false'}
+                    key={mode}
+                    onClick={() => setRecordDisplayMode(mode)}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="records-day-list">
-              {recordMonthDates.map((recordDate) => {
-                const dateKey = getDateKey(recordDate);
-                const holidayName = getHolidayName(recordDate);
-                const dayKind = getDateDisplayKind(recordDate);
-                const memoEntries = dateKey === selectedDateKey
-                  ? dailyMemo
-                  : dateKey === historySelectedDateKey
-                    ? historyDailyMemo
-                    : loadDailyMemo(recordDate);
-                const eventEntries = dateKey === selectedDateKey
-                  ? dailyEvent
-                  : dateKey === historySelectedDateKey
-                    ? historyDailyEvent
-                    : loadDailyEvent(recordDate);
-                const anyMemoValue = dateKey === selectedDateKey
-                  ? dailyAnyMemo
-                  : dateKey === historySelectedDateKey
-                    ? historyDailyAnyMemo
-                    : loadDailyAnyMemo(recordDate);
-                const savedMemoEntries = memoEntries.filter(
-                  (entry) => entry.saved && hasMeaningfulText(entry.text),
-                );
-                const savedEventEntries = eventEntries.filter(
-                  (entry) => entry.saved && hasMeaningfulText(entry.text),
-                );
-                const anyMemoText = anyMemoValue.trim();
-                const recordContentCount =
-                  recordView === 'memo'
-                    ? savedMemoEntries.length
-                    : recordView === 'events'
-                      ? savedEventEntries.length
-                      : anyMemoText.length > 0
-                        ? 1
-                        : 0;
-                const hasRecordContent = recordContentCount > 0;
-                const dateTitle = `${recordDate.getMonth() + 1}月${recordDate.getDate()}日（${
-                  weekdayShortLabels[recordDate.getDay()]
-                }${holidayName ? `・${holidayName}` : ''}）`;
-
+              {visibleRecordDaySummaries.length === 0 && (
+                <p className="records-empty-filter">この月の記録はまだありません</p>
+              )}
+              {visibleRecordDaySummaries.map(({
+                advancedEntries,
+                anyMemoText,
+                dateKey,
+                dateTitle,
+                dayKind,
+                hasRecordContent,
+                recordContentCount,
+                recordDate,
+                savedEventEntries,
+                savedMemoEntries,
+              }) => {
                 return (
                   <article
                     className="record-day-card"
@@ -9942,6 +11269,18 @@ function App() {
                             <p>{anyMemoText}</p>
                           </div>
                         )}
+                        {recordView === 'advanced' && advancedEntries.length > 0 && (
+                          <div className="record-read-section">
+                            <h3>⚙️ アドバンスト</h3>
+                            <div className="record-read-list">
+                              {advancedEntries.map((entry) => (
+                                <p key={`record-read-advanced-${dateKey}-${entry.id}`}>
+                                  {entry.label.trim()}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </article>
@@ -9970,6 +11309,21 @@ function App() {
                 : dateKey === historySelectedDateKey
                   ? historyDailyAnyMemo
                   : loadDailyAnyMemo(recordDate);
+              const advancedEntries = getAdvancedEntriesFromSections(
+                removeFixedRoutineItems(getSectionsForTarget(
+                  templateSettings,
+                  dateOverrides,
+                  dateSnapshots,
+                  resolveDateTarget(
+                    templateSettings,
+                    dateOverrides,
+                    dateSnapshots,
+                    recordDate,
+                    todayKey,
+                  ),
+                  todayKey,
+                )),
+              );
               const editorViewOption = recordViewOptions.find((option) => option.key === recordView);
               const editorTitle =
                 recordView === 'anyMemo'
@@ -10059,6 +11413,31 @@ function App() {
                       />
                     </div>
                     )}
+                    {recordView === 'advanced' && (
+                    <div className="record-field">
+                      <label>⚙️ アドバンスト</label>
+                      {advancedEntries.length > 0 ? (
+                        <div className="record-entry-list">
+                          {advancedEntries.map((entry) => (
+                            <textarea
+                              aria-label={`${dateTitle}のアドバンスト ${entry.label}`}
+                              key={`record-editor-advanced-${dateKey}-${entry.id}`}
+                              onChange={(event) => {
+                                adjustTextareaHeight(event.currentTarget);
+                                updateRecordAdvancedEntry(recordDate, entry.id, event.target.value);
+                              }}
+                              placeholder="追加でやったこと"
+                              ref={adjustTextareaHeight}
+                              rows={1}
+                              value={entry.label}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="record-editor-empty">この日のアドバンスト記録はありません。</p>
+                      )}
+                    </div>
+                    )}
                   </section>
                 </div>
               );
@@ -10128,6 +11507,8 @@ function App() {
                       setDraggedItemId(null);
                       setEditingItemId(null);
                       setEditingLabel('');
+                      setRoutineDrafts({});
+                      routineDraftComposingSectionsRef.current.clear();
                     }}
                     type="button"
                   >
@@ -10171,6 +11552,8 @@ function App() {
                         setDraggedItemId(null);
                         setEditingItemId(null);
                         setEditingLabel('');
+                        setRoutineDrafts({});
+                        routineDraftComposingSectionsRef.current.clear();
                       }}
                       type="button"
                     >
@@ -10184,6 +11567,8 @@ function App() {
                         setDraggedItemId(null);
                         setEditingItemId(null);
                         setEditingLabel('');
+                        setRoutineDrafts({});
+                        routineDraftComposingSectionsRef.current.clear();
                       }}
                       type="button"
                     >
@@ -10400,7 +11785,9 @@ function App() {
                                   <span aria-hidden="true">{coreRoutine.icon}</span>
                                   {coreRoutine.label.replace('今日', 'その日')}
                                 </button>
-                                <span className="core-routine-mini-badge">コアルーティン</span>
+                                <span className="quest-kind-mini-badge" data-kind="fixed">
+                                  固定クエスト
+                                </span>
                               </span>
                             </div>
                           );
@@ -10483,7 +11870,7 @@ function App() {
                                 onBlur={() => finishEditingItem(item, section.id)}
                                 onChange={(event) => setEditingLabel(event.target.value)}
                                 onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
+                                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                                     event.currentTarget.blur();
                                   }
 
@@ -10512,6 +11899,12 @@ function App() {
                             {item.time && (
                               <span className="fixed-time-display">{item.time}</span>
                             )}
+                            <span
+                              className="quest-kind-mini-badge"
+                              data-kind={isFixedItem ? 'fixed' : 'core'}
+                            >
+                              {isFixedItem ? '固定クエスト' : 'コアルーティン'}
+                            </span>
                           </span>
                           {historyItemTimerSeconds && !isHistoryEditMode && (
                             <span className="timer-badge">
@@ -10600,8 +11993,47 @@ function App() {
                         </div>
                         );
                       })}
+                      {isHistoryEditMode &&
+                        Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
+                        <div
+                          className="history-routine-item history-routine-draft-item"
+                          data-section-id={section.id}
+                          data-routine-draft="true"
+                        >
+                          <span className="history-routine-draft-check" aria-hidden="true" />
+                          <span className="history-routine-name">
+                            <input
+                              aria-label={`${section.title}へ追加するコアルーティン`}
+                              autoFocus
+                              onBlur={(event) => commitRoutineDraft(section.id, event.currentTarget.value)}
+                              onChange={(event) => updateRoutineDraft(section.id, event.target.value)}
+                              onCompositionEnd={(event) => {
+                                routineDraftComposingSectionsRef.current.delete(section.id);
+                                updateRoutineDraft(section.id, event.currentTarget.value);
+                              }}
+                              onCompositionStart={() =>
+                                routineDraftComposingSectionsRef.current.add(section.id)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                                  event.currentTarget.blur();
+                                }
+
+                                if (event.key === 'Escape') {
+                                  discardRoutineDraft(section.id);
+                                }
+                              }}
+                              placeholder={section.id === bonusSectionId ? '追加でやったこと' : 'クエスト名を入力'}
+                              type="text"
+                              value={routineDrafts[section.id] ?? ''}
+                            />
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {isHistoryEditMode && !isPlayerLimitReached && (
+                    {isHistoryEditMode &&
+                      !isPlayerLimitReached &&
+                      !Object.prototype.hasOwnProperty.call(routineDrafts, section.id) && (
                       <button
                         className="add-button section-add-button"
                         onClick={() => addRoutine(section.id)}
@@ -10611,7 +12043,7 @@ function App() {
                       </button>
                     )}
                     {isHistoryEditMode && isPlayerLimitReached && (
-                      <p className="quest-limit-note">ショップでフリークエスト枠を増やせます</p>
+                      <p className="quest-limit-note">ショップでコアルーティン枠を増やせます</p>
                     )}
                     </section>
                     );
@@ -10661,7 +12093,7 @@ function App() {
                   <dd>{playerEconomy.lifetimeStarsEarned}</dd>
                 </div>
                 <div>
-                  <dt>PT倍率</dt>
+                  <dt>PTボーナス倍率</dt>
                   <dd>×{playerRankProgress.multiplier.toFixed(2)}</dd>
                 </div>
               </dl>
@@ -11097,6 +12529,27 @@ function App() {
 
       </div>
 
+      {page === 'today' && !isEditMode && (
+        <nav
+          className="record-subtab-nav today-subtab-nav"
+          aria-label="今日画面の表示切り替え"
+        >
+          {todayViewOptions.map((option) => (
+            <button
+              aria-current={todayView === option.key ? 'page' : undefined}
+              className="record-subtab-item today-subtab-item"
+              data-active={todayView === option.key ? 'true' : 'false'}
+              key={option.key}
+              onClick={() => selectTodayView(option.key)}
+              type="button"
+            >
+              <span aria-hidden="true">{option.icon}</span>
+              {option.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {page === 'records' && (
         <nav
           className="record-subtab-nav"
@@ -11136,6 +12589,92 @@ function App() {
           </button>
         ))}
       </nav>
+
+      {isTodoReviewOpen && pendingTodoReviews.length > 0 && (
+        <div
+          className="todo-review-backdrop"
+          role="presentation"
+          onClick={deferTodoReview}
+        >
+          <section
+            aria-labelledby="todo-review-title"
+            aria-modal="true"
+            className="todo-review-panel"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="todo-review-header">
+              <div>
+                <p>☑️ やること整理</p>
+                <h2 id="todo-review-title">昨日のやることが残っています</h2>
+              </div>
+              <button
+                aria-label="あとで確認する"
+                onClick={deferTodoReview}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <p className="todo-review-lead">今日どうするか決めておこう。</p>
+            <div className="todo-review-bulk-actions" aria-label="一括操作">
+              <button onClick={() => applyTodoReviewBulkAction('today')} type="button">
+                全部今日へ移す
+              </button>
+              <button onClick={() => applyTodoReviewBulkAction('soon')} type="button">
+                全部早めに移す
+              </button>
+              <button onClick={deferTodoReview} type="button">
+                あとで確認する
+              </button>
+            </div>
+            <div className="todo-review-list">
+              {pendingTodoReviews.map((todo) => {
+                const originDate = todo.pendingReview?.originDate
+                  ? getDateFromKey(todo.pendingReview.originDate)
+                  : today;
+                const originLabel = `${originDate.getMonth() + 1}月${originDate.getDate()}日`;
+
+                return (
+                  <article className="todo-review-item" key={todo.id}>
+                    <div>
+                      <p>{todo.text}</p>
+                      <span>
+                        {originLabel} / 元の区分: {getTodoStatusLabel(todo.pendingReview?.fromStatus ?? 'today')}
+                      </span>
+                    </div>
+                    <select
+                      aria-label={`${todo.text}をどうするか`}
+                      onChange={(event) =>
+                        setTodoReviewActions((currentActions) => ({
+                          ...currentActions,
+                          [todo.id]: event.target.value as TodoReviewAction,
+                        }))
+                      }
+                      value={todoReviewActions[todo.id] ?? 'today'}
+                    >
+                      <option value="today">今日へ移す</option>
+                      <option value="tomorrow">明日へ移す</option>
+                      <option value="soon">早めにやるへ移す</option>
+                      <option value="someday">いずれやるへ移す</option>
+                      <option value="completed">完了にする</option>
+                      <option value="delete">削除</option>
+                    </select>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="todo-review-actions">
+              <button onClick={deferTodoReview} type="button">
+                あとで確認する
+              </button>
+              <button onClick={() => applyTodoReviewActions(todoReviewActions)} type="button">
+                決定
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {activeTimer?.isComplete && (
         <div className="timer-finished-backdrop" role="presentation">

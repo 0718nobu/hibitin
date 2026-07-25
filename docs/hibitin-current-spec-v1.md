@@ -25,15 +25,14 @@ PWA構成は `vite.config.ts` の `VitePWA` で定義されています。`regis
 画面管理は `src/App.tsx` の `PageName` です。
 
 ```ts
-type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' | 'settings';
+type PageName = 'today' | 'history' | 'schedule' | 'records' | 'shop' | 'settings';
 ```
 
-下部メインタブは7つです。
+下部メインタブは6つです。
 
 - `today`: 🎮 今日
 - `history`: 📅 スタンプ帳
 - `schedule`: 🗓️ スケジュール
-- `todos`: ☑️ やること
 - `records`: 📖 記録
 - `shop`: 🎁 ショップ
 - `settings`: ⚙️ 設定
@@ -43,6 +42,7 @@ type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' 
 表示内容:
 
 - アプリタイトル
+- 画面下部固定の今日サブタブ: クエスト / やること / ひとこと
 - 日付固定の今日の一言
 - 昨日 / 今日 切り替え
 - Rank / 所持PT / PT倍率 / 本日または昨日の獲得PT
@@ -51,8 +51,10 @@ type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' 
 - 達成ランク
 - タイマー状態
 - アイテム別メモ
-- 今日/昨日のできごと
-- 今日/昨日のひとこと
+- 今日/昨日のできごと（ひとことサブタブ）
+- 今日/昨日のひとこと（ひとことサブタブ）
+- なんでもメモ（ひとことサブタブ）
+- 今日のやること
 - 編集モード
 
 主なstate:
@@ -70,6 +72,7 @@ type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' 
 - `gameBalance`
 - `dailyNudgeCandidates`
 - `dailyNudgeRecords`
+- `todayView`
 
 保存データ:
 
@@ -91,16 +94,20 @@ type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' 
 - アドバンストはボーナスログ扱いで、フリークエスト枠の制限を受けず自由に追加できます。
 - 起床・就寝は達成率とPT対象です。ただし熟練度の対象外です。
 - 日替わりクエストはフリークエストとは独立し、達成率、熟練度、フリークエスト枠、スタンプ帳ランクには影響しません。PTは `gameBalance.pointSettings.dailyNudge` が有効な場合のみ付与されます。
+- 初期表示は `クエスト` サブタブです。クエスト一覧、日替わりクエスト、通常クエスト、コアルーティン、アドバンスト、今日のやることを表示します。
+- `やること` サブタブでは状態別やること管理を表示します。Today下部の `今日のやること` 欄と同じ `hibitin:todos:v2` を共有し、どちらで編集・チェックしても同期します。
+- `ひとこと` サブタブでは、今日/昨日のひとこと、今日/昨日のできごと、なんでもメモを表示・編集します。入力確定時のコアルーティン達成、PT付与、専用演出は既存仕様を維持します。
 
 ### 記録
 
 表示内容:
 
 - 月移動: 前月 / 今日へ / 翌月
-- 画面下部固定の記録サブタブ: ひとこと / できごと / メモ / 実績
+- 画面下部固定の記録サブタブ: ひとこと / できごと / メモ / アドバンスト / 実績
 - 1日から月末までの日付カード縦一覧
 - 日付、曜日、祝日名、今日マーカー
 - 選択中のサブタブに対応する保存済み内容
+- アドバンストサブタブでは日付別に追加済みアドバンスト項目を一覧表示
 - 実績サブタブでは従来の実績画面内容
 
 主なstate:
@@ -119,10 +126,10 @@ type PageName = 'today' | 'history' | 'schedule' | 'todos' | 'records' | 'shop' 
 連動:
 
 - Today画面と同じ保存キーを読み書きし、二重管理しません。
-- 月一覧は閲覧中心で、選択中サブタブの保存済み本文・なんでもメモだけを表示します。
+- 月一覧は閲覧中心で、選択中サブタブの保存済み本文・なんでもメモ・アドバンスト項目だけを表示します。
 - 未記入項目、入力欄、プレースホルダー、OKボタンは月一覧には表示しません。
 - 内容がない日はコンパクトな日付カードとして表示し、`記録なし` と表示します。
-- 日付カードをタップすると編集パネルを開き、その日のひとこと、できごと、なんでもメモのうち選択中の種類だけを編集できます。
+- 日付カードをタップすると編集パネルを開き、その日のひとこと、できごと、なんでもメモのうち選択中の種類だけを編集できます。アドバンストは閲覧中心で、記録画面では空の入力欄を表示しません。
 - 実績は独立したメインタブではなく、記録画面内の `実績` サブタブとして表示します。
 - 未来日にもひとこと、できごと、なんでもメモを入力できます。
 - 記録タブでの編集自体はPT、達成率、FIRST、スタンプ、Rank、スター、トロフィー、フリークエスト枠へ影響しません。
@@ -278,7 +285,7 @@ type RoutineSection = {
 - 今日タブの編集モード: `dateOverrides` に保存
 - スタンプ帳の編集モード: 選択日付の `dateOverrides` に保存
 - 設定タブ: `templates.normal` または `templates.holiday` を編集
-- 追加: `addRoutine()`
+- 追加: `addRoutine()` で仮入力欄を表示し、`commitRoutineDraft()` で空白以外の入力確定時だけ正式な `RoutineItem` を作成
 - 削除: `deleteRoutine()` が完全削除ではなくアーカイブへ移動
 - 復元: `restoreArchivedItem()`
 - 並び替え: HTML drag/drop + Pointer操作で `order` を再採番
@@ -299,9 +306,9 @@ type RoutineSection = {
 | セクション | アイテムID | 表示名 | タイマー | source |
 |---|---|---|---:|---|
 | 朝 | `morning-walk-or-running` | 散歩 or ランニング | 600秒 | default |
-| 昼 | `noon-chores` | 雑務 | 600秒 | default |
-| 夕 | `evening-workout-or-stretch` | 筋トレ or ストレッチ | 300秒 | default |
-| 夜 | `night-reading` | 読書 | 600秒 | default |
+| 昼 | なし | なし | なし | - |
+| 夕 | なし | なし | なし | - |
+| 夜 | なし | なし | なし | - |
 | アドバンスト | なし | なし | なし | - |
 
 固定アイテム:
@@ -461,11 +468,16 @@ type RoutineSection = {
 - 旧保存キー: `hibitin:todos:YYYY-MM-DD`。初回読み込み時に状態別データへ移行するため削除しない
 - 状態: `today` / `tomorrow` / `soon` / `someday` / `completed`
 - 表示名: 今日のやること / 明日のやること / 早めにやること / いずれやること / やり終えたこと
-- データ構造: `{ id, text, status, completed, createdAt, updatedAt, completedAt?, originalStatus? }[]`
-- Today画面には `today` のみ表示し、追加、編集、チェック、削除が可能
-- 独立した「やること」画面で5区分を切り替えて管理する。スケジュール配下の日付別やること管理は廃止
-- 未完了の `today` は翌日も `today` に繰り越す。未完了の `tomorrow` は翌日に `today` へ移動する
-- Todayでチェック済みの項目は当日中は `today` に完了状態で残り、翌日の起動時に `completed` へ移動する
+- データ構造: `{ id, text, status, completed, createdAt, updatedAt, completedAt?, originalStatus?, pendingReview? }[]`
+- Today画面の `クエスト` サブタブ下部には `today` のみ表示し、追加、編集、チェック、削除が可能
+- Today画面の `やること` サブタブでは5区分を切り替えて管理する。独立したやることメインタブと、スケジュール配下の日付別やること管理は廃止
+- `クエスト` サブタブ下部の `今日のやること` と、`やること` サブタブの `今日` 区分は同じデータを読み書きする
+- 日付が変わった後、未完了の `today` / `tomorrow` は自動移動せず `pendingReview` として確認待ちにする
+- 確認画面では各項目を `今日へ移す` / `明日へ移す` / `早めにやるへ移す` / `いずれやるへ移す` / `完了にする` / `削除` に振り分けられる
+- 一括操作は `全部今日へ移す` / `全部早めに移す` / `あとで確認する`
+- `あとで確認する` は未処理状態のまま閉じ、次回起動時に再確認できる
+- `完了にする` を含む場合は最終確認を入れ、完了日時は元の日付の終わりとして記録する
+- Todayでチェック済みの項目は当日中は `today` に完了状態で残り、翌日の起動時に `completed` へ移動する。未完了項目を自動で完了にはしない
 - `completed` には内容、完了日時、元の区分、作成日時を残し、閲覧・削除できる
 - 予定とは分離し、日時が決まっているものはスケジュール、状態や優先度で扱うものはやることとして管理する
 - PT、達成率、FIRST/PERFECT判定、スタンプ、Rank、星、トロフィー、コアルーティン数、フリークエスト数、フリークエスト枠には影響しない
@@ -711,7 +723,7 @@ type ShopItem = {
 
 - 保存キー: `hibitin:playerUnlocks:v2`
 - 構造: `{ totalQuestSlots: number }`
-- 初期合計枠: 4
+- 初期合計枠: 1
 - 最大合計枠: 10
 - 初期価格: 100PT
 - 枠判定対象: 朝・昼・夕・夜の通常アイテム合計
@@ -748,7 +760,8 @@ type ShopItem = {
 
 - `countFreeQuestItems()` が朝・昼・夕・夜のフリークエストを合計
 - `getEffectiveQuestSlotLimit()` が `playerUnlocks` と `gameBalance.questSlotExchange` から有効上限を計算
-- 追加時と追加ボタン表示時に判定
+- 仮入力開始時、正式追加時、追加ボタン表示時に判定
+- 空欄の仮入力は正式データ、削除履歴、アーカイブ、クラウドバックアップ対象には含めない
 
 ## 14. 管理者設定 / ゲームバランス設定
 
@@ -773,7 +786,7 @@ type ShopItem = {
 | 必要累計★ | `rankRules[].requiredLifetimeStars` | ランク算出に連動 | 0,5,15,30,50,80,120 |
 | PT倍率 | `rankRules[].pointMultiplier` | PT計算に連動 | 1.00〜1.75 |
 | フリークエスト枠販売 | `questSlotExchange.enabled` | ショップ購入可否に連動 | true |
-| 初期合計枠数 | `questSlotExchange.initialTotalSlots` | 有効枠下限に連動 | 4 |
+| 初期合計枠数 | `questSlotExchange.initialTotalSlots` | 有効枠下限に連動 | 1 |
 | 最大合計枠数 | `questSlotExchange.maxTotalSlots` | 有効枠上限/ショップ上限に連動 | 10 |
 | 価格 | `questSlotExchange.price` | ショップ購入額に連動 | 100 |
 | 日替わりクエスト管理 | `hibitin:dailyNudgeCandidates:v1` | 今後の日付抽選に連動 | 候補20件 |
