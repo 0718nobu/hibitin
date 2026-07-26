@@ -32,7 +32,7 @@ select {
 
 .app {
   min-height: 100vh;
-  padding: calc(92px + env(safe-area-inset-top)) 10px 28px;
+  padding: 12px 10px calc(132px + env(safe-area-inset-bottom));
   background:
     linear-gradient(180deg, #e8fff4 0%, #f7fbf4 38%),
     #f6f7f4;
@@ -40,7 +40,8 @@ select {
 
 .app[data-page='today'],
 .app[data-page='records'] {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-top: calc(62px + env(safe-area-inset-top));
+  padding-bottom: calc(132px + env(safe-area-inset-bottom));
 }
 
 .app-content {
@@ -3552,10 +3553,10 @@ h1 {
 .bottom-tab-nav {
   position: fixed;
   right: 6px;
-  top: calc(8px + env(safe-area-inset-top));
-  bottom: auto;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  top: auto;
   left: 6px;
-  z-index: 24;
+  z-index: 20;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 3px;
@@ -3586,7 +3587,8 @@ h1 {
 .record-subtab-nav {
   position: fixed;
   right: 10px;
-  bottom: calc(10px + env(safe-area-inset-bottom));
+  top: calc(8px + env(safe-area-inset-top));
+  bottom: auto;
   left: 10px;
   z-index: 19;
   display: grid;
@@ -4137,7 +4139,7 @@ h1 {
 
 .main-page-arrows {
   position: fixed;
-  top: 38%;
+  top: 56%;
   right: 0;
   left: 0;
   z-index: 18;
@@ -7395,12 +7397,13 @@ button.quest-support-badge:focus-visible {
 
 @media (max-width: 640px) {
   .app {
-    padding: calc(90px + env(safe-area-inset-top)) 8px 24px;
+    padding: 10px 8px calc(132px + env(safe-area-inset-bottom));
   }
 
   .app[data-page='today'],
   .app[data-page='records'] {
-    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+    padding-top: calc(60px + env(safe-area-inset-top));
+    padding-bottom: calc(132px + env(safe-area-inset-bottom));
   }
 
   .app-header {
