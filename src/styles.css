@@ -4139,37 +4139,37 @@ h1 {
 
 .main-page-arrows {
   position: fixed;
-  top: 44%;
+  top: 54%;
   right: 0;
   left: 0;
   z-index: 18;
   display: flex;
   justify-content: space-between;
-  padding: 0 max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left));
+  padding: 0 max(1px, env(safe-area-inset-right)) 0 max(1px, env(safe-area-inset-left));
   pointer-events: none;
 }
 
 .subtab-page-arrows {
-  top: 44%;
+  top: 54%;
 }
 
 .main-page-arrows button {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   place-items: center;
-  border: 1px solid rgb(45 127 89 / 18%);
+  border: 1px solid rgb(45 127 89 / 24%);
   border-radius: 999px;
-  background: rgb(255 255 255 / 62%);
+  background: rgb(255 255 255 / 72%);
   color: #1f7a5a;
   cursor: pointer;
   font: inherit;
-  font-size: 0.86rem;
+  font-size: 1rem;
   font-weight: 1000;
   box-shadow:
-    0 8px 20px rgb(27 87 58 / 13%),
-    inset 0 1px 0 rgb(255 255 255 / 74%);
-  opacity: 0.78;
+    0 10px 24px rgb(27 87 58 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 78%);
+  opacity: 0.86;
   pointer-events: auto;
   backdrop-filter: blur(10px);
   -webkit-tap-highlight-color: transparent;
@@ -4181,11 +4181,17 @@ h1 {
 }
 
 .main-page-arrows button:not(:disabled):hover,
-.main-page-arrows button:not(:disabled):active {
+.main-page-arrows button:not(:disabled):focus-visible {
   border-color: rgb(25 134 85 / 34%);
   background: rgb(239 255 246 / 84%);
   opacity: 1;
-  transform: scale(1.04);
+}
+
+.main-page-arrows button:not(:disabled):active {
+  border-color: rgb(25 134 85 / 34%);
+  background: rgb(232 252 241 / 88%);
+  opacity: 1;
+  transform: scale(0.94);
 }
 
 .main-page-arrows button:disabled {

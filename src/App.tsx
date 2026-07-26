@@ -4345,7 +4345,7 @@ function App() {
   const scheduleTodayScrollMonthRef = useRef<string | null>(null);
   const recordTodayScrollMonthRef = useRef<string | null>(null);
   const composingScheduleIdsRef = useRef<Set<string>>(new Set());
-  const subtabSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const subtabSwipeStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -8884,7 +8884,11 @@ function App() {
       return;
     }
 
-    subtabSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+    subtabSwipeStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      time: performance.now(),
+    };
   };
 
   const finishSubtabSwipe = (event: ReactPointerEvent<HTMLElement>) => {
@@ -8897,8 +8901,15 @@ function App() {
 
     const deltaX = event.clientX - startPoint.x;
     const deltaY = event.clientY - startPoint.y;
+    const elapsedMs = Math.max(1, performance.now() - startPoint.time);
+    const velocityX = deltaX / elapsedMs;
+    const horizontalDistance = Math.abs(deltaX);
+    const verticalDistance = Math.abs(deltaY);
     const isHorizontalSwipe =
-      Math.abs(deltaX) > 58 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+      (horizontalDistance > 36 && horizontalDistance > verticalDistance * 1.22) ||
+      (horizontalDistance > 22 &&
+        Math.abs(velocityX) > 0.55 &&
+        horizontalDistance > verticalDistance * 1.15);
 
     if (!isHorizontalSwipe) {
       return;
