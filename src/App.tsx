@@ -4345,7 +4345,7 @@ function App() {
   const scheduleTodayScrollMonthRef = useRef<string | null>(null);
   const recordTodayScrollMonthRef = useRef<string | null>(null);
   const composingScheduleIdsRef = useRef<Set<string>>(new Set());
-  const mainSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const subtabSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -4356,7 +4356,7 @@ function App() {
   const todayKey = getDateKey(today);
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
-  const [mainPageTransition, setMainPageTransition] =
+  const [todayViewTransition, setTodayViewTransition] =
     useState<'next' | 'previous' | null>(null);
   const [todayView, setTodayView] = useState<TodayViewName>('quests');
   const [selectedDate, setSelectedDate] = useState(() => today);
@@ -4557,10 +4557,14 @@ function App() {
     () => managedTodos.filter((todo) => todo.pendingReview && hasManagedTodoText(todo)),
     [managedTodos],
   );
-  const currentMainPageIndex = mainPageOptions.findIndex((option) => option.key === page);
-  const canMoveToPreviousMainPage = currentMainPageIndex > 0;
-  const canMoveToNextMainPage =
-    currentMainPageIndex >= 0 && currentMainPageIndex < mainPageOptions.length - 1;
+  const currentTodayViewIndex = todayViewOptions.findIndex((option) => option.key === todayView);
+  const canMoveToPreviousTodayView =
+    page === 'today' && !isEditMode && currentTodayViewIndex > 0;
+  const canMoveToNextTodayView =
+    page === 'today' &&
+    !isEditMode &&
+    currentTodayViewIndex >= 0 &&
+    currentTodayViewIndex < todayViewOptions.length - 1;
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -8813,38 +8817,54 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const changePage = (nextPage: PageName, direction?: 'next' | 'previous') => {
+  const changePage = (nextPage: PageName) => {
     if (nextPage === page) {
       return;
     }
 
     resetEditUiState();
-    setMainPageTransition(direction ?? (
-      mainPageOptions.findIndex((option) => option.key === nextPage) > currentMainPageIndex
-        ? 'next'
-        : 'previous'
-    ));
     setPage(nextPage);
   };
 
-  const moveMainPage = (direction: 'next' | 'previous') => {
-    const nextIndex = direction === 'next'
-      ? Math.min(mainPageOptions.length - 1, currentMainPageIndex + 1)
-      : Math.max(0, currentMainPageIndex - 1);
-    const nextPage = mainPageOptions[nextIndex]?.key;
-
-    if (!nextPage || nextPage === page) {
+  const selectTodayView = (nextView: TodayViewName, direction?: 'next' | 'previous') => {
+    if (nextView === todayView) {
       return;
     }
 
-    changePage(nextPage, direction);
+    resetEditUiState();
+    if (nextView === 'schedule') {
+      setScheduleView('today');
+    }
+    setTodayViewTransition(direction ?? (
+      todayViewOptions.findIndex((option) => option.key === nextView) > currentTodayViewIndex
+        ? 'next'
+        : 'previous'
+    ));
+    setTodayView(nextView);
   };
 
-  const isMainSwipeInteractiveTarget = (target: EventTarget | null) =>
+  const moveTodayView = (direction: 'next' | 'previous') => {
+    if (page !== 'today' || isEditMode) {
+      return;
+    }
+
+    const nextIndex = direction === 'next'
+      ? Math.min(todayViewOptions.length - 1, currentTodayViewIndex + 1)
+      : Math.max(0, currentTodayViewIndex - 1);
+    const nextView = todayViewOptions[nextIndex]?.key;
+
+    if (!nextView || nextView === todayView) {
+      return;
+    }
+
+    selectTodayView(nextView, direction);
+  };
+
+  const isSubtabSwipeInteractiveTarget = (target: EventTarget | null) =>
     target instanceof HTMLElement &&
     Boolean(target.closest('button, input, textarea, select, a, [role="button"], [data-popup-ui="true"]'));
 
-  const isInMainSwipeArea = (clientY: number) => {
+  const isInSubtabSwipeArea = (clientY: number) => {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const topLimit = Math.max(128, viewportHeight * 0.18);
     const bottomLimit = Math.min(viewportHeight - 136, viewportHeight * 0.78);
@@ -8852,24 +8872,26 @@ function App() {
     return clientY >= topLimit && clientY <= bottomLimit;
   };
 
-  const startMainSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+  const startSubtabSwipe = (event: ReactPointerEvent<HTMLElement>) => {
     if (
       event.pointerType === 'mouse' ||
-      isMainSwipeInteractiveTarget(event.target) ||
-      !isInMainSwipeArea(event.clientY)
+      page !== 'today' ||
+      isEditMode ||
+      isSubtabSwipeInteractiveTarget(event.target) ||
+      !isInSubtabSwipeArea(event.clientY)
     ) {
-      mainSwipeStartRef.current = null;
+      subtabSwipeStartRef.current = null;
       return;
     }
 
-    mainSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+    subtabSwipeStartRef.current = { x: event.clientX, y: event.clientY };
   };
 
-  const finishMainSwipe = (event: ReactPointerEvent<HTMLElement>) => {
-    const startPoint = mainSwipeStartRef.current;
-    mainSwipeStartRef.current = null;
+  const finishSubtabSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+    const startPoint = subtabSwipeStartRef.current;
+    subtabSwipeStartRef.current = null;
 
-    if (!startPoint || !isInMainSwipeArea(startPoint.y)) {
+    if (page !== 'today' || isEditMode || !startPoint || !isInSubtabSwipeArea(startPoint.y)) {
       return;
     }
 
@@ -8882,15 +8904,7 @@ function App() {
       return;
     }
 
-    moveMainPage(deltaX < 0 ? 'next' : 'previous');
-  };
-
-  const selectTodayView = (nextView: TodayViewName) => {
-    resetEditUiState();
-    if (nextView === 'schedule') {
-      setScheduleView('today');
-    }
-    setTodayView(nextView);
+    moveTodayView(deltaX < 0 ? 'next' : 'previous');
   };
 
   const selectRecordView = (nextView: RecordViewName) => {
@@ -9405,37 +9419,39 @@ function App() {
         ))}
       </nav>
 
-      <div
-        className="main-page-arrows"
-        aria-label="メイン画面のページ送り"
-      >
-        <button
-          aria-label="前のメイン画面へ"
-          disabled={!canMoveToPreviousMainPage}
-          onClick={() => moveMainPage('previous')}
-          type="button"
+      {page === 'today' && !isEditMode && (
+        <div
+          className="main-page-arrows subtab-page-arrows"
+          aria-label="今日画面サブタブのページ送り"
         >
-          ◀
-        </button>
-        <button
-          aria-label="次のメイン画面へ"
-          disabled={!canMoveToNextMainPage}
-          onClick={() => moveMainPage('next')}
-          type="button"
-        >
-          ▶
-        </button>
-      </div>
+          <button
+            aria-label="前のサブタブへ"
+            disabled={!canMoveToPreviousTodayView}
+            onClick={() => moveTodayView('previous')}
+            type="button"
+          >
+            ◀
+          </button>
+          <button
+            aria-label="次のサブタブへ"
+            disabled={!canMoveToNextTodayView}
+            onClick={() => moveTodayView('next')}
+            type="button"
+          >
+            ▶
+          </button>
+        </div>
+      )}
 
       <div
         className="app-content"
-        data-main-transition={mainPageTransition ?? undefined}
-        onAnimationEnd={() => setMainPageTransition(null)}
+        data-subtab-transition={todayViewTransition ?? undefined}
+        onAnimationEnd={() => setTodayViewTransition(null)}
         onPointerCancel={() => {
-          mainSwipeStartRef.current = null;
+          subtabSwipeStartRef.current = null;
         }}
-        onPointerDown={startMainSwipe}
-        onPointerUp={finishMainSwipe}
+        onPointerDown={startSubtabSwipe}
+        onPointerUp={finishSubtabSwipe}
       >
         <header className={`app-header${page === 'today' ? ' today-title-header' : ''}`}>
           <div className="top-bar">
