@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { User } from '@supabase/supabase-js';
 import {
@@ -3131,10 +3132,10 @@ const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
     }
 
     if (status === 'completed') {
-      return todo.status === 'completed' || todo.completed;
+      return todo.status === 'completed';
     }
 
-    return todo.status === status && !todo.completed;
+    return todo.status === status;
   });
 
   return {
@@ -3145,7 +3146,7 @@ const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
 
 const getManagedTodoRows = (todos: ManagedTodos, status: ActiveTodoStatus) => {
   const statusTodos = todos.filter(
-    (todo) => todo.status === status && !todo.completed && !todo.pendingReview,
+    (todo) => todo.status === status && !todo.pendingReview,
   );
 
   if (statusTodos.some((todo) => !hasManagedTodoText(todo))) {
@@ -3172,7 +3173,6 @@ const getVisibleManagedTodosByStatus = (todos: ManagedTodos, status: ActiveTodoS
     (todo) =>
       todo.status === status &&
       hasManagedTodoText(todo) &&
-      !todo.completed &&
       !todo.pendingReview,
   );
 
@@ -4331,7 +4331,7 @@ const calculateMasteryStats = (
 };
 
 function App() {
-  const today = useMemo(() => new Date(), []);
+  const [today, setToday] = useState(() => new Date());
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
   const dailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -4345,6 +4345,7 @@ function App() {
   const scheduleTodayScrollMonthRef = useRef<string | null>(null);
   const recordTodayScrollMonthRef = useRef<string | null>(null);
   const composingScheduleIdsRef = useRef<Set<string>>(new Set());
+  const mainSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -4355,6 +4356,8 @@ function App() {
   const todayKey = getDateKey(today);
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
+  const [mainPageTransition, setMainPageTransition] =
+    useState<'next' | 'previous' | null>(null);
   const [todayView, setTodayView] = useState<TodayViewName>('quests');
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
@@ -4554,6 +4557,27 @@ function App() {
     () => managedTodos.filter((todo) => todo.pendingReview && hasManagedTodoText(todo)),
     [managedTodos],
   );
+  const currentMainPageIndex = mainPageOptions.findIndex((option) => option.key === page);
+  const canMoveToPreviousMainPage = currentMainPageIndex > 0;
+  const canMoveToNextMainPage =
+    currentMainPageIndex >= 0 && currentMainPageIndex < mainPageOptions.length - 1;
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setToday((currentToday) => {
+        const nextToday = new Date();
+
+        return getDateKey(currentToday) === getDateKey(nextToday) ? currentToday : nextToday;
+      });
+    }, 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    setManagedTodos((currentTodos) => applyTodoRollover(currentTodos, today));
+  }, [todayKey, today]);
+
   const editTarget = resolveEditTarget(editTargetKey);
   const selectedDateTemplate = getBaseTemplateForDate(templateSettings, selectedDate);
   const selectedDateEditTarget: ResolvedEditTarget = {
@@ -5184,7 +5208,7 @@ function App() {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setPointToast(null), 2800);
+    const timeoutId = window.setTimeout(() => setPointToast(null), 5200);
 
     return () => window.clearTimeout(timeoutId);
   }, [pointToast]);
@@ -5194,7 +5218,7 @@ function App() {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setDailyNudgePointFlash(null), 2800);
+    const timeoutId = window.setTimeout(() => setDailyNudgePointFlash(null), 5000);
 
     return () => window.clearTimeout(timeoutId);
   }, [dailyNudgePointFlash]);
@@ -5677,7 +5701,7 @@ function App() {
       });
 
       delete questEmoteTimeoutsRef.current[emoteKey];
-    }, 1100);
+    }, 5800);
   };
 
   const updateItemNote = (dateKey: string, itemId: string, note: string) => {
@@ -8388,12 +8412,13 @@ function App() {
           };
         }
 
+        // Checked items stay in their current bucket for the rest of the day.
+        // The next local date rollover moves them into the completed history.
         return {
           ...todo,
-          status: 'completed' as const,
           completed: true,
           completedAt: timestamp,
-          originalStatus: todo.status,
+          originalStatus: todo.originalStatus ?? todo.status,
           updatedAt: timestamp,
         };
       });
@@ -8788,12 +8813,76 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const changePage = (nextPage: PageName) => {
-    resetEditUiState();
-    if (nextPage === 'today') {
-      setTodayView('quests');
+  const changePage = (nextPage: PageName, direction?: 'next' | 'previous') => {
+    if (nextPage === page) {
+      return;
     }
+
+    resetEditUiState();
+    setMainPageTransition(direction ?? (
+      mainPageOptions.findIndex((option) => option.key === nextPage) > currentMainPageIndex
+        ? 'next'
+        : 'previous'
+    ));
     setPage(nextPage);
+  };
+
+  const moveMainPage = (direction: 'next' | 'previous') => {
+    const nextIndex = direction === 'next'
+      ? Math.min(mainPageOptions.length - 1, currentMainPageIndex + 1)
+      : Math.max(0, currentMainPageIndex - 1);
+    const nextPage = mainPageOptions[nextIndex]?.key;
+
+    if (!nextPage || nextPage === page) {
+      return;
+    }
+
+    changePage(nextPage, direction);
+  };
+
+  const isMainSwipeInteractiveTarget = (target: EventTarget | null) =>
+    target instanceof HTMLElement &&
+    Boolean(target.closest('button, input, textarea, select, a, [role="button"], [data-popup-ui="true"]'));
+
+  const isInMainSwipeArea = (clientY: number) => {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const topLimit = Math.max(128, viewportHeight * 0.18);
+    const bottomLimit = Math.min(viewportHeight - 136, viewportHeight * 0.78);
+
+    return clientY >= topLimit && clientY <= bottomLimit;
+  };
+
+  const startMainSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      event.pointerType === 'mouse' ||
+      isMainSwipeInteractiveTarget(event.target) ||
+      !isInMainSwipeArea(event.clientY)
+    ) {
+      mainSwipeStartRef.current = null;
+      return;
+    }
+
+    mainSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const finishMainSwipe = (event: ReactPointerEvent<HTMLElement>) => {
+    const startPoint = mainSwipeStartRef.current;
+    mainSwipeStartRef.current = null;
+
+    if (!startPoint || !isInMainSwipeArea(startPoint.y)) {
+      return;
+    }
+
+    const deltaX = event.clientX - startPoint.x;
+    const deltaY = event.clientY - startPoint.y;
+    const isHorizontalSwipe =
+      Math.abs(deltaX) > 58 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+
+    if (!isHorizontalSwipe) {
+      return;
+    }
+
+    moveMainPage(deltaX < 0 ? 'next' : 'previous');
   };
 
   const selectTodayView = (nextView: TodayViewName) => {
@@ -9297,7 +9386,57 @@ function App() {
       data-schedule-view={isTodayScheduleView ? scheduleView : undefined}
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
-      <div className="app-content">
+      <nav
+        className="bottom-tab-nav main-tab-nav"
+        aria-label="メインナビゲーション"
+      >
+        {mainPageOptions.map((option) => (
+          <button
+            aria-current={page === option.key ? 'page' : undefined}
+            className="bottom-tab-item main-tab-item"
+            data-active={page === option.key ? 'true' : 'false'}
+            key={option.key}
+            onClick={() => changePage(option.key)}
+            type="button"
+          >
+            <span aria-hidden="true">{option.icon}</span>
+            {option.label}
+          </button>
+        ))}
+      </nav>
+
+      <div
+        className="main-page-arrows"
+        aria-label="メイン画面のページ送り"
+      >
+        <button
+          aria-label="前のメイン画面へ"
+          disabled={!canMoveToPreviousMainPage}
+          onClick={() => moveMainPage('previous')}
+          type="button"
+        >
+          ◀
+        </button>
+        <button
+          aria-label="次のメイン画面へ"
+          disabled={!canMoveToNextMainPage}
+          onClick={() => moveMainPage('next')}
+          type="button"
+        >
+          ▶
+        </button>
+      </div>
+
+      <div
+        className="app-content"
+        data-main-transition={mainPageTransition ?? undefined}
+        onAnimationEnd={() => setMainPageTransition(null)}
+        onPointerCancel={() => {
+          mainSwipeStartRef.current = null;
+        }}
+        onPointerDown={startMainSwipe}
+        onPointerUp={finishMainSwipe}
+      >
         <header className={`app-header${page === 'today' ? ' today-title-header' : ''}`}>
           <div className="top-bar">
             <p className="project-name">hibitin</p>
@@ -11450,7 +11589,7 @@ function App() {
             .filter((todo) =>
               hasManagedTodoText(todo) &&
               !todo.pendingReview &&
-              (todo.status === 'completed' || todo.completed),
+              todo.status === 'completed',
             )
             .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''));
           const renderManagedTodoRows = (
@@ -13108,25 +13247,6 @@ function App() {
           ))}
         </nav>
       )}
-
-      <nav
-        className="bottom-tab-nav"
-        aria-label="メインナビゲーション"
-      >
-        {mainPageOptions.map((option) => (
-          <button
-            aria-current={page === option.key ? 'page' : undefined}
-            className="bottom-tab-item"
-            data-active={page === option.key ? 'true' : 'false'}
-            key={option.key}
-            onClick={() => changePage(option.key)}
-            type="button"
-          >
-            <span aria-hidden="true">{option.icon}</span>
-            {option.label}
-          </button>
-        ))}
-      </nav>
 
       {isTodoReviewOpen && pendingTodoReviews.length > 0 && (
         <div
