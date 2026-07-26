@@ -4139,7 +4139,8 @@ h1 {
 
 .main-page-arrows {
   position: fixed;
-  top: 54%;
+  top: auto;
+  bottom: calc(92px + env(safe-area-inset-bottom));
   right: 0;
   left: 0;
   z-index: 18;
@@ -4150,13 +4151,14 @@ h1 {
 }
 
 .subtab-page-arrows {
-  top: 54%;
+  top: auto;
+  bottom: calc(92px + env(safe-area-inset-bottom));
 }
 
 .main-page-arrows button {
   display: grid;
-  width: 46px;
-  height: 46px;
+  width: 56px;
+  height: 56px;
   place-items: center;
   border: 1px solid rgb(45 127 89 / 24%);
   border-radius: 999px;
@@ -4164,10 +4166,10 @@ h1 {
   color: #1f7a5a;
   cursor: pointer;
   font: inherit;
-  font-size: 1rem;
+  font-size: 1.18rem;
   font-weight: 1000;
   box-shadow:
-    0 10px 24px rgb(27 87 58 / 18%),
+    0 12px 28px rgb(27 87 58 / 20%),
     inset 0 1px 0 rgb(255 255 255 / 78%);
   opacity: 0.86;
   pointer-events: auto;
