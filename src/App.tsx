@@ -33,6 +33,7 @@ type MenuViewName =
   | 'list'
   | 'schedule'
   | 'todos'
+  | 'timer'
   | 'recordMemo'
   | 'recordEvents'
   | 'recordAnyMemo'
@@ -164,7 +165,7 @@ const todoStatusHeadings: Record<TodoStatus, string> = {
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'today', icon: '🎮', label: '今日' },
   { key: 'history', icon: '📅', label: 'スタンプ帳' },
-  { key: 'library', icon: '📚', label: 'ライブラリ' },
+  { key: 'library', icon: '🎒', label: '持ちもの' },
 ];
 
 const menuViewOptions: {
@@ -175,25 +176,27 @@ const menuViewOptions: {
 }[] = [
   { key: 'schedule', icon: '📅', label: 'スケジュール', description: '予定を確認・追加する' },
   { key: 'todos', icon: '✅', label: 'やること', description: '今日や今後のタスクを整理する' },
-  { key: 'recordMemo', icon: '✍️', label: '今日のひとこと', description: '月ごとのひとことを振り返る' },
-  { key: 'recordEvents', icon: '📖', label: '今日のできごと', description: 'その日にあったことを読む' },
+  { key: 'timer', icon: '⏱', label: 'タイマー', description: '時間を決めて集中する' },
+  { key: 'recordMemo', icon: '✍️', label: 'ひとこと', description: '月ごとのひとことを振り返る' },
+  { key: 'recordEvents', icon: '📖', label: 'できごと', description: 'その日にあったことを読む' },
   { key: 'recordAnyMemo', icon: '📝', label: 'メモ', description: 'なんでもメモを確認する' },
   { key: 'recordAdvanced', icon: '⚙️', label: 'アドバンスト', description: '追加記録を日付ごとに見る' },
   { key: 'achievements', icon: '🏆', label: '実績', description: '育った記録とスターを見る' },
-  { key: 'status', icon: '🏅', label: 'ステータス', description: 'PTやフリールーティンを確認する' },
+  { key: 'status', icon: '🏅', label: 'ステータス', description: 'PTやフリークエストを確認する' },
   { key: 'shop', icon: '🎁', label: 'ショップ', description: '追加機能や枠を確認する' },
   { key: 'settings', icon: '⚙️', label: '設定', description: 'アプリの設定を変更する' },
 ];
 
 const libraryCategories: {
-  key: 'today' | 'archive' | 'player' | 'system';
+  key: 'today' | 'tools' | 'log' | 'player' | 'system';
   icon: string;
   title: string;
   items: Exclude<MenuViewName, 'list'>[];
 }[] = [
-  { key: 'today', icon: '☀️', title: '今日', items: ['schedule', 'todos', 'recordMemo', 'recordEvents'] },
-  { key: 'archive', icon: '📚', title: '保管', items: ['recordAnyMemo', 'recordAdvanced', 'achievements'] },
-  { key: 'player', icon: '🏅', title: 'プレイヤー', items: ['status'] },
+  { key: 'today', icon: '☀️', title: '今日', items: ['schedule', 'todos'] },
+  { key: 'tools', icon: '🧰', title: 'アイテム', items: ['timer'] },
+  { key: 'log', icon: '📝', title: 'ログ', items: ['recordMemo', 'recordEvents', 'recordAnyMemo', 'recordAdvanced'] },
+  { key: 'player', icon: '👤', title: 'プレイヤー', items: ['achievements', 'status'] },
   { key: 'system', icon: '⚙️', title: 'システム', items: ['shop', 'settings'] },
 ];
 
@@ -948,7 +951,7 @@ const sectionIconLabels: Record<string, string> = {
 };
 
 const shopCategoryLabels: Record<ShopCategory, string> = {
-  questSlot: 'フリールーティン枠',
+  questSlot: 'フリークエスト枠',
   feature: '機能',
   customize: 'カスタマイズ',
   item: 'アイテム',
@@ -959,6 +962,7 @@ const timerPresetSeconds = [30, 60, 180, 300, 600, 900, 1200, 1800];
 const timerHourOptions = [0, 1, 2];
 const timerMinuteOptions = Array.from({ length: 60 }, (_, index) => index);
 const timerSecondOptions = Array.from({ length: 60 }, (_, index) => index);
+const COMMON_TIMER_ITEM_ID = 'hibitin:common-timer';
 
 const dailyMessages = [
   '🌱 今日も、ゆるく一歩。',
@@ -2298,8 +2302,8 @@ function PlayerStatusCard({
             ×{playerRankProgress.multiplier.toFixed(2)}
           </span>
         </span>
-        <span className="rank-status-routines" aria-label="フリールーティン数">
-          <span>🎯 フリールーティン {freeQuestCount}個</span>
+        <span className="rank-status-routines" aria-label="フリークエスト数">
+          <span>🎯 フリークエスト {freeQuestCount}個</span>
         </span>
         <span
           className="rank-status-earned"
@@ -3646,10 +3650,10 @@ const getSectionsForTarget = (
 
 const getTargetLabel = (target: ResolvedEditTarget) => {
   if (target.kind === 'template') {
-    return target.template === 'normal' ? 'ノーマルルーティン' : '休日ルーティン';
+    return target.template === 'normal' ? 'ノーマルクエスト' : '休日クエスト';
   }
 
-  return `${target.dateKey}だけのルーティン`;
+  return `${target.dateKey}だけのクエスト`;
 };
 
 const getTemplateLabel = (template: TemplateKind) =>
@@ -3660,7 +3664,7 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
     return '個別カスタム';
   }
 
-  return kind === 'normal' ? 'ノーマルルーティン' : '休日ルーティン';
+  return kind === 'normal' ? 'ノーマルクエスト' : '休日クエスト';
 };
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
@@ -3879,18 +3883,6 @@ const getVisualProgressRank = (
   }
 
   return completionRank;
-};
-
-const getItemTimerSeconds = (item: RoutineItem) => {
-  if (item.timerSeconds && item.timerSeconds > 0) {
-    return Math.round(item.timerSeconds);
-  }
-
-  if (item.timerMinutes && item.timerMinutes > 0) {
-    return Math.round(item.timerMinutes * 60);
-  }
-
-  return undefined;
 };
 
 const getTimerParts = (seconds: number) => {
@@ -4150,7 +4142,7 @@ const formatMasteryStars = (starCount: number, trophyCount = 0) => {
 };
 
 const getMasteryAdminRuleText = () => [
-  '対象：固定クエストと朝・昼・夕・夜のフリールーティン',
+  '対象：固定クエストと朝・昼・夕・夜のフリークエスト',
   `星1〜3：${MASTERY_RULES.earlyStarStreakDays}日連続達成ごとに+1`,
   `星4：星3到達後、${MASTERY_RULES.fourthStarStreakDays}日連続達成で獲得`,
   `星5：星4到達後、${MASTERY_RULES.fifthStarStreakDays}日連続達成で獲得`,
@@ -4397,7 +4389,7 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
-  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('today');
+  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('month');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [recordDisplayMode, setRecordDisplayMode] =
@@ -4501,7 +4493,6 @@ function App() {
   const [editingLabel, setEditingLabel] = useState('');
   const [routineDrafts, setRoutineDrafts] = useState<RoutineDrafts>({});
   const routineDraftComposingSectionsRef = useRef(new Set<string>());
-  const [timerSettingItemId, setTimerSettingItemId] = useState<string | null>(null);
   const [timerDraftParts, setTimerDraftParts] = useState(() => getTimerParts(300));
   const [noteEditorTarget, setNoteEditorTarget] = useState<NoteEditorTarget | null>(null);
   const [inlineDailyRecordKind, setInlineDailyRecordKind] = useState<CoreRoutineKind | null>(null);
@@ -4690,6 +4681,7 @@ function App() {
   const isTodayQuestView = page === 'today';
   const isMenuScheduleView = page === 'library' && menuView === 'schedule';
   const isMenuTodoView = page === 'library' && menuView === 'todos';
+  const isMenuTimerView = page === 'library' && menuView === 'timer';
   const isMenuNotesView = false;
   const isMenuStatusView = page === 'library' && menuView === 'status';
   const isShopView = page === 'library' && menuView === 'shop';
@@ -4731,7 +4723,7 @@ function App() {
   );
   const isCheckMode = page === 'today';
   const canEditRoutines = isSettingsView || (page === 'today' && isEditMode);
-  const canEditRoutineDetails = isSettingsView || (page === 'today' && isToday && !isEditMode);
+  const canEditRoutineDetails = isSettingsView || (page === 'today' && isToday);
   const totalQuestSlotLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
   const usedQuestSlots = countFreeQuestItems(displaySections);
   const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
@@ -4981,7 +4973,7 @@ function App() {
     window.requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${todayKey}"]`)
-        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
   }, [isTodayScheduleView, scheduleMonth, scheduleView, today, todayKey]);
   useEffect(() => {
@@ -5497,7 +5489,6 @@ function App() {
 
   useEffect(() => {
     const closePopupPanels = () => {
-      setTimerSettingItemId(null);
       setNoteEditorTarget(null);
       setIsRankPanelOpen(false);
     };
@@ -6385,20 +6376,12 @@ function App() {
   };
 
   const toggleItemNoteEditor = (dateKey: string, itemId: string) => {
-    setTimerSettingItemId(null);
     setIsRankPanelOpen(false);
     setNoteEditorTarget((currentTarget) =>
       currentTarget?.dateKey === dateKey && currentTarget.itemId === itemId
         ? null
         : { dateKey, itemId },
     );
-  };
-
-  const toggleTimerSetting = (item: RoutineItem) => {
-    setNoteEditorTarget(null);
-    setIsRankPanelOpen(false);
-    setTimerDraftParts(getTimerParts(getItemTimerSeconds(item) ?? 300));
-    setTimerSettingItemId((currentId) => (currentId === item.id ? null : item.id));
   };
 
   const applyPointChangeForItemCheck = (
@@ -6592,40 +6575,6 @@ function App() {
     });
   };
 
-  const completeActiveTimerItem = () => {
-    if (!activeTimer) {
-      return;
-    }
-
-    setTimerAlertSilenced(true);
-    setCheckedItems((current) => {
-      const wasChecked = Boolean(current[activeTimer.itemId]);
-      const nextChecks = {
-        ...current,
-        [activeTimer.itemId]: true,
-      };
-
-      if (!wasChecked) {
-        applyPointChangeForItemCheck(selectedDateKey, activeTimer.itemId, true, displaySections);
-      }
-
-      if (historySelectedDate && historySelectedDateKey === selectedDateKey) {
-        setHistoryCheckedItems(nextChecks);
-      }
-
-      return nextChecks;
-    });
-    setPausedTimers((currentTimers) => {
-      const nextTimers = { ...currentTimers };
-
-      delete nextTimers[activeTimer.itemId];
-
-      return nextTimers;
-    });
-    alertedFinishedTimerIdRef.current = null;
-    setActiveTimer(null);
-  };
-
   const closeActiveTimerPanel = () => {
     if (!activeTimer) {
       return;
@@ -6667,159 +6616,8 @@ function App() {
     ));
   };
 
-  const updateItemTimerSeconds = (
-    sectionId: string,
-    itemId: string,
-    timerSeconds?: number,
-  ) => {
-    updateSectionsForTarget(getUpdateTargetForSection(sectionId), (currentSections) =>
-      currentSections.map((section) => ({
-        ...section,
-        items: section.items.map((item) => {
-          if (item.id !== itemId) {
-            return item;
-          }
-
-          if (!timerSeconds) {
-            const itemWithoutTimer = { ...item };
-
-            delete itemWithoutTimer.timerMinutes;
-            delete itemWithoutTimer.timerSeconds;
-
-            return itemWithoutTimer;
-          }
-
-          const itemWithTimer = { ...item };
-
-          delete itemWithTimer.timerMinutes;
-
-          return {
-            ...itemWithTimer,
-            timerSeconds,
-          };
-        }),
-      })),
-    );
-
-    if (activeTimer?.itemId === itemId) {
-      setTimerAlertSilenced(true);
-      alertedFinishedTimerIdRef.current = null;
-      setActiveTimer(null);
-    }
-    setPausedTimers((currentTimers) => {
-      const nextTimers = { ...currentTimers };
-
-      delete nextTimers[itemId];
-
-      return nextTimers;
-    });
-  };
-
-  const renderTimerSettingMenu = (sectionId: string, item: RoutineItem) => (
-    <div className="timer-setting-menu" data-popup-ui="true">
-      <p className="timer-setting-title">タイマー設定</p>
-      <div className="timer-shortcut-group">
-        <span>よく使う時間</span>
-        <div className="timer-shortcut-buttons">
-          {timerPresetSeconds.map((seconds) => (
-            <button
-              data-active={
-                getSecondsFromTimerParts(timerDraftParts) === seconds ? 'true' : 'false'
-              }
-              key={seconds}
-              onClick={() => setTimerDraftParts(getTimerParts(seconds))}
-              type="button"
-            >
-              {formatTimerDuration(seconds)}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="timer-part-picker">
-        <label>
-          <span>時</span>
-          <select
-            aria-label={`${item.label}のタイマー時間`}
-            onChange={(event) =>
-              setTimerDraftParts((currentParts) => ({
-                ...currentParts,
-                hours: Number(event.target.value),
-              }))
-            }
-            value={timerDraftParts.hours}
-          >
-            {timerHourOptions.map((hours) => (
-              <option key={hours} value={hours}>
-                {hours}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>分</span>
-          <select
-            aria-label={`${item.label}のタイマー分`}
-            onChange={(event) =>
-              setTimerDraftParts((currentParts) => ({
-                ...currentParts,
-                minutes: Number(event.target.value),
-              }))
-            }
-            value={timerDraftParts.minutes}
-          >
-            {timerMinuteOptions.map((minutes) => (
-              <option key={minutes} value={minutes}>
-                {minutes}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>秒</span>
-          <select
-            aria-label={`${item.label}のタイマー秒`}
-            onChange={(event) =>
-              setTimerDraftParts((currentParts) => ({
-                ...currentParts,
-                seconds: Number(event.target.value),
-              }))
-            }
-            value={timerDraftParts.seconds}
-          >
-            {timerSecondOptions.map((seconds) => (
-              <option key={seconds} value={seconds}>
-                {seconds}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="timer-picker-actions">
-        <button onClick={() => setTimerSettingItemId(null)} type="button">
-          キャンセル
-        </button>
-        <button
-          disabled={getSecondsFromTimerParts(timerDraftParts) === 0}
-          onClick={() => {
-            updateItemTimerSeconds(
-              sectionId,
-              item.id,
-              getSecondsFromTimerParts(timerDraftParts),
-            );
-            setTimerSettingItemId(null);
-          }}
-          type="button"
-        >
-          保存
-        </button>
-      </div>
-    </div>
-  );
-
-  const startItemTimer = (item: RoutineItem) => {
-    const totalSeconds = getItemTimerSeconds(item);
-
-    if (!totalSeconds) {
+  const startCommonTimer = (durationSeconds: number) => {
+    if (durationSeconds <= 0) {
       return;
     }
 
@@ -6827,34 +6625,16 @@ function App() {
     alertedFinishedTimerIdRef.current = null;
     setPausedTimers((currentTimers) => {
       const nextTimers = { ...currentTimers };
-      const timerToPause = normalizeActiveTimer(activeTimer);
 
-      if (
-        timerToPause &&
-        !timerToPause.isComplete &&
-        timerToPause.remainingSeconds > 0 &&
-        timerToPause.itemId !== item.id
-      ) {
-        nextTimers[timerToPause.itemId] = {
-          label: timerToPause.label,
-          durationSeconds: timerToPause.durationSeconds,
-          totalSeconds: timerToPause.totalSeconds,
-          remainingSeconds: timerToPause.remainingSeconds,
-          status: 'paused',
-        };
-      }
-
-      delete nextTimers[item.id];
+      delete nextTimers[COMMON_TIMER_ITEM_ID];
 
       return nextTimers;
     });
-
-    const pausedTimer = pausedTimers[item.id];
     setActiveTimer(createRunningTimer(
-      item.id,
-      item.label,
-      pausedTimer?.durationSeconds ?? pausedTimer?.totalSeconds ?? totalSeconds,
-      pausedTimer?.remainingSeconds ?? totalSeconds,
+      COMMON_TIMER_ITEM_ID,
+      'タイマー',
+      durationSeconds,
+      durationSeconds,
     ));
   };
 
@@ -7002,7 +6782,6 @@ function App() {
     setEditingLabel('');
     setRoutineDrafts({});
     routineDraftComposingSectionsRef.current.clear();
-    setTimerSettingItemId(null);
     setIsRankPanelOpen(false);
   };
 
@@ -7021,7 +6800,6 @@ function App() {
     setEditingLabel('');
     setRoutineDrafts({});
     routineDraftComposingSectionsRef.current.clear();
-    setTimerSettingItemId(null);
   };
 
   const canAddRoutineToSection = (sectionId: string) => {
@@ -7070,7 +6848,6 @@ function App() {
     }));
     setEditingItemId(null);
     setEditingLabel('');
-    setTimerSettingItemId(null);
   };
 
   const goToQuestSlotShop = () => {
@@ -7158,7 +6935,6 @@ function App() {
     discardRoutineDraft(sectionId);
     setEditingItemId(null);
     setEditingLabel('');
-    setTimerSettingItemId(null);
   };
 
   const deleteRoutine = () => {
@@ -7266,7 +7042,7 @@ function App() {
   const saveDisplayedRoutineAsTemplate = (template: TemplateKind) => {
     const label = getTemplateLabel(template);
     const shouldSave = window.confirm(
-      `現在表示しているチェック表を、今後使う${label}のルーティンに設定しますか？過去の日付には影響しません。`,
+      `現在表示しているチェック表を、今後使う${label}のクエストに設定しますか？過去の日付には影響しません。`,
     );
 
     if (!shouldSave) {
@@ -8185,7 +7961,7 @@ function App() {
     }
 
     const finalConfirmed = window.confirm(
-      '最終確認です。ルーティン、チェック履歴、記録、メモ、タイマー、実績、削除済みクエストの内部記録を含む全データを削除します。よろしいですか？',
+      '最終確認です。クエスト、チェック履歴、記録、メモ、タイマー、実績、削除済みクエストの内部記録を含む全データを削除します。よろしいですか？',
     );
 
     if (!finalConfirmed) {
@@ -8211,7 +7987,6 @@ function App() {
     setEditingLabel('');
     setRoutineDrafts({});
     routineDraftComposingSectionsRef.current.clear();
-    setTimerSettingItemId(null);
   };
 
   const updateDailyEventForSelectedDate = (index: number, value: string) => {
@@ -8897,12 +8672,6 @@ function App() {
     });
   };
 
-  const showScheduleToday = () => {
-    setScheduleMonth(getMonthStart(today));
-    setSelectedScheduleDate(null);
-    setScheduleView('today');
-  };
-
   const moveScheduleMonth = (months: number) => {
     setScheduleMonth((currentMonth) => addMonths(currentMonth, months));
     setSelectedScheduleDate(null);
@@ -8939,14 +8708,19 @@ function App() {
     setPage('library');
     setMenuView(nextMenuView);
     if (nextMenuView === 'schedule') {
-      setScheduleView('today');
+      scheduleTodayScrollMonthRef.current = null;
+      setScheduleMonth(getMonthStart(today));
+      setSelectedScheduleDate(null);
+      setScheduleView('month');
     }
     const nextRecordView = libraryRecordViewMap[nextMenuView];
     if (nextRecordView) {
       setRecordView(nextRecordView);
       setSelectedRecordDate(null);
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (nextMenuView !== 'schedule') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const startStatusProfileEditing = () => {
@@ -9097,7 +8871,7 @@ function App() {
     }
 
     const confirmed = window.confirm(
-      `${exchangeRule.price}PTを使って、フリールーティン枠を1つ増やしますか？`,
+      `${exchangeRule.price}PTを使って、フリークエスト枠を1つ増やしますか？`,
     );
 
     if (!confirmed) {
@@ -9106,7 +8880,7 @@ function App() {
 
     exchangeLockRef.current = true;
     const now = new Date().toISOString();
-    const reason = 'フリールーティン枠 +1';
+    const reason = 'フリークエスト枠 +1';
 
     setPlayerEconomy((currentEconomy) => {
       if (currentEconomy.currentPoints < exchangeRule.price) {
@@ -9151,7 +8925,7 @@ function App() {
     });
     setExchangeToast({
       id: `exchange-toast:quest-slot:${now}`,
-      message: `フリールーティン枠が${nextSlots}個に増えました！`,
+      message: `フリークエスト枠が${nextSlots}個に増えました！`,
     });
     window.setTimeout(() => {
       exchangeLockRef.current = false;
@@ -9162,7 +8936,7 @@ function App() {
     {
       id: 'quest-slot-total',
       category: 'questSlot',
-      label: 'フリールーティン枠 +1',
+      label: 'フリークエスト枠 +1',
       price: gameBalance.questSlotExchange.price,
       enabled: gameBalance.questSlotExchange.enabled,
       maxPurchases: Math.max(
@@ -9223,7 +8997,7 @@ function App() {
     onSupportClick?: () => void;
     supportLabel: string;
   }) => {
-    const kindLabel = kind === 'fixed' ? '固定クエスト' : 'フリールーティン';
+    const kindLabel = kind === 'fixed' ? '固定クエスト' : 'フリークエスト';
     const isOpen = activeQuestInfo?.id === id;
     const actionLabel = supportLabel === '変更可能' ? '編集する' : supportLabel;
 
@@ -9277,8 +9051,8 @@ function App() {
     const entries = isMemo ? dailyMemo : dailyEvent;
     const label = isMemo ? dailyOneLineLabel : dailyEventLabel;
     const placeholder = isMemo
-      ? '今の気持ちをひとこと'
-      : `${isToday ? '今日' : '昨日'}あったことを少しだけ`;
+      ? '今の気持ちや思ったことを書き残してみよう'
+      : `${isToday ? '今日やったことやできごとを書いてみよう' : '昨日やったことやできごとを書いてみよう'}`;
     const updateEntry = isMemo
       ? updateDailyMemoForSelectedDate
       : updateDailyEventForSelectedDate;
@@ -9608,17 +9382,17 @@ function App() {
               </>
             )}
             {page === 'history' && 'スタンプ帳'}
-            {page === 'library' && menuView === 'list' && 'ライブラリ'}
+            {page === 'library' && menuView === 'list' && '持ちもの'}
             {page === 'library' && menuView !== 'list' && activeMenuViewOption
               ? `${activeMenuViewOption.icon} ${activeMenuViewOption.label}`
               : ''}
           </h1>
-          {isLibraryRecordView && <p className="record-header-kicker">ライブラリ</p>}
+          {isLibraryRecordView && <p className="record-header-kicker">持ちもの</p>}
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
         {page === 'library' && menuView === 'list' && (
-          <section className="menu-page library-page" aria-label="ライブラリ">
+          <section className="menu-page library-page" aria-label="持ちもの">
             {libraryCategories.map((category) => (
               <section
                 className="library-category"
@@ -9666,6 +9440,7 @@ function App() {
         {page === 'library' && menuView !== 'list' && (
           <button
             className="menu-back-button"
+            aria-label="持ちもの一覧へ戻る"
             onClick={() => {
               resetEditUiState();
               setMenuView('list');
@@ -9673,7 +9448,7 @@ function App() {
             }}
             type="button"
           >
-            ← ライブラリ
+            ← 持ちもの
           </button>
         )}
 
@@ -9713,6 +9488,156 @@ function App() {
           </div>
         )}
 
+        {isMenuTimerView && (
+          <section className="common-timer-page" aria-label="タイマー">
+            <div className="common-timer-header">
+              <p>TOOL</p>
+              <h2>⏱ タイマー</h2>
+              <span>時間を決めて、少しだけ集中する道具です。</span>
+            </div>
+            <div className="common-timer-display" data-finished={activeTimer?.isComplete ? 'true' : 'false'}>
+              <span>{activeTimer?.isComplete ? '終了しました' : activeTimer ? '残り時間' : '待機中'}</span>
+              <strong>
+                {activeTimer
+                  ? formatTimerSeconds(activeTimer.remainingSeconds)
+                  : formatTimerSeconds(getSecondsFromTimerParts(timerDraftParts))}
+              </strong>
+              {activeTimer && (
+                <small>
+                  設定 {formatTimerDuration(activeTimer.durationSeconds)}
+                </small>
+              )}
+            </div>
+            {!activeTimer && (
+              <div className="common-timer-settings">
+                <div className="timer-shortcut-group">
+                  <span>よく使う時間</span>
+                  <div className="timer-shortcut-buttons">
+                    {timerPresetSeconds.map((seconds) => (
+                      <button
+                        data-active={
+                          getSecondsFromTimerParts(timerDraftParts) === seconds ? 'true' : 'false'
+                        }
+                        key={seconds}
+                        onClick={() => setTimerDraftParts(getTimerParts(seconds))}
+                        type="button"
+                      >
+                        {formatTimerDuration(seconds)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="timer-part-picker">
+                  <label>
+                    <span>時</span>
+                    <select
+                      aria-label="タイマーの時間"
+                      onChange={(event) =>
+                        setTimerDraftParts((currentParts) => ({
+                          ...currentParts,
+                          hours: Number(event.target.value),
+                        }))
+                      }
+                      value={timerDraftParts.hours}
+                    >
+                      {timerHourOptions.map((hours) => (
+                        <option key={hours} value={hours}>
+                          {hours}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>分</span>
+                    <select
+                      aria-label="タイマーの分"
+                      onChange={(event) =>
+                        setTimerDraftParts((currentParts) => ({
+                          ...currentParts,
+                          minutes: Number(event.target.value),
+                        }))
+                      }
+                      value={timerDraftParts.minutes}
+                    >
+                      {timerMinuteOptions.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>秒</span>
+                    <select
+                      aria-label="タイマーの秒"
+                      onChange={(event) =>
+                        setTimerDraftParts((currentParts) => ({
+                          ...currentParts,
+                          seconds: Number(event.target.value),
+                        }))
+                      }
+                      value={timerDraftParts.seconds}
+                    >
+                      {timerSecondOptions.map((seconds) => (
+                        <option key={seconds} value={seconds}>
+                          {seconds}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+            <div className="common-timer-actions">
+              {!activeTimer ? (
+                <button
+                  disabled={getSecondsFromTimerParts(timerDraftParts) <= 0}
+                  onClick={() => startCommonTimer(getSecondsFromTimerParts(timerDraftParts))}
+                  type="button"
+                >
+                  開始
+                </button>
+              ) : activeTimer.isComplete ? (
+                <>
+                  <button onClick={extendFinishedTimerByFiveMinutes} type="button">
+                    ＋5分
+                  </button>
+                  <button onClick={closeActiveTimerPanel} type="button">
+                    閉じる
+                  </button>
+                </>
+              ) : (
+                <>
+                  {activeTimer.isRunning ? (
+                    <button onClick={pauseActiveTimer} type="button">
+                      一時停止
+                    </button>
+                  ) : (
+                    <button onClick={resumeActiveTimer} type="button">
+                      再開
+                    </button>
+                  )}
+                  <button onClick={resetActiveTimer} type="button">
+                    リセット
+                  </button>
+                  <button onClick={closeActiveTimerPanel} type="button">
+                    閉じる
+                  </button>
+                </>
+              )}
+            </div>
+            {notificationPermission === 'default' && (
+              <button
+                className="timer-permission-button common-timer-permission"
+                onClick={requestNotificationPermission}
+                type="button"
+              >
+                ブラウザ通知を許可
+              </button>
+            )}
+          </section>
+        )}
+
         {isTodayStatusView && (
           <section className="player-status-page" aria-label="ステータス">
             <div className="player-status-page-header">
@@ -9747,7 +9672,6 @@ function App() {
                 onCloseDetail={() => setIsRankPanelOpen(false)}
                 onToggleDetail={() => {
                   setNoteEditorTarget(null);
-                  setTimerSettingItemId(null);
                   setIsRankPanelOpen((current) => !current);
                 }}
                 playerDisplayName={playerDisplayName}
@@ -9862,7 +9786,7 @@ function App() {
                   <strong>{playerEconomy.currentPoints}PT</strong>
                 </div>
                 <div>
-                  <span>フリールーティン数</span>
+                  <span>フリークエスト数</span>
                   <strong>{freeQuestCount}個</strong>
                 </div>
                 <div>
@@ -10013,7 +9937,7 @@ function App() {
                   title: '開発者モード',
                   badge: '全機能',
                   description:
-                    '現在のhibitinと同じく、制限なしでルーティンを作れるモードです。',
+                    '現在のhibitinと同じく、制限なしでクエストを作れるモードです。',
                 },
               ] as {
                 key: GameMode;
@@ -10374,7 +10298,7 @@ function App() {
                 <div className="admin-point-targets">
                   {([
                     ['wake', '起床'],
-                    ['normal', 'フリールーティン'],
+                    ['normal', 'フリークエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
                     ['dailyNudge', '本日の日替わりクエスト'],
@@ -10460,7 +10384,7 @@ function App() {
                   <div>
                     <h4>実装済み</h4>
                     <ul>
-                      <li>フリールーティン完了によるPT獲得</li>
+                      <li>フリークエスト完了によるPT獲得</li>
                       <li>チェック解除によるPT取消</li>
                       <li>二重獲得防止</li>
                       <li>累計星によるランク計算</li>
@@ -10470,9 +10394,9 @@ function App() {
                       <li>本日の日替わりクエスト連続記録</li>
                       <li>記憶系固定クエスト完了によるPT獲得</li>
                       <li>記憶系固定クエスト本文削除によるPT取消</li>
-                      <li>ライブラリ内のショップ</li>
+                      <li>持ちもの内のショップ</li>
                       <li>所持PT表示</li>
-                      <li>PTによるフリールーティン枠購入</li>
+                      <li>PTによるフリークエスト枠購入</li>
                       <li>PT支出履歴</li>
                       <li>所持PT不足判定</li>
                       <li>最大枠判定</li>
@@ -10493,9 +10417,9 @@ function App() {
                 </div>
               </div>
               <div className="admin-balance-block admin-slot-exchange-settings">
-                <h3>フリールーティン枠交換設定</h3>
+                <h3>フリークエスト枠交換設定</h3>
                 <div className="admin-slot-row">
-                  <h4>フリールーティン枠 +1</h4>
+                  <h4>フリークエスト枠 +1</h4>
                   <p>
                     利用可能：{getEffectiveQuestSlotLimit(playerUnlocks, gameBalanceDraft)}枠 /
                     使用中：{countFreeQuestItems(displaySections)}枠
@@ -10551,7 +10475,7 @@ function App() {
                   </label>
                 </div>
                 <p className="admin-balance-note">
-                  プレイヤーモードでは、朝・昼・夕・夜のフリールーティン合計数が追加上限になります。
+                  プレイヤーモードでは、朝・昼・夕・夜のフリークエスト合計数が追加上限になります。
                   開発者モードでは枠制限はありません。
                 </p>
               </div>
@@ -10572,7 +10496,7 @@ function App() {
             <div className="settings-header">
               <div>
                 <h2>テンプレート設定</h2>
-                <p>ノーマルと休日のルーティン、曜日ごとの割り当てを管理します。</p>
+                <p>ノーマルと休日のクエスト、曜日ごとの割り当てを管理します。</p>
               </div>
             </div>
 
@@ -10664,7 +10588,7 @@ function App() {
             >
               {selectedDateStats.rate === null ? (
                 <>
-                  <p className="result-rank">ルーティン未設定</p>
+                  <p className="result-rank">クエスト未設定</p>
                   <p className="result-rate">--</p>
                   <p className="result-count">0 / 0 完了</p>
                 </>
@@ -10737,65 +10661,6 @@ function App() {
               )}
             </section>
           )}
-          {page === 'today' && isToday && activeTimer && (
-            <section
-              className="timer-panel"
-              data-complete={activeTimer.isComplete ? 'true' : 'false'}
-              aria-label="実行中のタイマー"
-            >
-              {activeTimer.isComplete ? (
-                <>
-                  <p className="timer-finished">🎉 クエストタイム終了！</p>
-                  <p className="timer-title">
-                    {activeTimer.label} {formatTimerDuration(activeTimer.durationSeconds)}
-                  </p>
-                  <p className="timer-alert-note">
-                    ナイス！1クエスト進んだ！
-                  </p>
-                  <div className="timer-actions">
-                    <button onClick={completeActiveTimerItem} type="button">
-                      完了にする
-                    </button>
-                    {notificationPermission === 'default' && (
-                      <button onClick={requestNotificationPermission} type="button">
-                        通知を許可
-                      </button>
-                    )}
-                    <button onClick={extendFinishedTimerByFiveMinutes} type="button">
-                      ＋5分
-                    </button>
-                    <button onClick={stopFinishedTimerAlert} type="button">
-                      閉じる
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="timer-title">{activeTimer.label}</p>
-                  <p className="timer-remaining">
-                    残り {formatTimerSeconds(activeTimer.remainingSeconds)}
-                  </p>
-                  <div className="timer-actions">
-                    {activeTimer.isRunning ? (
-                      <button onClick={pauseActiveTimer} type="button">
-                        ⏸ 一時停止
-                      </button>
-                    ) : (
-                      <button onClick={resumeActiveTimer} type="button">
-                        ▶ 再開
-                      </button>
-                    )}
-                    <button onClick={resetActiveTimer} type="button">
-                      ↺ リセット
-                    </button>
-                    <button onClick={closeActiveTimerPanel} type="button">
-                      閉じる
-                    </button>
-                  </div>
-                </>
-              )}
-            </section>
-          )}
           {(isSettingsView || isEditMode) && (
             <div className="routine-context" data-quiet={page === 'today' ? 'true' : 'false'}>
               <p>
@@ -10811,8 +10676,8 @@ function App() {
             </div>
           )}
           {canEditRoutines && gameMode === 'player' && (
-            <div className="quest-slot-usage" aria-label="フリールーティン枠">
-              <strong>フリールーティン枠</strong>
+            <div className="quest-slot-usage" aria-label="フリークエスト枠">
+              <strong>フリークエスト枠</strong>
               <span>{usedQuestSlots} / {totalQuestSlotLimit} 使用中</span>
               <span>残り{remainingQuestSlots}枠</span>
             </div>
@@ -11031,19 +10896,7 @@ function App() {
                     canEditRoutines &&
                     isCoreRoutineSectionId(section.id) &&
                     !isFixedItem;
-                  const canConfigureTimer =
-                    !isFixedItem &&
-                    canEditRoutineDetails;
                   const itemMasteryStats = masteryStatsByItemId.get(item.id);
-                  const pausedTimer = pausedTimers[item.id];
-                  const activeItemTimer =
-                    activeTimer?.itemId === item.id ? activeTimer : null;
-                  const itemTimerSeconds = getItemTimerSeconds(item);
-                  const showTimerStart =
-                    page === 'today' &&
-                    isToday &&
-                    !isEditMode &&
-                    Boolean(itemTimerSeconds);
                   const itemNote = page === 'today' ? getItemNote(selectedDateKey, item.id) : '';
                   const isItemNoteOpen =
                     noteEditorTarget?.dateKey === selectedDateKey &&
@@ -11218,51 +11071,6 @@ function App() {
                           {formatMasteryStars(itemMasteryStats.starCount, itemMasteryStats.trophyCount)}
                         </span>
                       )}
-                      {showTimerStart && (
-                        <div className="timer-start-control">
-                          <span>
-                            {activeItemTimer && !activeItemTimer.isComplete
-                              ? `⏱残り ${formatTimerSeconds(activeItemTimer.remainingSeconds)}`
-                              : pausedTimer
-                              ? `⏱残り ${formatTimerSeconds(pausedTimer.remainingSeconds)}`
-                              : `⏱${formatTimerDuration(itemTimerSeconds ?? 0)}`}
-                          </span>
-                          <button
-                            onClick={() => {
-                              if (activeItemTimer?.isRunning) {
-                                pauseActiveTimer();
-                                return;
-                              }
-
-                              if (activeItemTimer && !activeItemTimer.isComplete) {
-                                resumeActiveTimer();
-                                return;
-                              }
-
-                              startItemTimer(item);
-                            }}
-                            type="button"
-                          >
-                            {activeItemTimer?.isRunning ? '⏸' : '▶'}
-                          </button>
-                        </div>
-                      )}
-                      {canConfigureTimer && (
-                        <div className="timer-setting-control">
-                          <button
-                            aria-label={`${item.label}のタイマーを設定`}
-                            className="timer-settings-toggle"
-                            data-popup-ui="true"
-                            onClick={() => toggleTimerSetting(item)}
-                            type="button"
-                          >
-                            ⏱
-                          </button>
-                          {timerSettingItemId === item.id && (
-                            renderTimerSettingMenu(section.id, item)
-                          )}
-                        </div>
-                      )}
                       {page === 'today' && (
                         <button
                           aria-label={`${item.label}のメモ`}
@@ -11331,7 +11139,7 @@ function App() {
                     <span className="routine-check routine-draft-check" aria-hidden="true" />
                     <div className="routine-name">
                       <input
-                        aria-label={`${section.title}へ追加するフリールーティン`}
+                        aria-label={`${section.title}へ追加するフリークエスト`}
                         autoFocus
                         onBlur={(event) => commitRoutineDraft(section.id, event.currentTarget.value)}
                         onChange={(event) => updateRoutineDraft(section.id, event.target.value)}
@@ -11596,14 +11404,6 @@ function App() {
                     type="button"
                   >
                     ›
-                  </button>
-                  <button
-                    aria-label="今日のスケジュールへ"
-                    className="records-today-button"
-                    onClick={showScheduleToday}
-                    type="button"
-                  >
-                    今日のスケジュール
                   </button>
                 </div>
                 <div className="records-day-list schedule-day-list">
@@ -12567,7 +12367,7 @@ function App() {
                 >
                   {historyDateStats.rate === null ? (
                     <>
-                      <p className="result-rank">ルーティン未設定</p>
+                      <p className="result-rank">クエスト未設定</p>
                       <p className="result-rate">--</p>
                       <p className="result-count">0 / 0 完了</p>
                     </>
@@ -12771,7 +12571,6 @@ function App() {
                         const item = entry.item;
                         const isEditing = editingItemId === item.id;
                         const isFixedItem = fixedRoutineIds.has(item.id);
-                        const historyItemTimerSeconds = getItemTimerSeconds(item);
                         const historyItemNote = getItemNote(historySelectedDateKey, item.id);
                         const isHistoryItemNoteOpen =
                           noteEditorTarget?.dateKey === historySelectedDateKey &&
@@ -12840,27 +12639,6 @@ function App() {
                                 : '変更可能',
                             })}
                           </span>
-                          {historyItemTimerSeconds && !isHistoryEditMode && (
-                            <span className="timer-badge">
-                              ⏱{formatTimerDuration(historyItemTimerSeconds)}
-                            </span>
-                          )}
-                          {isHistoryEditMode && (
-                            <div className="timer-setting-control">
-                              <button
-                                aria-label={`${item.label}のタイマーを設定`}
-                                className="timer-settings-toggle"
-                                data-popup-ui="true"
-                                onClick={() => toggleTimerSetting(item)}
-                                type="button"
-                              >
-                                ⏱
-                              </button>
-                              {timerSettingItemId === item.id && (
-                                renderTimerSettingMenu(section.id, item)
-                              )}
-                            </div>
-                          )}
                           <button
                             aria-label={`${item.label}のメモ`}
                             className="item-note-toggle"
@@ -12937,7 +12715,7 @@ function App() {
                           <span className="history-routine-draft-check" aria-hidden="true" />
                           <span className="history-routine-name">
                             <input
-                              aria-label={`${section.title}へ追加するフリールーティン`}
+                              aria-label={`${section.title}へ追加するフリークエスト`}
                               autoFocus
                               onBlur={(event) => commitRoutineDraft(section.id, event.currentTarget.value)}
                               onChange={(event) => updateRoutineDraft(section.id, event.target.value)}
@@ -13030,7 +12808,7 @@ function App() {
             </section>
             {masteryStats.length === 0 ? (
               <p className="empty-achievements">
-                まずは今日のルーティンをチェックすると、ここに実績が育っていきます。
+                まずは今日のクエストをチェックすると、ここに実績が育っていきます。
               </p>
             ) : (
               <>
@@ -13087,8 +12865,8 @@ function App() {
                     ))}
                   </div>
                 </section>
-                <section className="mastery-section-group" aria-label="フリールーティン実績">
-                  <h3>フリールーティン実績</h3>
+                <section className="mastery-section-group" aria-label="フリークエスト実績">
+                  <h3>フリークエスト実績</h3>
                   <div className="mastery-list">
                     {coreRoutineMasteryStats.map((itemStats) => (
                       <article
@@ -13259,14 +13037,14 @@ function App() {
               onClick={() => saveDisplayedRoutineAsTemplate('normal')}
               type="button"
             >
-              編集内容をノーマルルーティンにコピー
+              編集内容をノーマルクエストにコピー
             </button>
             <button
               className="default-template-button"
               onClick={() => saveDisplayedRoutineAsTemplate('holiday')}
               type="button"
             >
-              編集内容を休日ルーティンにコピー
+              編集内容を休日クエストにコピー
             </button>
             {page === 'today' && (
               <button
@@ -13457,7 +13235,7 @@ function App() {
                   初回状態にリセット
                 </button>
                 <p>
-                  開発中に初期ルーティンを確認するための操作です。hibitin以外の保存データは削除しません。
+                  開発中に初期クエストを確認するための操作です。hibitin以外の保存データは削除しません。
                 </p>
               </div>
             </div>
@@ -13566,15 +13344,12 @@ function App() {
             role="dialog"
           >
             <p className="timer-finished-kicker">⏱ タイマー終了</p>
-            <h2 id="timer-finished-title">🎉 クエストタイム終了！</h2>
+            <h2 id="timer-finished-title">時間になりました</h2>
             <p className="timer-finished-routine">
               {activeTimer.label} {formatTimerDuration(activeTimer.durationSeconds)}
             </p>
-            <p className="timer-finished-message">ナイス！1クエスト進んだ！</p>
+            <p className="timer-finished-message">ここまでで一区切り。</p>
             <div className="timer-finished-actions">
-              <button onClick={completeActiveTimerItem} type="button">
-                完了にする
-              </button>
               <button onClick={extendFinishedTimerByFiveMinutes} type="button">
                 ＋5分
               </button>
@@ -13626,7 +13401,7 @@ function App() {
             role="dialog"
           >
             <h2 id="quest-slot-guide-title">枠がいっぱいです</h2>
-            <p>フリールーティン枠を使い切っています。ショップで枠を増やしてください。</p>
+            <p>フリークエスト枠を使い切っています。ショップで枠を増やしてください。</p>
             <div className="dialog-actions">
               <button onClick={goToQuestSlotShop} type="button">
                 ショップへ
