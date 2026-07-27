@@ -8253,32 +8253,6 @@ function App() {
     }
   };
 
-  const updateInlineDailyMemoForSelectedDate = (index: number, value: string) => {
-    const wasCompleted = hasSavedDailyRecordEntries(dailyMemo);
-    const nextEntries = updateDailyRecordEntryAsSaved(dailyMemo, index, value);
-    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
-
-    setDailyMemoDateKey(selectedDateKey);
-    setDailyMemo(nextEntries);
-
-    if (wasCompleted !== nextCompleted) {
-      applyPointChangeForCoreRoutine(selectedDateKey, 'memo', nextCompleted);
-    }
-  };
-
-  const updateInlineDailyEventForSelectedDate = (index: number, value: string) => {
-    const wasCompleted = hasSavedDailyRecordEntries(dailyEvent);
-    const nextEntries = updateDailyRecordEntryAsSaved(dailyEvent, index, value);
-    const nextCompleted = hasSavedDailyRecordEntries(nextEntries);
-
-    setDailyEventDateKey(selectedDateKey);
-    setDailyEvent(nextEntries);
-
-    if (wasCompleted !== nextCompleted) {
-      applyPointChangeForCoreRoutine(selectedDateKey, 'events', nextCompleted);
-    }
-  };
-
   const saveDailyMemoForSelectedDate = (index: number) => {
     const wasCompleted = hasSavedDailyRecordEntries(dailyMemo);
     const nextEntries = saveDailyRecordEntry(dailyMemo, index);
@@ -9306,12 +9280,19 @@ function App() {
       ? '今の気持ちをひとこと'
       : `${isToday ? '今日' : '昨日'}あったことを少しだけ`;
     const updateEntry = isMemo
-      ? updateInlineDailyMemoForSelectedDate
-      : updateInlineDailyEventForSelectedDate;
+      ? updateDailyMemoForSelectedDate
+      : updateDailyEventForSelectedDate;
+    const saveEntry = isMemo
+      ? saveDailyMemoForSelectedDate
+      : saveDailyEventForSelectedDate;
     const primaryRef = isMemo ? dailyMemoTextareaRef : dailyEventTextareaRef;
 
     return (
-      <div className="inline-daily-record-editor" data-record-kind={kind}>
+      <div
+        className="inline-daily-record-editor"
+        data-record-kind={kind}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="inline-daily-record-header">
           <strong>{isMemo ? '✍️' : '📖'} {label}</strong>
           <button
@@ -9323,26 +9304,45 @@ function App() {
           </button>
         </div>
         <div className="inline-daily-record-fields">
-          {entries.map((entry, index) => (
-            <textarea
-              aria-label={`${label} ${index + 1}`}
-              key={`${kind}-${index}`}
-              onChange={(event) => {
-                adjustTextareaHeight(event.currentTarget);
-                updateEntry(index, event.target.value);
-              }}
-              placeholder={placeholder}
-              ref={(element) => {
-                if (index === 0) {
-                  primaryRef.current = element;
-                }
+          {entries.map((entry, index) => {
+            const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
 
-                adjustTextareaHeight(element);
-              }}
-              rows={1}
-              value={entry.text}
-            />
-          ))}
+            return (
+              <div className="inline-daily-record-row" key={`${kind}-${index}`}>
+                <textarea
+                  aria-label={`${label} ${index + 1}`}
+                  onChange={(event) => {
+                    adjustTextareaHeight(event.currentTarget);
+                    updateEntry(index, event.target.value);
+                  }}
+                  placeholder={placeholder}
+                  ref={(element) => {
+                    if (index === 0) {
+                      primaryRef.current = element;
+                    }
+
+                    adjustTextareaHeight(element);
+                  }}
+                  rows={1}
+                  value={entry.text}
+                />
+                {!entry.saved && (
+                  <button
+                    aria-label={`${label} ${index + 1}をOKにする`}
+                    className="inline-daily-record-save-button"
+                    disabled={!canSaveEntry}
+                    onClick={() => {
+                      saveEntry(index);
+                      setInlineDailyRecordKind(null);
+                    }}
+                    type="button"
+                  >
+                    OK
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );

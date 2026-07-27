@@ -7417,6 +7417,13 @@ h1 {
   gap: 6px;
 }
 
+.inline-daily-record-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 7px;
+}
+
 .inline-daily-record-fields textarea {
   width: 100%;
   min-height: 39px;
@@ -7432,6 +7439,28 @@ h1 {
   font-weight: 800;
   line-height: 1.5;
   overflow: hidden;
+}
+
+.inline-daily-record-save-button {
+  min-height: 38px;
+  min-width: 46px;
+  border: 1px solid rgb(76 145 91 / 22%);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: linear-gradient(180deg, #f8fff2, #e8f8dc);
+  color: #2f7446;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 5px 12px rgb(62 111 49 / 10%);
+}
+
+.inline-daily-record-save-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  box-shadow: none;
 }
 
 .inline-daily-record-fields textarea:focus {
