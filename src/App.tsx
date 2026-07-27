@@ -11005,6 +11005,16 @@ function App() {
                             onSupportClick: () => focusDailyRecordField(coreRoutine.kind),
                             supportLabel: 'ひとことへ',
                           })}
+                          <button
+                            className="inline-record-open-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              focusDailyRecordField(coreRoutine.kind);
+                            }}
+                            type="button"
+                          >
+                            書く
+                          </button>
                         </div>
                         {page === 'today' &&
                           inlineDailyRecordKind === coreRoutine.kind &&

@@ -6799,6 +6799,12 @@ h1 {
   cursor: pointer;
 }
 
+.routine-item[data-core-routine='true']:active {
+  background:
+    linear-gradient(90deg, rgb(229 246 235 / 74%), rgb(255 255 255 / 72%)),
+    rgb(255 255 255 / 68%);
+}
+
 .routine-item[data-core-routine='true'] {
   border-top: 1px solid rgb(139 184 122 / 18%);
   border-right: 1px solid rgb(139 184 122 / 18%);
@@ -7114,6 +7120,35 @@ h1 {
 
 .routine-name-button:not(:disabled) {
   cursor: pointer;
+}
+
+.inline-record-open-button {
+  min-height: 26px;
+  border: 1px solid rgb(53 150 94 / 24%);
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgb(238 255 246 / 84%);
+  color: #28704c;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 950;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 70%);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.inline-record-open-button:active {
+  transform: translateY(1px);
+  background: rgb(224 248 235 / 92%);
+}
+
+.inline-record-open-button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.inline-record-open-button:focus-visible {
+  outline: 2px solid #00a86b;
+  outline-offset: 2px;
 }
 
 .routine-name-button,
