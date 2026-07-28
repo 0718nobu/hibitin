@@ -43,7 +43,7 @@ type MenuViewName =
   | 'status'
   | 'shop'
   | 'settings';
-type ScheduleViewName = 'today' | 'month';
+type ScheduleViewName = 'today' | 'month' | 'year';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
@@ -180,7 +180,7 @@ const menuViewOptions: {
   { key: 'timer', icon: '⏱', label: 'タイマー', description: '時間を決めて集中する' },
   { key: 'recordMemo', icon: '✍️', label: 'ひとこと', description: '月ごとのひとことを振り返る' },
   { key: 'recordEvents', icon: '📖', label: 'できごと', description: 'その日にあったことを読む' },
-  { key: 'recordAnyMemo', icon: '📝', label: 'メモ', description: 'なんでもメモを確認する' },
+  { key: 'recordAnyMemo', icon: '📝', label: 'メモ', description: '思いついたことをすぐ書く' },
   { key: 'recordAdvanced', icon: '⚙️', label: 'アドバンスト', description: '追加記録を日付ごとに見る' },
   { key: 'achievements', icon: '🏆', label: '実績', description: '育った記録とスターを見る' },
   { key: 'status', icon: '🏅', label: 'ステータス', description: 'PTやフリークエストを確認する' },
@@ -631,6 +631,9 @@ const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 const TODO_ITEMS_STORAGE_KEY = 'hibitin:todos:v2';
 const TODO_ROLLOVER_STORAGE_KEY = 'hibitin:todos:lastRolloverDate:v1';
 const RECORD_DISPLAY_MODE_STORAGE_KEY = 'hibitin:recordDisplayMode:v1';
+const ANY_MEMO_ITEMS_STORAGE_KEY = 'hibitin:anyMemoItems:v1';
+const ANY_MEMO_FOLDERS_STORAGE_KEY = 'hibitin:anyMemoFolders:v1';
+const ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY = 'hibitin:anyMemoFolderItems:v1';
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -2872,10 +2875,18 @@ const createManagedTodoId = () =>
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const getRoundedCurrentHourTime = (date = new Date()) => {
-  const roundedHour = (date.getHours() + (date.getMinutes() >= 30 ? 1 : 0)) % 24;
+const getRoundedCurrentFiveMinuteTime = (date = new Date()) => {
+  const roundedDate = new Date(date);
+  roundedDate.setSeconds(0, 0);
+  const nextFiveMinutes = Math.ceil(roundedDate.getMinutes() / 5) * 5;
 
-  return `${String(roundedHour).padStart(2, '0')}:00`;
+  if (nextFiveMinutes >= 60) {
+    roundedDate.setHours(roundedDate.getHours() + 1, 0, 0, 0);
+  } else {
+    roundedDate.setMinutes(nextFiveMinutes);
+  }
+
+  return `${String(roundedDate.getHours()).padStart(2, '0')}:${String(roundedDate.getMinutes()).padStart(2, '0')}`;
 };
 
 const createDailyTodoItem = (
@@ -3232,7 +3243,7 @@ const createDailyScheduleItem = (
 });
 
 const createDailyScheduleDraftItem = (): DailyScheduleDraftItem => ({
-  ...createDailyScheduleItem(getRoundedCurrentHourTime()),
+  ...createDailyScheduleItem(getRoundedCurrentFiveMinuteTime()),
   touched: false,
 });
 
@@ -3321,6 +3332,12 @@ const serializeDailySchedule = (
 const loadDailySchedule = (date: Date) =>
   parseDailySchedule(localStorage.getItem(getDailyScheduleStorageKey(date)));
 
+const getScheduleDateKeys = () =>
+  Object.keys(localStorage)
+    .map((key) => key.match(/^hibitin:schedule:(\d{4}-\d{2}-\d{2})$/)?.[1])
+    .filter((dateKey): dateKey is string => Boolean(dateKey))
+    .sort();
+
 const upsertDailyScheduleItem = (
   schedule: DailySchedule,
   item: DailyScheduleItem,
@@ -3342,6 +3359,32 @@ type DailyRecordEntry = {
 };
 
 type DailyRecordEntries = DailyRecordEntry[];
+
+type AnyMemoItem = {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+type AnyMemoListItem = AnyMemoItem & {
+  source: 'item' | 'legacy';
+  dateKey?: string;
+  hasTime: boolean;
+};
+
+type AnyMemoFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AnyMemoFolderMemoItem = AnyMemoItem & {
+  folderId: string;
+};
+
+type AnyMemoTabName = 'memo' | 'folders';
 
 const createDailyRecordEntry = (text = '', saved = false): DailyRecordEntry => ({
   text,
@@ -3491,6 +3534,242 @@ const loadDailyEvent = (date: Date) =>
 
 const loadDailyAnyMemo = (date: Date) =>
   localStorage.getItem(getDailyAnyMemoStorageKey(date)) ?? '';
+
+const createAnyMemoId = () =>
+  `any-memo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createAnyMemoFolderId = () =>
+  `any-memo-folder-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const isValidIsoDateString = (value: unknown): value is string =>
+  typeof value === 'string' && !Number.isNaN(Date.parse(value));
+
+const normalizeAnyMemoItems = (items: unknown): AnyMemoItem[] => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+      }
+
+      const parsedItem = item as Partial<AnyMemoItem>;
+      const text = typeof parsedItem.text === 'string' ? parsedItem.text : '';
+      const createdAt = isValidIsoDateString(parsedItem.createdAt)
+        ? parsedItem.createdAt
+        : new Date().toISOString();
+      const updatedAt = isValidIsoDateString(parsedItem.updatedAt)
+        ? parsedItem.updatedAt
+        : undefined;
+
+      if (!hasMeaningfulText(text)) {
+        return null;
+      }
+
+      return {
+        id:
+          typeof parsedItem.id === 'string' && parsedItem.id.trim()
+            ? parsedItem.id
+            : createAnyMemoId(),
+        text,
+        createdAt,
+        ...(updatedAt ? { updatedAt } : {}),
+      };
+    })
+    .filter((item): item is AnyMemoItem => Boolean(item));
+};
+
+const normalizeAnyMemoFolders = (folders: unknown): AnyMemoFolder[] => {
+  if (!Array.isArray(folders)) {
+    return [];
+  }
+
+  return folders
+    .map((folder) => {
+      if (!folder || typeof folder !== 'object' || Array.isArray(folder)) {
+        return null;
+      }
+
+      const parsedFolder = folder as Partial<AnyMemoFolder>;
+      const name = typeof parsedFolder.name === 'string' ? parsedFolder.name.trim() : '';
+      const createdAt = isValidIsoDateString(parsedFolder.createdAt)
+        ? parsedFolder.createdAt
+        : new Date().toISOString();
+      const updatedAt = isValidIsoDateString(parsedFolder.updatedAt)
+        ? parsedFolder.updatedAt
+        : createdAt;
+
+      if (!name) {
+        return null;
+      }
+
+      return {
+        id:
+          typeof parsedFolder.id === 'string' && parsedFolder.id.trim()
+            ? parsedFolder.id
+            : createAnyMemoFolderId(),
+        name,
+        createdAt,
+        updatedAt,
+      };
+    })
+    .filter((folder): folder is AnyMemoFolder => Boolean(folder));
+};
+
+const normalizeAnyMemoFolderMemoItems = (items: unknown): AnyMemoFolderMemoItem[] => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+      }
+
+      const parsedItem = item as Partial<AnyMemoFolderMemoItem>;
+      const text = typeof parsedItem.text === 'string' ? parsedItem.text : '';
+      const folderId = typeof parsedItem.folderId === 'string' ? parsedItem.folderId : '';
+      const createdAt = isValidIsoDateString(parsedItem.createdAt)
+        ? parsedItem.createdAt
+        : new Date().toISOString();
+      const updatedAt = isValidIsoDateString(parsedItem.updatedAt)
+        ? parsedItem.updatedAt
+        : undefined;
+
+      if (!folderId || !hasMeaningfulText(text)) {
+        return null;
+      }
+
+      return {
+        id:
+          typeof parsedItem.id === 'string' && parsedItem.id.trim()
+            ? parsedItem.id
+            : createAnyMemoId(),
+        folderId,
+        text,
+        createdAt,
+        ...(updatedAt ? { updatedAt } : {}),
+      };
+    })
+    .filter((item): item is AnyMemoFolderMemoItem => Boolean(item));
+};
+
+const loadAnyMemoItems = () => {
+  try {
+    return normalizeAnyMemoItems(JSON.parse(localStorage.getItem(ANY_MEMO_ITEMS_STORAGE_KEY) ?? '[]'));
+  } catch {
+    return [];
+  }
+};
+
+const loadAnyMemoFolders = () => {
+  try {
+    return normalizeAnyMemoFolders(
+      JSON.parse(localStorage.getItem(ANY_MEMO_FOLDERS_STORAGE_KEY) ?? '[]'),
+    );
+  } catch {
+    return [];
+  }
+};
+
+const loadAnyMemoFolderItems = () => {
+  try {
+    return normalizeAnyMemoFolderMemoItems(
+      JSON.parse(localStorage.getItem(ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY) ?? '[]'),
+    );
+  } catch {
+    return [];
+  }
+};
+
+const saveAnyMemoItems = (items: AnyMemoItem[]) => {
+  const normalizedItems = normalizeAnyMemoItems(items);
+
+  if (normalizedItems.length > 0) {
+    localStorage.setItem(ANY_MEMO_ITEMS_STORAGE_KEY, JSON.stringify(normalizedItems));
+    return;
+  }
+
+  localStorage.removeItem(ANY_MEMO_ITEMS_STORAGE_KEY);
+};
+
+const saveAnyMemoFolders = (folders: AnyMemoFolder[]) => {
+  const normalizedFolders = normalizeAnyMemoFolders(folders);
+
+  if (normalizedFolders.length > 0) {
+    localStorage.setItem(ANY_MEMO_FOLDERS_STORAGE_KEY, JSON.stringify(normalizedFolders));
+    return;
+  }
+
+  localStorage.removeItem(ANY_MEMO_FOLDERS_STORAGE_KEY);
+};
+
+const saveAnyMemoFolderItems = (items: AnyMemoFolderMemoItem[]) => {
+  const normalizedItems = normalizeAnyMemoFolderMemoItems(items);
+
+  if (normalizedItems.length > 0) {
+    localStorage.setItem(ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY, JSON.stringify(normalizedItems));
+    return;
+  }
+
+  localStorage.removeItem(ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY);
+};
+
+const getLegacyAnyMemoItems = (): AnyMemoListItem[] => {
+  const legacyItems: AnyMemoListItem[] = [];
+
+  Object.keys(localStorage).forEach((key) => {
+      const dateKey = key.match(/^hibitin:anyMemo:(\d{4}-\d{2}-\d{2})$/)?.[1];
+
+      if (!dateKey) {
+        return;
+      }
+
+      const text = localStorage.getItem(key) ?? '';
+
+      if (!hasMeaningfulText(text)) {
+        return;
+      }
+
+      legacyItems.push({
+        id: `legacy-any-memo-${dateKey}`,
+        text,
+        createdAt: `${dateKey}T00:00:00.000`,
+        source: 'legacy' as const,
+        dateKey,
+        hasTime: false,
+      });
+    });
+
+  return legacyItems;
+};
+
+const getAnyMemoListItems = (items: AnyMemoItem[]): AnyMemoListItem[] =>
+  [
+    ...items.map((item) => ({
+      ...item,
+      source: 'item' as const,
+      hasTime: true,
+    })),
+    ...getLegacyAnyMemoItems(),
+  ].sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt));
+
+const formatAnyMemoTimestamp = (item: AnyMemoListItem, todayDate: Date) => {
+  const createdAt = new Date(item.createdAt);
+  const sameYear = createdAt.getFullYear() === todayDate.getFullYear();
+  const dateLabel = sameYear
+    ? `${createdAt.getMonth() + 1}月${createdAt.getDate()}日`
+    : `${createdAt.getFullYear()}年${createdAt.getMonth() + 1}月${createdAt.getDate()}日`;
+
+  if (!item.hasTime) {
+    return dateLabel;
+  }
+
+  return `${dateLabel} ${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`;
+};
 
 const loadRecordDisplayMode = (): RecordDisplayMode => {
   const savedMode = localStorage.getItem(RECORD_DISPLAY_MODE_STORAGE_KEY);
@@ -4364,6 +4643,7 @@ function App() {
   const [today, setToday] = useState(() => new Date());
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
+  const anyMemoInputRef = useRef<HTMLTextAreaElement>(null);
   const dailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
   const dailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const historyDailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -4391,6 +4671,7 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
+  const [scheduleYear, setScheduleYear] = useState(() => today.getFullYear());
   const [scheduleView, setScheduleView] = useState<ScheduleViewName>('month');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
@@ -4414,6 +4695,24 @@ function App() {
   } | null>(null);
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
+  const [anyMemoItems, setAnyMemoItems] = useState<AnyMemoItem[]>(() => loadAnyMemoItems());
+  const [anyMemoTab, setAnyMemoTab] = useState<AnyMemoTabName>('memo');
+  const [newAnyMemoText, setNewAnyMemoText] = useState('');
+  const [editingAnyMemoId, setEditingAnyMemoId] = useState<string | null>(null);
+  const [editingAnyMemoText, setEditingAnyMemoText] = useState('');
+  const [expandedAnyMemoIds, setExpandedAnyMemoIds] = useState<Record<string, boolean>>({});
+  const [anyMemoStatusMessage, setAnyMemoStatusMessage] = useState('');
+  const [anyMemoFolders, setAnyMemoFolders] = useState<AnyMemoFolder[]>(() => loadAnyMemoFolders());
+  const [anyMemoFolderItems, setAnyMemoFolderItems] = useState<AnyMemoFolderMemoItem[]>(() =>
+    loadAnyMemoFolderItems(),
+  );
+  const [selectedAnyMemoFolderId, setSelectedAnyMemoFolderId] = useState<string | null>(null);
+  const [newAnyMemoFolderName, setNewAnyMemoFolderName] = useState('');
+  const [editingAnyMemoFolderId, setEditingAnyMemoFolderId] = useState<string | null>(null);
+  const [editingAnyMemoFolderName, setEditingAnyMemoFolderName] = useState('');
+  const [newFolderMemoText, setNewFolderMemoText] = useState('');
+  const [movingAnyMemoId, setMovingAnyMemoId] = useState<string | null>(null);
+  const [newMoveFolderName, setNewMoveFolderName] = useState('');
   const selectedDateKey = getDateKey(selectedDate);
   const questDateLabel = formatQuestDateLabel(selectedDate);
   const historySelectedDateKey = historySelectedDate ? getDateKey(historySelectedDate) : '';
@@ -4697,6 +4996,8 @@ function App() {
   const libraryRecordView = libraryRecordViewMap[menuView] ?? null;
   const isLibraryRecordView = page === 'library' && Boolean(libraryRecordView);
   const isLibraryAchievementsView = isLibraryRecordView && recordView === 'achievements';
+  const isLibraryAnyMemoView = isLibraryRecordView && recordView === 'anyMemo';
+  const isAnyMemoFolderDetailView = isLibraryAnyMemoView && Boolean(selectedAnyMemoFolderId);
   const isTodayScheduleView = isMenuScheduleView;
   const isTodayTodoView = isMenuTodoView;
   const isTodayNotesView = isMenuNotesView;
@@ -4865,6 +5166,28 @@ function App() {
     () => getMonthDateCells(scheduleMonth).filter((date): date is Date => Boolean(date)),
     [scheduleMonth, scheduleRevision],
   );
+  const yearlyScheduleGroups = useMemo(() => (
+    Array.from({ length: 12 }, (_, monthIndex) => {
+      const days = getScheduleDateKeys()
+        .filter((dateKey) => dateKey.startsWith(`${scheduleYear}-`))
+        .map((dateKey) => {
+          const date = getDateFromKey(dateKey);
+          const scheduleItems = loadDailySchedule(date);
+
+          return {
+            date,
+            dateKey,
+            items: scheduleItems,
+          };
+        })
+        .filter(({ date, items }) => date.getMonth() === monthIndex && items.length > 0);
+
+      return {
+        monthIndex,
+        days,
+      };
+    }).filter((group) => group.days.length > 0)
+  ), [scheduleRevision, scheduleYear]);
   const recordMonthLabel = monthFormatter.format(recordMonth);
   const recordMonthDates = useMemo(
     () => getMonthDateCells(recordMonth).filter((date): date is Date => Boolean(date)),
@@ -4962,6 +5285,28 @@ function App() {
   const visibleRecordDaySummaries = recordDisplayMode === 'withRecords'
     ? recordDaySummaries.filter((summary) => summary.hasRecordContent)
     : recordDaySummaries;
+  const anyMemoListItems = useMemo(
+    () => getAnyMemoListItems(anyMemoItems),
+    [anyMemoItems, recordRevision],
+  );
+  const sortedAnyMemoFolders = useMemo(
+    () => [...anyMemoFolders].sort((first, second) =>
+      Date.parse(second.updatedAt) - Date.parse(first.updatedAt),
+    ),
+    [anyMemoFolders],
+  );
+  const selectedAnyMemoFolder = useMemo(
+    () =>
+      anyMemoFolders.find((folder) => folder.id === selectedAnyMemoFolderId) ?? null,
+    [anyMemoFolders, selectedAnyMemoFolderId],
+  );
+  const selectedAnyMemoFolderItems = useMemo(
+    () =>
+      anyMemoFolderItems
+        .filter((item) => item.folderId === selectedAnyMemoFolderId)
+        .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt)),
+    [anyMemoFolderItems, selectedAnyMemoFolderId],
+  );
   useEffect(() => {
     if (
       !isTodayScheduleView ||
@@ -5211,6 +5556,35 @@ function App() {
   useEffect(() => {
     localStorage.setItem(RECORD_DISPLAY_MODE_STORAGE_KEY, JSON.stringify(recordDisplayMode));
   }, [recordDisplayMode]);
+
+  useEffect(() => {
+    if (page !== 'library' || menuView !== 'recordAnyMemo') {
+      return;
+    }
+
+    const focusTimerId = window.setTimeout(() => {
+      if (anyMemoTab !== 'memo') {
+        return;
+      }
+
+      anyMemoInputRef.current?.focus({ preventScroll: true });
+      adjustTextareaHeight(anyMemoInputRef.current);
+    }, 120);
+
+    return () => window.clearTimeout(focusTimerId);
+  }, [anyMemoTab, menuView, page]);
+
+  useEffect(() => {
+    if (!anyMemoStatusMessage) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setAnyMemoStatusMessage('');
+    }, 1800);
+
+    return () => window.clearTimeout(timerId);
+  }, [anyMemoStatusMessage]);
 
   useEffect(() => {
     const hasAnyCompletedQuest = getStoredCheckDateKeys().some((dateKey) =>
@@ -8525,6 +8899,353 @@ function App() {
     setRecordRevision((revision) => revision + 1);
   };
 
+  const persistAnyMemoItems = (updater: (items: AnyMemoItem[]) => AnyMemoItem[]) => {
+    setAnyMemoItems((currentItems) => {
+      const nextItems = normalizeAnyMemoItems(updater(currentItems));
+      saveAnyMemoItems(nextItems);
+
+      return nextItems;
+    });
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const addAnyMemoItem = () => {
+    const text = newAnyMemoText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    persistAnyMemoItems((currentItems) => [
+      {
+        id: createAnyMemoId(),
+        text,
+        createdAt: timestamp,
+      },
+      ...currentItems,
+    ]);
+    setNewAnyMemoText('');
+    setAnyMemoStatusMessage('追加しました');
+    window.setTimeout(() => {
+      anyMemoInputRef.current?.focus({ preventScroll: true });
+      adjustTextareaHeight(anyMemoInputRef.current);
+    }, 0);
+  };
+
+  const startEditingAnyMemo = (item: AnyMemoListItem) => {
+    setEditingAnyMemoId(item.id);
+    setEditingAnyMemoText(item.text);
+  };
+
+  const cancelEditingAnyMemo = () => {
+    setEditingAnyMemoId(null);
+    setEditingAnyMemoText('');
+  };
+
+  const saveEditingAnyMemo = (item: AnyMemoListItem) => {
+    const text = editingAnyMemoText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    if (item.source === 'legacy' && item.dateKey) {
+      updateRecordAnyMemo(getDateFromKey(item.dateKey), text);
+    } else {
+      persistAnyMemoItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.id === item.id
+            ? {
+                ...currentItem,
+                text,
+                updatedAt: new Date().toISOString(),
+              }
+            : currentItem,
+        ),
+      );
+    }
+
+    setEditingAnyMemoId(null);
+    setEditingAnyMemoText('');
+    setAnyMemoStatusMessage('更新しました');
+  };
+
+  const deleteAnyMemoItem = (item: AnyMemoListItem) => {
+    if (!window.confirm('このメモを削除しますか？')) {
+      return;
+    }
+
+    if (item.source === 'legacy' && item.dateKey) {
+      localStorage.removeItem(getDailyAnyMemoStorageKey(getDateFromKey(item.dateKey)));
+      syncRecordAnyMemoToActiveDates(getDateFromKey(item.dateKey), '');
+      setRecordRevision((revision) => revision + 1);
+    } else {
+      persistAnyMemoItems((currentItems) =>
+        currentItems.filter((currentItem) => currentItem.id !== item.id),
+      );
+    }
+
+    if (editingAnyMemoId === item.id) {
+      cancelEditingAnyMemo();
+    }
+    setAnyMemoStatusMessage('削除しました');
+  };
+
+  const removeAnyMemoFromSource = (item: AnyMemoListItem) => {
+    if (item.source === 'legacy' && item.dateKey) {
+      localStorage.removeItem(getDailyAnyMemoStorageKey(getDateFromKey(item.dateKey)));
+      syncRecordAnyMemoToActiveDates(getDateFromKey(item.dateKey), '');
+      setRecordRevision((revision) => revision + 1);
+      return;
+    }
+
+    persistAnyMemoItems((currentItems) =>
+      currentItems.filter((currentItem) => currentItem.id !== item.id),
+    );
+  };
+
+  const toggleAnyMemoExpansion = (id: string) => {
+    setExpandedAnyMemoIds((currentExpandedIds) => ({
+      ...currentExpandedIds,
+      [id]: !currentExpandedIds[id],
+    }));
+  };
+
+  const persistAnyMemoFolders = (updater: (folders: AnyMemoFolder[]) => AnyMemoFolder[]) => {
+    setAnyMemoFolders((currentFolders) => {
+      const nextFolders = normalizeAnyMemoFolders(updater(currentFolders));
+      saveAnyMemoFolders(nextFolders);
+
+      return nextFolders;
+    });
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const persistAnyMemoFolderItems = (
+    updater: (items: AnyMemoFolderMemoItem[]) => AnyMemoFolderMemoItem[],
+  ) => {
+    setAnyMemoFolderItems((currentItems) => {
+      const nextItems = normalizeAnyMemoFolderMemoItems(updater(currentItems));
+      saveAnyMemoFolderItems(nextItems);
+
+      return nextItems;
+    });
+    setRecordRevision((revision) => revision + 1);
+  };
+
+  const createAnyMemoFolder = () => {
+    const name = newAnyMemoFolderName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const folder: AnyMemoFolder = {
+      id: createAnyMemoFolderId(),
+      name,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    persistAnyMemoFolders((currentFolders) => [folder, ...currentFolders]);
+    setNewAnyMemoFolderName('');
+    setAnyMemoStatusMessage('フォルダを作りました');
+  };
+
+  const startEditingAnyMemoFolder = (folder: AnyMemoFolder) => {
+    setEditingAnyMemoFolderId(folder.id);
+    setEditingAnyMemoFolderName(folder.name);
+  };
+
+  const cancelEditingAnyMemoFolder = () => {
+    setEditingAnyMemoFolderId(null);
+    setEditingAnyMemoFolderName('');
+  };
+
+  const saveEditingAnyMemoFolder = (folderId: string) => {
+    const name = editingAnyMemoFolderName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    persistAnyMemoFolders((currentFolders) =>
+      currentFolders.map((folder) =>
+        folder.id === folderId
+          ? { ...folder, name, updatedAt: new Date().toISOString() }
+          : folder,
+      ),
+    );
+    cancelEditingAnyMemoFolder();
+    setAnyMemoStatusMessage('フォルダ名を変更しました');
+  };
+
+  const deleteAnyMemoFolder = (folder: AnyMemoFolder) => {
+    const folderMemoCount = anyMemoFolderItems.filter((item) => item.folderId === folder.id).length;
+    const confirmMessage = folderMemoCount > 0
+      ? `「${folder.name}」を削除しますか？ このフォルダ内のメモもすべて削除されます。`
+      : `「${folder.name}」を削除しますか？`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    persistAnyMemoFolders((currentFolders) =>
+      currentFolders.filter((currentFolder) => currentFolder.id !== folder.id),
+    );
+    persistAnyMemoFolderItems((currentItems) =>
+      currentItems.filter((item) => item.folderId !== folder.id),
+    );
+
+    if (selectedAnyMemoFolderId === folder.id) {
+      setSelectedAnyMemoFolderId(null);
+    }
+    if (editingAnyMemoFolderId === folder.id) {
+      cancelEditingAnyMemoFolder();
+    }
+    setAnyMemoStatusMessage('フォルダを削除しました');
+  };
+
+  const addFolderMemoItem = (folderId: string) => {
+    const text = newFolderMemoText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    persistAnyMemoFolderItems((currentItems) => [
+      {
+        id: createAnyMemoId(),
+        folderId,
+        text,
+        createdAt: timestamp,
+      },
+      ...currentItems,
+    ]);
+    persistAnyMemoFolders((currentFolders) =>
+      currentFolders.map((folder) =>
+        folder.id === folderId ? { ...folder, updatedAt: timestamp } : folder,
+      ),
+    );
+    setNewFolderMemoText('');
+    setAnyMemoStatusMessage('追加しました');
+  };
+
+  const startEditingFolderMemo = (item: AnyMemoFolderMemoItem) => {
+    setEditingAnyMemoId(item.id);
+    setEditingAnyMemoText(item.text);
+  };
+
+  const saveEditingFolderMemo = (item: AnyMemoFolderMemoItem) => {
+    const text = editingAnyMemoText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    persistAnyMemoFolderItems((currentItems) =>
+      currentItems.map((currentItem) =>
+        currentItem.id === item.id
+          ? {
+              ...currentItem,
+              text,
+              updatedAt: timestamp,
+            }
+          : currentItem,
+      ),
+    );
+    persistAnyMemoFolders((currentFolders) =>
+      currentFolders.map((folder) =>
+        folder.id === item.folderId ? { ...folder, updatedAt: timestamp } : folder,
+      ),
+    );
+    setEditingAnyMemoId(null);
+    setEditingAnyMemoText('');
+    setAnyMemoStatusMessage('更新しました');
+  };
+
+  const deleteFolderMemoItem = (item: AnyMemoFolderMemoItem) => {
+    if (!window.confirm('このメモを削除しますか？')) {
+      return;
+    }
+
+    persistAnyMemoFolderItems((currentItems) =>
+      currentItems.filter((currentItem) => currentItem.id !== item.id),
+    );
+    if (editingAnyMemoId === item.id) {
+      cancelEditingAnyMemo();
+    }
+    setAnyMemoStatusMessage('削除しました');
+  };
+
+  const moveAnyMemoItemToFolder = (item: AnyMemoListItem, folderId: string) => {
+    const targetFolder = anyMemoFolders.find((folder) => folder.id === folderId);
+
+    if (!targetFolder) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const movedItem: AnyMemoFolderMemoItem = {
+      id: item.source === 'item' ? item.id : createAnyMemoId(),
+      folderId,
+      text: item.text,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt ?? timestamp,
+    };
+
+    removeAnyMemoFromSource(item);
+    persistAnyMemoFolderItems((currentItems) => [movedItem, ...currentItems]);
+    persistAnyMemoFolders((currentFolders) =>
+      currentFolders.map((folder) =>
+        folder.id === folderId ? { ...folder, updatedAt: timestamp } : folder,
+      ),
+    );
+    if (editingAnyMemoId === item.id) {
+      cancelEditingAnyMemo();
+    }
+    setMovingAnyMemoId(null);
+    setNewMoveFolderName('');
+    setAnyMemoStatusMessage(`「${targetFolder.name}」へ移動しました`);
+  };
+
+  const createFolderAndMoveAnyMemoItem = (item: AnyMemoListItem) => {
+    const folderName = newMoveFolderName.trim();
+
+    if (!folderName) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const folder: AnyMemoFolder = {
+      id: createAnyMemoFolderId(),
+      name: folderName,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const movedItem: AnyMemoFolderMemoItem = {
+      id: item.source === 'item' ? item.id : createAnyMemoId(),
+      folderId: folder.id,
+      text: item.text,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt ?? timestamp,
+    };
+
+    removeAnyMemoFromSource(item);
+    persistAnyMemoFolders((currentFolders) => [folder, ...currentFolders]);
+    persistAnyMemoFolderItems((currentItems) => [movedItem, ...currentItems]);
+    if (editingAnyMemoId === item.id) {
+      cancelEditingAnyMemo();
+    }
+    setMovingAnyMemoId(null);
+    setNewMoveFolderName('');
+    setAnyMemoStatusMessage(`「${folder.name}」へ移動しました`);
+  };
+
   const updateRecordAdvancedEntry = (date: Date, itemId: string, value: string) => {
     const target = resolveDateTarget(
       templateSettings,
@@ -8680,8 +9401,34 @@ function App() {
     });
   };
 
+  const openScheduleEditor = (date: Date) => {
+    setScheduleMonth(getMonthStart(date));
+    setScheduleYear(date.getFullYear());
+    setSelectedScheduleDate(date);
+  };
+
+  const openScheduleEditorForToday = () => {
+    openScheduleEditor(today);
+  };
+
+  const changeSelectedScheduleDate = (dateValue: string) => {
+    if (!dateValue) {
+      return;
+    }
+
+    const nextDate = getDateFromKey(dateValue);
+
+    openScheduleEditor(nextDate);
+  };
+
   const moveScheduleMonth = (months: number) => {
     setScheduleMonth((currentMonth) => addMonths(currentMonth, months));
+    setSelectedScheduleDate(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const moveScheduleYear = (years: number) => {
+    setScheduleYear((currentYear) => currentYear + years);
     setSelectedScheduleDate(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -8718,6 +9465,7 @@ function App() {
     if (nextMenuView === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
       setScheduleMonth(getMonthStart(today));
+      setScheduleYear(today.getFullYear());
       setSelectedScheduleDate(null);
       setScheduleView('month');
     }
@@ -8729,6 +9477,16 @@ function App() {
     if (nextMenuView !== 'schedule') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const returnFromLibraryDetail = (options: { animated?: boolean } = {}) => {
+    if (isAnyMemoFolderDetailView) {
+      setSelectedAnyMemoFolderId(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    returnToLibraryList(options);
   };
 
   const returnToLibraryList = (options: { animated?: boolean } = {}) => {
@@ -8819,7 +9577,7 @@ function App() {
     if (deltaX >= 58 && deltaX > absY * 1.45) {
       swipe.triggered = true;
       setActiveQuestInfo(null);
-      returnToLibraryList({ animated: true });
+      returnFromLibraryDetail({ animated: true });
     }
   };
 
@@ -9495,8 +10253,8 @@ function App() {
           {isLibraryDetailView && (
             <button
               className="header-back-icon-button"
-              aria-label="持ちもの一覧へ戻る"
-              onClick={() => returnToLibraryList()}
+              aria-label={isAnyMemoFolderDetailView ? 'フォルダ一覧へ戻る' : '持ちもの一覧へ戻る'}
+              onClick={() => returnFromLibraryDetail()}
               type="button"
             >
               ‹
@@ -11434,21 +12192,25 @@ function App() {
             key="schedule"
           >
             <div className="schedule-view-tabs" aria-label="スケジュール表示切り替え">
-              <button
-                aria-current={scheduleView === 'today' ? 'page' : undefined}
-                data-active={scheduleView === 'today' ? 'true' : 'false'}
-                onClick={() => setScheduleView('today')}
-                type="button"
-              >
-                今日
-              </button>
-              <button
-                aria-current={scheduleView === 'month' ? 'page' : undefined}
-                data-active={scheduleView === 'month' ? 'true' : 'false'}
-                onClick={() => setScheduleView('month')}
-                type="button"
-              >
-                今月
+              {([
+                ['today', '今日'],
+                ['month', '今月'],
+                ['year', '年間'],
+              ] as const).map(([view, label]) => (
+                <button
+                  aria-current={scheduleView === view ? 'page' : undefined}
+                  data-active={scheduleView === view ? 'true' : 'false'}
+                  key={view}
+                  onClick={() => setScheduleView(view)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="schedule-common-action">
+              <button onClick={openScheduleEditorForToday} type="button">
+                ＋ 予定を入力する
               </button>
             </div>
             {scheduleView === 'today' && (() => {
@@ -11465,17 +12227,6 @@ function App() {
                       <p>今日のスケジュール</p>
                       <h2>🗓️ {todayScheduleTitle}</h2>
                     </div>
-                    <button
-                      aria-label="今日のスケジュールを追加"
-                      className="schedule-floating-add-button"
-                      onClick={() => {
-                        setScheduleMonth(getMonthStart(today));
-                        setSelectedScheduleDate(today);
-                      }}
-                      type="button"
-                    >
-                      ＋
-                    </button>
                   </div>
                   {todayScheduleItems.length > 0 ? (
                     <div className="schedule-read-list schedule-today-list">
@@ -11483,10 +12234,7 @@ function App() {
                         <button
                           className="schedule-today-item"
                           key={scheduleItem.id}
-                          onClick={() => {
-                            setScheduleMonth(getMonthStart(today));
-                            setSelectedScheduleDate(today);
-                          }}
+                          onClick={() => openScheduleEditor(today)}
                           type="button"
                         >
                           <time>{scheduleItem.time || '--:--'}</time>
@@ -11495,7 +12243,7 @@ function App() {
                       ))}
                     </div>
                   ) : (
-                    <p className="schedule-today-empty">スケジュールなし</p>
+                    <p className="schedule-today-empty">今日の予定はありません</p>
                   )}
                 </section>
               );
@@ -11541,16 +12289,18 @@ function App() {
                       >
                         <button
                           className="record-day-toggle"
-                          onClick={() => setSelectedScheduleDate(scheduleDate)}
+                          onClick={() => openScheduleEditor(scheduleDate)}
                           type="button"
                         >
                           <span className="record-day-date">
                             🗓️ {dateTitle}
                           </span>
-                          <span className="record-day-meta">
-                            {dateKey === todayKey && <strong>今日</strong>}
-                            {hasSchedule && `${scheduleItems.length}件`}
-                          </span>
+                          {(dateKey === todayKey || hasSchedule) && (
+                            <span className="record-day-meta">
+                              {dateKey === todayKey && <strong>今日</strong>}
+                              {hasSchedule && `${scheduleItems.length}件`}
+                            </span>
+                          )}
                         </button>
 
                         {hasSchedule && (
@@ -11570,6 +12320,71 @@ function App() {
                   })}
                 </div>
               </>
+            )}
+            {scheduleView === 'year' && (
+              <section className="schedule-year-panel" aria-label={`${scheduleYear}年のスケジュール`}>
+                <div className="schedule-year-header">
+                  <button
+                    aria-label="前年のスケジュールへ"
+                    onClick={() => moveScheduleYear(-1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <h2>{scheduleYear}年</h2>
+                  <button
+                    aria-label="翌年のスケジュールへ"
+                    onClick={() => moveScheduleYear(1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                </div>
+                {yearlyScheduleGroups.length === 0 ? (
+                  <p className="schedule-year-empty">この年の予定はまだありません</p>
+                ) : (
+                  <div className="schedule-year-list">
+                    {yearlyScheduleGroups.map((monthGroup) => (
+                      <section className="schedule-year-month" key={monthGroup.monthIndex}>
+                        <h3>{monthGroup.monthIndex + 1}月</h3>
+                        <div className="schedule-year-days">
+                          {monthGroup.days.map(({ date, dateKey, items }) => {
+                            const holidayName = getHolidayName(date);
+                            const dateTitle = `${date.getMonth() + 1}月${date.getDate()}日（${
+                              weekdayShortLabels[date.getDay()]
+                            }${holidayName ? `・${holidayName}` : ''}）`;
+
+                            return (
+                              <article className="schedule-year-day" key={dateKey}>
+                                <button
+                                  className="schedule-year-date-button"
+                                  onClick={() => openScheduleEditor(date)}
+                                  type="button"
+                                >
+                                  {dateTitle}
+                                </button>
+                                <div className="schedule-year-items">
+                                  {items.map((scheduleItem) => (
+                                    <button
+                                      className="schedule-year-item"
+                                      key={scheduleItem.id}
+                                      onClick={() => openScheduleEditor(date)}
+                                      type="button"
+                                    >
+                                      <time>{scheduleItem.time || '--:--'}</time>
+                                      <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
             {selectedScheduleDate && (() => {
               const scheduleDate = selectedScheduleDate;
@@ -11598,7 +12413,7 @@ function App() {
                   >
                     <div className="record-editor-header">
                       <div>
-                        <p>🗓️ スケジュールを編集</p>
+                        <p>🗓️ 予定を入力する</p>
                         <h2>{dateTitle}</h2>
                       </div>
                       <button
@@ -11611,9 +12426,18 @@ function App() {
                     </div>
                     <div className="record-field schedule-field">
                       <label>
-                        🗓️ スケジュール
+                        🗓️ 予定を入力する
                         <span>{scheduleItems.length}件</span>
                       </label>
+                      <div className="schedule-date-field">
+                        <label htmlFor="schedule-editor-date">日付</label>
+                        <input
+                          id="schedule-editor-date"
+                          onChange={(event) => changeSelectedScheduleDate(event.target.value)}
+                          type="date"
+                          value={dateKey}
+                        />
+                      </div>
                       <div className="schedule-editor-list">
                         {visibleScheduleItems.map((scheduleItem, index) => (
                           <div className="schedule-editor-row" key={scheduleItem.id}>
@@ -11735,7 +12559,7 @@ function App() {
                             onClick={() => addScheduleDraftRow(scheduleDate)}
                             type="button"
                           >
-                            ＋ スケジュールを追加
+                            ＋ 予定を追加
                           </button>
                         )}
                       </div>
@@ -12044,7 +12868,473 @@ function App() {
           );
         })()}
 
-        {isLibraryRecordView && !isLibraryAchievementsView && (
+        {isLibraryAnyMemoView && (
+          <section
+            className="quick-memo-page record-view-content"
+            aria-label="メモ"
+          >
+            <div className="quick-memo-tabs" aria-label="メモ表示切り替え">
+              {([
+                ['memo', 'メモ'],
+                ['folders', 'フォルダ'],
+              ] as const).map(([tabName, label]) => (
+                <button
+                  aria-current={anyMemoTab === tabName ? 'page' : undefined}
+                  data-active={anyMemoTab === tabName ? 'true' : 'false'}
+                  key={tabName}
+                  onClick={() => {
+                    setAnyMemoTab(tabName);
+                    setSelectedAnyMemoFolderId(null);
+                    setMovingAnyMemoId(null);
+                    setNewMoveFolderName('');
+                  }}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {anyMemoTab === 'memo' && (
+            <>
+            <section className="quick-memo-composer" aria-label="新しいメモ">
+              <div className="quick-memo-composer-header">
+                <div>
+                  <h2>📝 メモ</h2>
+                  <p>思いついたことを、そのまま置いておく。</p>
+                </div>
+                {anyMemoStatusMessage && (
+                  <span className="quick-memo-status">{anyMemoStatusMessage}</span>
+                )}
+              </div>
+              <textarea
+                aria-label="新しいメモ"
+                onChange={(event) => {
+                  setNewAnyMemoText(event.target.value);
+                  adjustTextareaHeight(event.currentTarget);
+                }}
+                onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                placeholder="思いついたことを書く"
+                ref={(element) => {
+                  anyMemoInputRef.current = element;
+                  adjustTextareaHeight(element);
+                }}
+                rows={3}
+                value={newAnyMemoText}
+              />
+              <div className="quick-memo-composer-actions">
+                <button
+                  disabled={!hasMeaningfulText(newAnyMemoText)}
+                  onClick={addAnyMemoItem}
+                  type="button"
+                >
+                  追加
+                </button>
+              </div>
+            </section>
+
+            <section className="quick-memo-list-section" aria-label="保存済みメモ">
+              <div className="quick-memo-list-heading">
+                <h3>メモ一覧</h3>
+                <span>{anyMemoListItems.length}件</span>
+              </div>
+              {anyMemoListItems.length === 0 ? (
+                <p className="quick-memo-empty">まだメモはありません。</p>
+              ) : (
+                <div className="quick-memo-list">
+                  {anyMemoListItems.map((item) => {
+                    const isEditing = editingAnyMemoId === item.id;
+                    const isExpanded = Boolean(expandedAnyMemoIds[item.id]);
+                    const lineCount = item.text.split(/\r?\n/).length;
+                    const isLongMemo = item.text.length > 120 || lineCount > 5;
+
+                    return (
+                      <article
+                        className="quick-memo-item"
+                        data-expanded={isExpanded ? 'true' : 'false'}
+                        key={item.id}
+                      >
+                        <div className="quick-memo-item-meta">
+                          <time dateTime={item.createdAt}>
+                            {formatAnyMemoTimestamp(item, today)}
+                          </time>
+                          <details className="quick-memo-menu">
+                            <summary aria-label="メモ操作">…</summary>
+                            <div className="quick-memo-menu-panel">
+                              <button onClick={() => startEditingAnyMemo(item)} type="button">
+                                編集
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setMovingAnyMemoId((currentId) =>
+                                    currentId === item.id ? null : item.id,
+                                  );
+                                  setNewMoveFolderName('');
+                                }}
+                                type="button"
+                              >
+                                フォルダへ移動
+                              </button>
+                              {movingAnyMemoId === item.id && (
+                                <section
+                                  aria-label="移動先フォルダ"
+                                  className="quick-memo-move-panel"
+                                >
+                                  <p>移動先を選ぶ</p>
+                                  {sortedAnyMemoFolders.length > 0 && (
+                                    <div className="quick-memo-move-folder-list">
+                                      {sortedAnyMemoFolders.map((folder) => (
+                                        <button
+                                          key={folder.id}
+                                          onClick={() => moveAnyMemoItemToFolder(item, folder.id)}
+                                          type="button"
+                                        >
+                                          📁 {folder.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="quick-memo-new-folder-move">
+                                    <input
+                                      aria-label="新しい移動先フォルダ名"
+                                      onChange={(event) => setNewMoveFolderName(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                          createFolderAndMoveAnyMemoItem(item);
+                                        }
+                                      }}
+                                      placeholder="新しいフォルダ"
+                                      type="text"
+                                      value={newMoveFolderName}
+                                    />
+                                    <button
+                                      disabled={!newMoveFolderName.trim()}
+                                      onClick={() => createFolderAndMoveAnyMemoItem(item)}
+                                      type="button"
+                                    >
+                                      ＋ 新しいフォルダ
+                                    </button>
+                                  </div>
+                                </section>
+                              )}
+                              <button onClick={() => deleteAnyMemoItem(item)} type="button">
+                                削除
+                              </button>
+                            </div>
+                          </details>
+                        </div>
+
+                        {isEditing ? (
+                          <div className="quick-memo-edit">
+                            <textarea
+                              aria-label="メモ本文を編集"
+                              onChange={(event) => {
+                                setEditingAnyMemoText(event.target.value);
+                                adjustTextareaHeight(event.currentTarget);
+                              }}
+                              onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                              ref={adjustTextareaHeight}
+                              rows={3}
+                              value={editingAnyMemoText}
+                            />
+                            <div className="quick-memo-edit-actions">
+                              <button onClick={cancelEditingAnyMemo} type="button">
+                                キャンセル
+                              </button>
+                              <button
+                                disabled={!hasMeaningfulText(editingAnyMemoText)}
+                                onClick={() => saveEditingAnyMemo(item)}
+                                type="button"
+                              >
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              className="quick-memo-text"
+                              onClick={() => startEditingAnyMemo(item)}
+                              type="button"
+                            >
+                              {item.text.trim()}
+                            </button>
+                            {isLongMemo && (
+                              <button
+                                className="quick-memo-expand-button"
+                                onClick={() => toggleAnyMemoExpansion(item.id)}
+                                type="button"
+                              >
+                                {isExpanded ? '閉じる' : '続きを読む'}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+            </>
+            )}
+
+            {anyMemoTab === 'folders' && !selectedAnyMemoFolder && (
+              <section className="memo-folder-page" aria-label="メモフォルダ">
+                <section className="memo-folder-create" aria-label="フォルダ作成">
+                  <div>
+                    <h2>📁 フォルダ</h2>
+                    <p>テーマごとにメモを置いておく。</p>
+                  </div>
+                  <div className="memo-folder-create-row">
+                    <input
+                      aria-label="新しいフォルダ名"
+                      onChange={(event) => setNewAnyMemoFolderName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          createAnyMemoFolder();
+                        }
+                      }}
+                      placeholder="フォルダ名"
+                      type="text"
+                      value={newAnyMemoFolderName}
+                    />
+                    <button
+                      disabled={!newAnyMemoFolderName.trim()}
+                      onClick={createAnyMemoFolder}
+                      type="button"
+                    >
+                      ＋ フォルダを作る
+                    </button>
+                  </div>
+                </section>
+
+                {sortedAnyMemoFolders.length === 0 ? (
+                  <p className="quick-memo-empty">まだフォルダはありません。</p>
+                ) : (
+                  <div className="memo-folder-list">
+                    {sortedAnyMemoFolders.map((folder) => {
+                      const folderMemoCount = anyMemoFolderItems.filter(
+                        (item) => item.folderId === folder.id,
+                      ).length;
+                      const isEditingFolder = editingAnyMemoFolderId === folder.id;
+
+                      return (
+                        <article className="memo-folder-card" key={folder.id}>
+                          {isEditingFolder ? (
+                            <div className="memo-folder-edit">
+                              <input
+                                aria-label={`${folder.name}のフォルダ名`}
+                                autoFocus
+                                onChange={(event) => setEditingAnyMemoFolderName(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    saveEditingAnyMemoFolder(folder.id);
+                                  }
+
+                                  if (event.key === 'Escape') {
+                                    cancelEditingAnyMemoFolder();
+                                  }
+                                }}
+                                type="text"
+                                value={editingAnyMemoFolderName}
+                              />
+                              <button onClick={cancelEditingAnyMemoFolder} type="button">
+                                キャンセル
+                              </button>
+                              <button
+                                disabled={!editingAnyMemoFolderName.trim()}
+                                onClick={() => saveEditingAnyMemoFolder(folder.id)}
+                                type="button"
+                              >
+                                保存
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                className="memo-folder-open-button"
+                                onClick={() => setSelectedAnyMemoFolderId(folder.id)}
+                                type="button"
+                              >
+                                <span aria-hidden="true">📁</span>
+                                <span>
+                                  <strong>{folder.name}</strong>
+                                  <small>{folderMemoCount}件</small>
+                                </span>
+                                <i aria-hidden="true">›</i>
+                              </button>
+                              <details className="quick-memo-menu memo-folder-menu">
+                                <summary aria-label={`${folder.name}のフォルダ操作`}>…</summary>
+                                <div className="quick-memo-menu-panel">
+                                  <button onClick={() => startEditingAnyMemoFolder(folder)} type="button">
+                                    名前を変更
+                                  </button>
+                                  <button onClick={() => deleteAnyMemoFolder(folder)} type="button">
+                                    削除
+                                  </button>
+                                </div>
+                              </details>
+                            </>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {anyMemoTab === 'folders' && selectedAnyMemoFolder && (
+              <section className="memo-folder-detail-page" aria-label={`${selectedAnyMemoFolder.name}のメモ`}>
+                <div className="memo-folder-detail-header">
+                  <button
+                    aria-label="フォルダ一覧へ戻る"
+                    onClick={() => setSelectedAnyMemoFolderId(null)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <div>
+                    <p>フォルダ</p>
+                    <h2>📁 {selectedAnyMemoFolder.name}</h2>
+                  </div>
+                </div>
+
+                <section className="quick-memo-composer" aria-label="フォルダ内の新しいメモ">
+                  <div className="quick-memo-composer-header">
+                    <div>
+                      <h2>メモを追加</h2>
+                      <p>このフォルダにだけ保存します。</p>
+                    </div>
+                    {anyMemoStatusMessage && (
+                      <span className="quick-memo-status">{anyMemoStatusMessage}</span>
+                    )}
+                  </div>
+                  <textarea
+                    aria-label={`${selectedAnyMemoFolder.name}へ追加するメモ`}
+                    onChange={(event) => {
+                      setNewFolderMemoText(event.target.value);
+                      adjustTextareaHeight(event.currentTarget);
+                    }}
+                    onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                    placeholder="思いついたことを書く"
+                    ref={adjustTextareaHeight}
+                    rows={3}
+                    value={newFolderMemoText}
+                  />
+                  <div className="quick-memo-composer-actions">
+                    <button
+                      disabled={!hasMeaningfulText(newFolderMemoText)}
+                      onClick={() => addFolderMemoItem(selectedAnyMemoFolder.id)}
+                      type="button"
+                    >
+                      追加
+                    </button>
+                  </div>
+                </section>
+
+                <section className="quick-memo-list-section" aria-label="フォルダ内メモ一覧">
+                  <div className="quick-memo-list-heading">
+                    <h3>保存済みメモ</h3>
+                    <span>{selectedAnyMemoFolderItems.length}件</span>
+                  </div>
+                  {selectedAnyMemoFolderItems.length === 0 ? (
+                    <p className="quick-memo-empty">このフォルダのメモはまだありません。</p>
+                  ) : (
+                    <div className="quick-memo-list">
+                      {selectedAnyMemoFolderItems.map((item) => {
+                        const displayItem: AnyMemoListItem = {
+                          ...item,
+                          source: 'item',
+                          hasTime: true,
+                        };
+                        const isEditing = editingAnyMemoId === item.id;
+                        const isExpanded = Boolean(expandedAnyMemoIds[item.id]);
+                        const lineCount = item.text.split(/\r?\n/).length;
+                        const isLongMemo = item.text.length > 120 || lineCount > 5;
+
+                        return (
+                          <article
+                            className="quick-memo-item"
+                            data-expanded={isExpanded ? 'true' : 'false'}
+                            key={item.id}
+                          >
+                            <div className="quick-memo-item-meta">
+                              <time dateTime={item.createdAt}>
+                                {formatAnyMemoTimestamp(displayItem, today)}
+                              </time>
+                              <details className="quick-memo-menu">
+                                <summary aria-label="メモ操作">…</summary>
+                                <div className="quick-memo-menu-panel">
+                                  <button onClick={() => startEditingFolderMemo(item)} type="button">
+                                    編集
+                                  </button>
+                                  <button onClick={() => deleteFolderMemoItem(item)} type="button">
+                                    削除
+                                  </button>
+                                </div>
+                              </details>
+                            </div>
+
+                            {isEditing ? (
+                              <div className="quick-memo-edit">
+                                <textarea
+                                  aria-label="メモ本文を編集"
+                                  onChange={(event) => {
+                                    setEditingAnyMemoText(event.target.value);
+                                    adjustTextareaHeight(event.currentTarget);
+                                  }}
+                                  onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                                  ref={adjustTextareaHeight}
+                                  rows={3}
+                                  value={editingAnyMemoText}
+                                />
+                                <div className="quick-memo-edit-actions">
+                                  <button onClick={cancelEditingAnyMemo} type="button">
+                                    キャンセル
+                                  </button>
+                                  <button
+                                    disabled={!hasMeaningfulText(editingAnyMemoText)}
+                                    onClick={() => saveEditingFolderMemo(item)}
+                                    type="button"
+                                  >
+                                    保存
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  className="quick-memo-text"
+                                  onClick={() => startEditingFolderMemo(item)}
+                                  type="button"
+                                >
+                                  {item.text.trim()}
+                                </button>
+                                {isLongMemo && (
+                                  <button
+                                    className="quick-memo-expand-button"
+                                    onClick={() => toggleAnyMemoExpansion(item.id)}
+                                    type="button"
+                                  >
+                                    {isExpanded ? '閉じる' : '続きを読む'}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              </section>
+            )}
+          </section>
+        )}
+
+        {isLibraryRecordView && !isLibraryAchievementsView && !isLibraryAnyMemoView && (
           <section
             className="records-page record-view-content"
             aria-label="月間記録"
