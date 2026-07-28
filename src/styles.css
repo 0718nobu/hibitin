@@ -43,12 +43,80 @@ select {
   margin: 0 auto;
 }
 
+.app-content[data-swipe-back='true'] {
+  touch-action: pan-y;
+}
+
+.app-content[data-swipe-back-animating='true'] {
+  animation: library-back-slide 180ms ease-out both;
+}
+
+@keyframes library-back-slide {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0.86;
+    transform: translateX(28px);
+  }
+}
+
 .app[data-page='history'] .app-content {
   width: min(100%, 620px);
 }
 
 .app-header {
+  position: relative;
   padding: 6px 2px 8px;
+}
+
+.app-header.library-detail-header {
+  padding-left: 42px;
+}
+
+.header-back-icon-button {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  z-index: 2;
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgb(183 218 187 / 76%);
+  border-radius: 999px;
+  margin: 0;
+  padding: 0 0 2px;
+  background: rgb(255 255 255 / 72%);
+  color: #2c7552;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.65rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 6px 14px rgb(51 101 60 / 10%);
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.header-back-icon-button:active {
+  transform: translateX(-1px) scale(0.96);
+  background: rgb(238 255 244 / 92%);
+  box-shadow: 0 4px 10px rgb(51 101 60 / 9%);
+}
+
+.header-back-icon-button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.header-back-icon-button:focus-visible {
+  outline: 3px solid #9bd7b6;
+  outline-offset: 2px;
 }
 
 .today-title-header {
@@ -128,6 +196,10 @@ select {
 .app[data-page='library'][data-record-view] .app-header > * {
   position: relative;
   z-index: 1;
+}
+
+.app[data-page='library'] .app-header.library-detail-header {
+  padding-left: 42px;
 }
 
 .app[data-record-view='memo'] {
@@ -2266,7 +2338,7 @@ h1 {
   display: grid;
   gap: 10px;
   margin-top: 4px;
-  padding: 15px 10px 13px;
+  padding: 15px 10px 18px;
   border: 1px solid #e7c978;
   border-radius: 8px;
   background:
@@ -2854,9 +2926,9 @@ h1 {
 }
 
 .history-empty-guide {
-  margin: 10px 0 0;
+  margin: 14px 0 4px;
   border-top: 1px dashed rgb(139 101 0 / 18%);
-  padding: 14px 4px 0;
+  padding: 17px 4px 0;
   color: #7c6733;
   font-size: 0.85rem;
   font-weight: 800;
@@ -3757,50 +3829,6 @@ h1 {
   color: #6a8d73;
   font-size: 1.4rem;
   font-weight: 1000;
-}
-
-.menu-back-button {
-  position: fixed;
-  left: 14px;
-  bottom: calc(94px + env(safe-area-inset-bottom));
-  z-index: 22;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  width: fit-content;
-  border: 1px solid rgb(182 217 183 / 82%);
-  border-radius: 999px;
-  margin: 0;
-  padding: 10px 15px;
-  background: rgb(255 255 255 / 90%);
-  color: #2a6b48;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 950;
-  box-shadow: 0 10px 24px rgb(48 91 48 / 16%);
-  backdrop-filter: blur(12px);
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    transform 140ms ease,
-    background 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.menu-back-button:active {
-  transform: translateY(1px) scale(0.98);
-  background: rgb(239 255 245 / 94%);
-  box-shadow: 0 7px 18px rgb(48 91 48 / 13%);
-}
-
-.menu-back-button:focus:not(:focus-visible) {
-  outline: none;
-}
-
-.menu-back-button:focus-visible {
-  outline: 3px solid #9bd7b6;
-  outline-offset: 2px;
 }
 
 .common-timer-page {
@@ -6979,7 +7007,7 @@ h1 {
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  font-weight: 900;
+  font-weight: 760;
 }
 
 .quest-kind-mini-badge {
@@ -7554,14 +7582,14 @@ h1 {
   display: grid;
   flex: 1 0 100%;
   gap: 7px;
-  margin: 3px 0 1px 27px;
-  border: 1px solid rgb(181 219 190 / 68%);
-  border-radius: 11px;
-  padding: 9px;
+  grid-column: 1 / -1;
+  margin: 4px 0 1px;
+  border: 1px solid rgb(181 219 190 / 54%);
+  border-radius: 10px;
+  padding: 8px 7px;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 92%), rgb(247 255 247 / 88%));
+    linear-gradient(180deg, rgb(255 255 255 / 72%), rgb(247 255 247 / 66%));
   box-shadow:
-    0 8px 18px rgb(42 94 58 / 8%),
     inset 0 1px 0 rgb(255 255 255 / 78%);
 }
 
@@ -7610,7 +7638,7 @@ h1 {
   resize: none;
   border: 1px solid #cddfd4;
   border-radius: 9px;
-  padding: 8px 9px;
+  padding: 8px 10px;
   background: #ffffff;
   color: #21382c;
   font: inherit;
@@ -7927,7 +7955,13 @@ h1 {
   }
 
   .completion-calendar {
-    padding-inline: 7px;
+    padding: 15px 7px 20px;
+  }
+
+  .history-empty-guide {
+    margin-top: 16px;
+    margin-bottom: 18px;
+    padding-top: 18px;
   }
 
   .completion-calendar-grid {
@@ -8016,7 +8050,7 @@ h1 {
 
   @media (max-width: 360px) {
     .completion-calendar {
-      padding-inline: 6px;
+      padding: 15px 6px 20px;
     }
 
     .completion-calendar-grid {

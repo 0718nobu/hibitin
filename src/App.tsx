@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type TouchEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { User } from '@supabase/supabase-js';
@@ -164,7 +165,7 @@ const todoStatusHeadings: Record<TodoStatus, string> = {
 
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'today', icon: '🎮', label: '今日' },
-  { key: 'history', icon: '📅', label: 'スタンプ帳' },
+  { key: 'history', icon: '📒', label: 'スタンプ帳' },
   { key: 'library', icon: '🎒', label: '持ちもの' },
 ];
 
@@ -4385,6 +4386,7 @@ function App() {
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
   const [menuView, setMenuView] = useState<MenuViewName>('list');
+  const [isLibraryBackAnimating, setIsLibraryBackAnimating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
@@ -4405,6 +4407,11 @@ function App() {
     someday: '',
   });
   const managedTodoDraftComposingStatusesRef = useRef(new Set<ActiveTodoStatus>());
+  const librarySwipeBackRef = useRef<{
+    startX: number;
+    startY: number;
+    triggered: boolean;
+  } | null>(null);
   const [selectedRecordDate, setSelectedRecordDate] = useState<Date | null>(null);
   const [recordRevision, setRecordRevision] = useState(0);
   const selectedDateKey = getDateKey(selectedDate);
@@ -4686,6 +4693,7 @@ function App() {
   const isMenuStatusView = page === 'library' && menuView === 'status';
   const isShopView = page === 'library' && menuView === 'shop';
   const isSettingsView = page === 'library' && menuView === 'settings';
+  const isLibraryDetailView = page === 'library' && menuView !== 'list';
   const libraryRecordView = libraryRecordViewMap[menuView] ?? null;
   const isLibraryRecordView = page === 'library' && Boolean(libraryRecordView);
   const isLibraryAchievementsView = isLibraryRecordView && recordView === 'achievements';
@@ -8723,6 +8731,102 @@ function App() {
     }
   };
 
+  const returnToLibraryList = (options: { animated?: boolean } = {}) => {
+    if (!isLibraryDetailView) {
+      return;
+    }
+
+    const finishReturn = () => {
+      resetEditUiState();
+      setMenuView('list');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setIsLibraryBackAnimating(false);
+    };
+
+    if (options.animated) {
+      setIsLibraryBackAnimating(true);
+      window.setTimeout(finishReturn, 180);
+      return;
+    }
+
+    finishReturn();
+  };
+
+  const shouldIgnoreLibraryBackSwipe = (target: EventTarget | null) => {
+    const element = target instanceof Element ? target : null;
+
+    return Boolean(
+      element?.closest(
+        [
+          'input',
+          'textarea',
+          'select',
+          'button',
+          'a',
+          '[contenteditable="true"]',
+          '[data-quest-info-ui="true"]',
+          '.schedule-view-tabs',
+          '.record-tabs',
+          '.records-display-toggle',
+          '.todo-status-tabs',
+          '.todo-card-menu',
+          '.timer-shortcut-grid',
+          '.timer-controls',
+        ].join(', '),
+      ),
+    );
+  };
+
+  const handleLibraryBackTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (!isLibraryDetailView || isLibraryBackAnimating || event.touches.length !== 1) {
+      librarySwipeBackRef.current = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+
+    if (touch.clientX > 40 || shouldIgnoreLibraryBackSwipe(event.target)) {
+      librarySwipeBackRef.current = null;
+      return;
+    }
+
+    librarySwipeBackRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      triggered: false,
+    };
+  };
+
+  const handleLibraryBackTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    const swipe = librarySwipeBackRef.current;
+
+    if (!swipe || swipe.triggered || event.touches.length !== 1) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const deltaX = touch.clientX - swipe.startX;
+    const deltaY = touch.clientY - swipe.startY;
+    const absY = Math.abs(deltaY);
+
+    if (deltaX < 0 || absY > Math.max(26, Math.abs(deltaX) * 0.72)) {
+      if (absY > 18) {
+        librarySwipeBackRef.current = null;
+      }
+      return;
+    }
+
+    if (deltaX >= 58 && deltaX > absY * 1.45) {
+      swipe.triggered = true;
+      setActiveQuestInfo(null);
+      returnToLibraryList({ animated: true });
+    }
+  };
+
+  const handleLibraryBackTouchEnd = () => {
+    librarySwipeBackRef.current = null;
+  };
+
   const startStatusProfileEditing = () => {
     setStatusProfileDraft(playerProfile);
     setIsStatusProfileEditing(true);
@@ -9369,11 +9473,35 @@ function App() {
         ))}
       </nav>
 
-      <div className="app-content">
-        <header className={`app-header${page === 'today' ? ' today-title-header' : ''}`}>
+      <div
+        className="app-content"
+        data-swipe-back={isLibraryDetailView ? 'true' : undefined}
+        data-swipe-back-animating={isLibraryBackAnimating ? 'true' : undefined}
+        onTouchCancel={handleLibraryBackTouchEnd}
+        onTouchEnd={handleLibraryBackTouchEnd}
+        onTouchMove={handleLibraryBackTouchMove}
+        onTouchStart={handleLibraryBackTouchStart}
+      >
+        <header
+          className={[
+            'app-header',
+            page === 'today' ? 'today-title-header' : '',
+            isLibraryDetailView ? 'library-detail-header' : '',
+          ].filter(Boolean).join(' ')}
+        >
           <div className="top-bar">
             <p className="project-name">hibitin</p>
           </div>
+          {isLibraryDetailView && (
+            <button
+              className="header-back-icon-button"
+              aria-label="持ちもの一覧へ戻る"
+              onClick={() => returnToLibraryList()}
+              type="button"
+            >
+              ‹
+            </button>
+          )}
           <h1>
             {page === 'today' && (
               <>
@@ -9435,21 +9563,6 @@ function App() {
               </section>
             ))}
           </section>
-        )}
-
-        {page === 'library' && menuView !== 'list' && (
-          <button
-            className="menu-back-button"
-            aria-label="持ちもの一覧へ戻る"
-            onClick={() => {
-              resetEditUiState();
-              setMenuView('list');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            type="button"
-          >
-            ← 持ちもの
-          </button>
         )}
 
         {page === 'today' && (
@@ -10878,7 +10991,7 @@ function App() {
                             }}
                             type="button"
                           >
-                            書く
+                            開く
                           </button>
                         </div>
                         {page === 'today' &&
@@ -11444,7 +11557,7 @@ function App() {
                           </span>
                           <span className="record-day-meta">
                             {dateKey === todayKey && <strong>今日</strong>}
-                            {hasSchedule ? `${scheduleItems.length}件` : 'スケジュールなし'}
+                            {hasSchedule && `${scheduleItems.length}件`}
                           </span>
                         </button>
 
