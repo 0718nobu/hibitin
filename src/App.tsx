@@ -11540,14 +11540,6 @@ function App() {
                         key={dateKey}
                       >
                         <button
-                          aria-label={`${dateTitle}のスケジュールを開く`}
-                          className="schedule-floating-add-button schedule-day-add-button"
-                          onClick={() => setSelectedScheduleDate(scheduleDate)}
-                          type="button"
-                        >
-                          ＋
-                        </button>
-                        <button
                           className="record-day-toggle"
                           onClick={() => setSelectedScheduleDate(scheduleDate)}
                           type="button"
