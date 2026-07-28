@@ -2414,8 +2414,8 @@ h1 {
 .calendar-day,
 .calendar-day-empty {
   aspect-ratio: auto;
-  height: 110px;
-  min-height: 110px;
+  height: 124px;
+  min-height: 124px;
   border-radius: 12px;
 }
 
@@ -2423,12 +2423,12 @@ h1 {
   position: relative;
   box-sizing: border-box;
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 36px minmax(0, 1fr);
   align-content: stretch;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   border: 1px dashed #dfc67b;
-  padding: 8px 3px 15px;
+  padding: 9px 3px 20px;
   background: rgb(255 255 255 / 62%);
   color: #2d3c35;
   cursor: pointer;
@@ -2745,7 +2745,7 @@ h1 {
   z-index: 3;
   display: grid;
   min-width: 0;
-  min-height: 34px;
+  min-height: 36px;
   justify-items: center;
   gap: 2px;
   padding-inline: 1px;
@@ -2755,9 +2755,9 @@ h1 {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 54px;
+  min-height: 62px;
   place-items: center;
-  transform: translateY(-1px);
+  transform: translateY(-3px);
 }
 
 .calendar-day-number,
@@ -7975,23 +7975,23 @@ h1 {
 
   .calendar-day,
   .calendar-day-empty {
-    height: 104px;
-    min-height: 104px;
+    height: 116px;
+    min-height: 116px;
   }
 
   .calendar-day {
-    gap: 5px;
-    grid-template-rows: 31px minmax(0, 1fr);
-    padding: 7px 2px 14px;
+    gap: 7px;
+    grid-template-rows: 32px minmax(0, 1fr);
+    padding: 8px 2px 18px;
   }
 
   .calendar-date-header {
-    min-height: 31px;
+    min-height: 32px;
   }
 
   .calendar-stamp-visual {
-    min-height: 50px;
-    transform: translateY(-1px);
+    min-height: 58px;
+    transform: translateY(-3px);
   }
 
   .calendar-stamp-slot {
@@ -8066,12 +8066,12 @@ h1 {
 
     .calendar-day,
     .calendar-day-empty {
-      height: 98px;
-      min-height: 98px;
+      height: 108px;
+      min-height: 108px;
     }
 
     .calendar-day {
-      padding: 7px 2px 13px;
+      padding: 7px 2px 16px;
       grid-template-rows: 30px minmax(0, 1fr);
     }
 
