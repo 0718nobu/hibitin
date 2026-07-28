@@ -2338,7 +2338,7 @@ h1 {
   display: grid;
   gap: 10px;
   margin-top: 4px;
-  padding: 15px 10px 18px;
+  padding: 15px 10px 22px;
   border: 1px solid #e7c978;
   border-radius: 8px;
   background:
@@ -2926,9 +2926,9 @@ h1 {
 }
 
 .history-empty-guide {
-  margin: 14px 0 4px;
+  margin: 22px 0 8px;
   border-top: 1px dashed rgb(139 101 0 / 18%);
-  padding: 17px 4px 0;
+  padding: 18px 4px 0;
   color: #7c6733;
   font-size: 0.85rem;
   font-weight: 800;
@@ -7007,7 +7007,7 @@ h1 {
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  font-weight: 760;
+  font-weight: 400;
 }
 
 .quest-kind-mini-badge {
@@ -7643,7 +7643,7 @@ h1 {
   color: #21382c;
   font: inherit;
   font-size: 0.88rem;
-  font-weight: 800;
+  font-weight: 400;
   line-height: 1.5;
   overflow: hidden;
 }
@@ -7955,11 +7955,11 @@ h1 {
   }
 
   .completion-calendar {
-    padding: 15px 7px 20px;
+    padding: 15px 7px 22px;
   }
 
   .history-empty-guide {
-    margin-top: 16px;
+    margin-top: 24px;
     margin-bottom: 18px;
     padding-top: 18px;
   }
