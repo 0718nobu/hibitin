@@ -2875,15 +2875,17 @@ const createManagedTodoId = () =>
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const getRoundedCurrentFiveMinuteTime = (date = new Date()) => {
+const getRoundedNextHalfHourTime = (date = new Date()) => {
   const roundedDate = new Date(date);
   roundedDate.setSeconds(0, 0);
-  const nextFiveMinutes = Math.ceil(roundedDate.getMinutes() / 5) * 5;
+  const minutes = roundedDate.getMinutes();
 
-  if (nextFiveMinutes >= 60) {
-    roundedDate.setHours(roundedDate.getHours() + 1, 0, 0, 0);
+  if (minutes === 0) {
+    roundedDate.setMinutes(0);
+  } else if (minutes <= 30) {
+    roundedDate.setMinutes(30);
   } else {
-    roundedDate.setMinutes(nextFiveMinutes);
+    roundedDate.setHours(roundedDate.getHours() + 1, 0, 0, 0);
   }
 
   return `${String(roundedDate.getHours()).padStart(2, '0')}:${String(roundedDate.getMinutes()).padStart(2, '0')}`;
@@ -3243,7 +3245,7 @@ const createDailyScheduleItem = (
 });
 
 const createDailyScheduleDraftItem = (): DailyScheduleDraftItem => ({
-  ...createDailyScheduleItem(getRoundedCurrentFiveMinuteTime()),
+  ...createDailyScheduleItem(getRoundedNextHalfHourTime()),
   touched: false,
 });
 
@@ -3356,6 +3358,7 @@ const deleteDailyScheduleItem = (schedule: DailySchedule, id: string): DailySche
 type DailyRecordEntry = {
   text: string;
   saved: boolean;
+  savedAt?: string;
 };
 
 type DailyRecordEntries = DailyRecordEntry[];
@@ -3386,9 +3389,14 @@ type AnyMemoFolderMemoItem = AnyMemoItem & {
 
 type AnyMemoTabName = 'memo' | 'folders';
 
-const createDailyRecordEntry = (text = '', saved = false): DailyRecordEntry => ({
+const createDailyRecordEntry = (
+  text = '',
+  saved = false,
+  savedAt?: string,
+): DailyRecordEntry => ({
   text,
   saved,
+  ...(savedAt ? { savedAt } : {}),
 });
 
 const hasSavedDailyRecordEntries = (entries: DailyRecordEntries) =>
@@ -3416,8 +3424,14 @@ const normalizeDailyRecordEntries = (entries: unknown): DailyRecordEntries => {
           'saved' in entry && typeof (entry as { saved: unknown }).saved === 'boolean'
             ? (entry as { saved: boolean }).saved
             : hasMeaningfulText(text);
+        const savedAt =
+          'savedAt' in entry &&
+          typeof (entry as { savedAt: unknown }).savedAt === 'string' &&
+          !Number.isNaN(Date.parse((entry as { savedAt: string }).savedAt))
+            ? (entry as { savedAt: string }).savedAt
+            : undefined;
 
-        return createDailyRecordEntry(text, saved && hasMeaningfulText(text));
+        return createDailyRecordEntry(text, saved && hasMeaningfulText(text), savedAt);
       }
 
       return null;
@@ -3456,7 +3470,11 @@ const serializeDailyRecordEntries = (entries: DailyRecordEntries) =>
   JSON.stringify(
     entries
       .filter((entry) => entry.saved && hasMeaningfulText(entry.text))
-      .map((entry) => entry.text),
+      .map((entry) => ({
+        text: entry.text,
+        saved: true,
+        ...(entry.savedAt ? { savedAt: entry.savedAt } : {}),
+      })),
   );
 
 const updateDailyRecordEntry = (
@@ -3471,6 +3489,7 @@ const updateDailyRecordEntry = (
     ...currentEntry,
     text: value,
     saved: currentEntry.saved && hasMeaningfulText(value),
+    savedAt: currentEntry.saved && hasMeaningfulText(value) ? currentEntry.savedAt : undefined,
   };
 
   return normalizeDailyRecordEntries(nextEntries);
@@ -3488,12 +3507,14 @@ const updateDailyRecordEntryAsSaved = (
     ...currentEntry,
     text: value,
     saved: hasMeaningfulText(value),
+    savedAt: hasMeaningfulText(value) ? currentEntry.savedAt ?? new Date().toISOString() : undefined,
   };
 
   return normalizeDailyRecordEntries(
     nextEntries.map((entry) => ({
       ...entry,
       saved: hasMeaningfulText(entry.text),
+      savedAt: hasMeaningfulText(entry.text) ? entry.savedAt ?? new Date().toISOString() : undefined,
     })),
   );
 };
@@ -3512,6 +3533,7 @@ const saveDailyRecordEntry = (
   nextEntries[index] = {
     ...currentEntry,
     saved: true,
+    savedAt: currentEntry.savedAt ?? new Date().toISOString(),
   };
 
   return normalizeDailyRecordEntries(nextEntries);
@@ -3769,6 +3791,16 @@ const formatAnyMemoTimestamp = (item: AnyMemoListItem, todayDate: Date) => {
   }
 
   return `${dateLabel} ${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`;
+};
+
+const formatDailyRecordSavedTime = (savedAt?: string) => {
+  if (!savedAt || Number.isNaN(Date.parse(savedAt))) {
+    return '';
+  }
+
+  const date = new Date(savedAt);
+
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
 
 const loadRecordDisplayMode = (): RecordDisplayMode => {
@@ -4646,6 +4678,8 @@ function App() {
   const anyMemoInputRef = useRef<HTMLTextAreaElement>(null);
   const dailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
   const dailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dailyMemoCardRef = useRef<HTMLElement>(null);
+  const dailyEventCardRef = useRef<HTMLElement>(null);
   const historyDailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
   const historyDailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTimerStateRef = useRef<StoredTimerState | null>(null);
@@ -4801,7 +4835,6 @@ function App() {
   const routineDraftComposingSectionsRef = useRef(new Set<string>());
   const [timerDraftParts, setTimerDraftParts] = useState(() => getTimerParts(300));
   const [noteEditorTarget, setNoteEditorTarget] = useState<NoteEditorTarget | null>(null);
-  const [inlineDailyRecordKind, setInlineDailyRecordKind] = useState<CoreRoutineKind | null>(null);
   const [activeQuestInfo, setActiveQuestInfo] = useState<{
     id: string;
     kindLabel: string;
@@ -4948,23 +4981,7 @@ function App() {
 
   useEffect(() => {
     setActiveQuestInfo(null);
-    setInlineDailyRecordKind(null);
   }, [page, menuView, isEditMode, isHistoryEditMode]);
-
-  useEffect(() => {
-    if (!inlineDailyRecordKind) {
-      return;
-    }
-
-    const targetRef = inlineDailyRecordKind === 'memo'
-      ? dailyMemoTextareaRef
-      : dailyEventTextareaRef;
-
-    window.requestAnimationFrame(() => {
-      adjustTextareaHeight(targetRef.current);
-      targetRef.current?.focus();
-    });
-  }, [inlineDailyRecordKind, selectedDateKey]);
 
   useEffect(() => {
     setManagedTodos((currentTodos) => applyTodoRollover(currentTodos, today));
@@ -5165,6 +5182,10 @@ function App() {
   const scheduleMonthDates = useMemo(
     () => getMonthDateCells(scheduleMonth).filter((date): date is Date => Boolean(date)),
     [scheduleMonth, scheduleRevision],
+  );
+  const todayScheduleItems = useMemo(
+    () => loadDailySchedule(today),
+    [scheduleRevision, todayKey, today],
   );
   const yearlyScheduleGroups = useMemo(() => (
     Array.from({ length: 12 }, (_, monthIndex) => {
@@ -9324,7 +9345,7 @@ function App() {
 
       return {
         ...currentDrafts,
-        [dateKey]: [...currentRows, createDailyScheduleDraftItem()],
+        [dateKey]: [createDailyScheduleDraftItem()],
       };
     });
   };
@@ -9477,6 +9498,18 @@ function App() {
     if (nextMenuView !== 'schedule') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const openTodayScheduleView = () => {
+    resetEditUiState();
+    scheduleTodayScrollMonthRef.current = null;
+    setPage('library');
+    setMenuView('schedule');
+    setScheduleMonth(getMonthStart(today));
+    setScheduleYear(today.getFullYear());
+    setSelectedScheduleDate(null);
+    setScheduleView('today');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const returnFromLibraryDetail = (options: { animated?: boolean } = {}) => {
@@ -9813,12 +9846,15 @@ function App() {
     context: 'today' | 'history' = 'today',
   ) => {
     if (context === 'today') {
-      setInlineDailyRecordKind((currentKind) => (currentKind === kind ? null : kind));
-      window.requestAnimationFrame(() => {
-        const targetRef = kind === 'memo' ? dailyMemoTextareaRef : dailyEventTextareaRef;
+      const targetCardRef = kind === 'memo' ? dailyMemoCardRef : dailyEventCardRef;
+      const targetTextareaRef = kind === 'memo' ? dailyMemoTextareaRef : dailyEventTextareaRef;
 
-        targetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        window.setTimeout(() => targetRef.current?.focus(), 180);
+      window.requestAnimationFrame(() => {
+        targetCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(() => {
+          adjustTextareaHeight(targetTextareaRef.current);
+          targetTextareaRef.current?.focus({ preventScroll: true });
+        }, 260);
       });
       return;
     }
@@ -9908,13 +9944,14 @@ function App() {
       </span>
     );
   };
-  const renderInlineDailyRecordEditor = (kind: CoreRoutineKind) => {
+  const renderTodayDailyRecordCard = (kind: CoreRoutineKind) => {
     const isMemo = kind === 'memo';
     const entries = isMemo ? dailyMemo : dailyEvent;
     const label = isMemo ? dailyOneLineLabel : dailyEventLabel;
+    const icon = isMemo ? '✍️' : '📖';
     const placeholder = isMemo
-      ? '今の気持ちや思ったことを書き残してみよう'
-      : `${isToday ? '今日やったことやできごとを書いてみよう' : '昨日やったことやできごとを書いてみよう'}`;
+      ? '今の気持ちや思ったことを書いてみよう'
+      : `${isToday ? '今日' : '昨日'}あったことを書いてみよう`;
     const updateEntry = isMemo
       ? updateDailyMemoForSelectedDate
       : updateDailyEventForSelectedDate;
@@ -9922,29 +9959,44 @@ function App() {
       ? saveDailyMemoForSelectedDate
       : saveDailyEventForSelectedDate;
     const primaryRef = isMemo ? dailyMemoTextareaRef : dailyEventTextareaRef;
+    const cardRef = isMemo ? dailyMemoCardRef : dailyEventCardRef;
+    const savedEntries = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.saved && hasMeaningfulText(entry.text));
+    const draftEntries = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => !entry.saved);
 
     return (
-      <div
-        className="inline-daily-record-editor"
+      <section
+        aria-label={label}
+        className="today-record-write-card"
         data-record-kind={kind}
-        onClick={(event) => event.stopPropagation()}
+        ref={cardRef}
       >
-        <div className="inline-daily-record-header">
-          <strong>{isMemo ? '✍️' : '📖'} {label}</strong>
-          <button
-            aria-label={`${label}を閉じる`}
-            onClick={() => setInlineDailyRecordKind(null)}
-            type="button"
-          >
-            閉じる
-          </button>
+        <div className="today-record-write-header">
+          <h2>{icon} {label}</h2>
         </div>
-        <div className="inline-daily-record-fields">
-          {entries.map((entry, index) => {
-            const canSaveEntry = hasMeaningfulText(entry.text) && !entry.saved;
+        {savedEntries.length > 0 && (
+          <div className="today-record-saved-list">
+            {savedEntries.map(({ entry, index }) => {
+              const savedTime = formatDailyRecordSavedTime(entry.savedAt);
+
+              return (
+                <article className="today-record-saved-item" key={`${kind}-saved-${index}`}>
+                  <p>{entry.text.trim()}</p>
+                  {savedTime && <time dateTime={entry.savedAt}>{savedTime}</time>}
+                </article>
+              );
+            })}
+          </div>
+        )}
+        <div className="today-record-write-fields">
+          {draftEntries.map(({ entry, index }, draftIndex) => {
+            const canSaveEntry = hasMeaningfulText(entry.text);
 
             return (
-              <div className="inline-daily-record-row" key={`${kind}-${index}`}>
+              <div className="today-record-write-row" key={`${kind}-${index}`}>
                 <textarea
                   aria-label={`${label} ${index + 1}`}
                   onChange={(event) => {
@@ -9953,34 +10005,35 @@ function App() {
                   }}
                   placeholder={placeholder}
                   ref={(element) => {
-                    if (index === 0) {
+                    if (draftIndex === 0) {
                       primaryRef.current = element;
                     }
 
                     adjustTextareaHeight(element);
                   }}
-                  rows={1}
+                  rows={isMemo ? 2 : 4}
                   value={entry.text}
                 />
-                {!entry.saved && (
-                  <button
-                    aria-label={`${label} ${index + 1}をOKにする`}
-                    className="inline-daily-record-save-button"
-                    disabled={!canSaveEntry}
-                    onClick={() => {
-                      saveEntry(index);
-                      setInlineDailyRecordKind(null);
-                    }}
-                    type="button"
-                  >
-                    OK
-                  </button>
-                )}
+                <button
+                  aria-label={`${label} ${index + 1}をOKにする`}
+                  className="today-record-write-save-button"
+                  disabled={!canSaveEntry}
+                  onClick={() => {
+                    saveEntry(index);
+                    window.setTimeout(() => {
+                      adjustTextareaHeight(primaryRef.current);
+                      primaryRef.current?.focus({ preventScroll: true });
+                    }, 0);
+                  }}
+                  type="button"
+                >
+                  OK
+                </button>
               </div>
             );
           })}
         </div>
-      </div>
+      </section>
     );
   };
   const getCoreRoutineEntryKey = (coreRoutineId: CoreRoutineId) => `core:${coreRoutineId}`;
@@ -11435,6 +11488,38 @@ function App() {
           </section>
         )}
 
+        {isTodayQuestView && isToday && todayScheduleItems.length > 0 && (() => {
+          const visibleScheduleItems = todayScheduleItems.slice(0, 3);
+          const remainingScheduleCount = Math.max(0, todayScheduleItems.length - visibleScheduleItems.length);
+
+          return (
+          <section className="today-schedule-summary-card" aria-label="スケジュール">
+            <button
+              className="today-schedule-summary-button"
+              onClick={openTodayScheduleView}
+              type="button"
+            >
+              <div className="today-schedule-summary-header">
+                <h2>🕒 スケジュール</h2>
+                <span>{todayScheduleItems.length}件</span>
+                <i aria-hidden="true">›</i>
+              </div>
+              <div className="today-schedule-summary-list">
+                {visibleScheduleItems.map((scheduleItem) => (
+                  <p key={scheduleItem.id}>
+                    <time>{scheduleItem.time || '終日'}</time>
+                    <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                  </p>
+                ))}
+              </div>
+              {remainingScheduleCount > 0 && (
+                <p className="today-schedule-summary-more">ほか{remainingScheduleCount}件</p>
+              )}
+            </button>
+          </section>
+          );
+        })()}
+
         {(isTodayQuestView || isSettingsView) && (
         <div
           className="routine-list"
@@ -11752,9 +11837,6 @@ function App() {
                             開く
                           </button>
                         </div>
-                        {page === 'today' &&
-                          inlineDailyRecordKind === coreRoutine.kind &&
-                          renderInlineDailyRecordEditor(coreRoutine.kind)}
                       </div>
                     );
                   }
@@ -12062,6 +12144,13 @@ function App() {
             </div>
           )}
         </div>
+        )}
+
+        {isTodayQuestView && !isEditMode && (
+          <div className="today-record-write-cards">
+            {renderTodayDailyRecordCard('memo')}
+            {renderTodayDailyRecordCard('events')}
+          </div>
         )}
 
         {isTodayNotesView && !isEditMode && (
@@ -12427,7 +12516,6 @@ function App() {
                     <div className="record-field schedule-field">
                       <label>
                         🗓️ 予定を入力する
-                        <span>{scheduleItems.length}件</span>
                       </label>
                       <div className="schedule-date-field">
                         <label htmlFor="schedule-editor-date">日付</label>
@@ -12438,61 +12526,10 @@ function App() {
                           value={dateKey}
                         />
                       </div>
-                      <div className="schedule-editor-list">
-                        {visibleScheduleItems.map((scheduleItem, index) => (
-                          <div className="schedule-editor-row" key={scheduleItem.id}>
-                            <input
-                              aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
-                              onChange={(event) =>
-                                updateScheduleItem(
-                                  scheduleDate,
-                                  scheduleItem,
-                                  'time',
-                                  event.target.value,
-                                )
-                              }
-                              onInput={(event) =>
-                                updateScheduleItem(
-                                  scheduleDate,
-                                  scheduleItem,
-                                  'time',
-                                  event.currentTarget.value,
-                                )
-                              }
-                              type="time"
-                              value={scheduleItem.time}
-                            />
-                            <input
-                              aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
-                              onCompositionEnd={(event) =>
-                                endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
-                              }
-                              onCompositionStart={() => startScheduleComposition(scheduleItem.id)}
-                              onChange={(event) =>
-                                updateScheduleItem(
-                                  scheduleDate,
-                                  scheduleItem,
-                                  'text',
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="スケジュール内容"
-                              type="text"
-                              value={scheduleItem.text}
-                            />
-                            <button
-                              aria-label={`${dateTitle}のスケジュール ${index + 1}を削除`}
-                              className="schedule-delete-button"
-                              onClick={() => removeScheduleItem(scheduleDate, scheduleItem.id)}
-                              type="button"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
+                      <div className="schedule-editor-new-list">
                         {scheduleDraftRows.map((scheduleDraft, index) => (
                           <div
-                            className="schedule-editor-row"
+                            className="schedule-editor-row schedule-editor-new-row"
                             data-new={hasScheduleDraftValue(scheduleDraft) ? 'false' : 'true'}
                             key={scheduleDraft.id}
                           >
@@ -12539,7 +12576,16 @@ function App() {
                               type="text"
                               value={scheduleDraft.text}
                             />
-                            {hasScheduleDraftValue(scheduleDraft) ? (
+                            <button
+                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}を追加`}
+                              className="schedule-new-mark"
+                              disabled={!hasScheduleDraftValue(scheduleDraft)}
+                              onClick={() => addScheduleDraftRow(scheduleDate)}
+                              type="button"
+                            >
+                              追加
+                            </button>
+                            {hasScheduleDraftValue(scheduleDraft) && (
                               <button
                                 aria-label={`${dateTitle}の新しいスケジュール ${index + 1}を削除`}
                                 className="schedule-delete-button"
@@ -12548,21 +12594,70 @@ function App() {
                               >
                                 ×
                               </button>
-                            ) : (
-                              <span className="schedule-row-spacer" aria-hidden="true" />
                             )}
                           </div>
                         ))}
-                        {!scheduleDraftRows.some(hasPendingScheduleDraft) && (
-                          <button
-                            className="schedule-add-row-button"
-                            onClick={() => addScheduleDraftRow(scheduleDate)}
-                            type="button"
-                          >
-                            ＋ 予定を追加
-                          </button>
-                        )}
                       </div>
+                      {visibleScheduleItems.length > 0 && (
+                        <details className="schedule-existing-details">
+                          <summary>
+                            <span>今日の予定（{visibleScheduleItems.length}件）</span>
+                          </summary>
+                          <div className="schedule-editor-list">
+                            {visibleScheduleItems.map((scheduleItem, index) => (
+                              <div className="schedule-editor-row" key={scheduleItem.id}>
+                                <input
+                                  aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
+                                  onChange={(event) =>
+                                    updateScheduleItem(
+                                      scheduleDate,
+                                      scheduleItem,
+                                      'time',
+                                      event.target.value,
+                                    )
+                                  }
+                                  onInput={(event) =>
+                                    updateScheduleItem(
+                                      scheduleDate,
+                                      scheduleItem,
+                                      'time',
+                                      event.currentTarget.value,
+                                    )
+                                  }
+                                  type="time"
+                                  value={scheduleItem.time}
+                                />
+                                <input
+                                  aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
+                                  onCompositionEnd={(event) =>
+                                    endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
+                                  }
+                                  onCompositionStart={() => startScheduleComposition(scheduleItem.id)}
+                                  onChange={(event) =>
+                                    updateScheduleItem(
+                                      scheduleDate,
+                                      scheduleItem,
+                                      'text',
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder="スケジュール内容"
+                                  type="text"
+                                  value={scheduleItem.text}
+                                />
+                                <button
+                                  aria-label={`${dateTitle}のスケジュール ${index + 1}を削除`}
+                                  className="schedule-delete-button"
+                                  onClick={() => removeScheduleItem(scheduleDate, scheduleItem.id)}
+                                  type="button"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                     </div>
                   </section>
                 </div>
