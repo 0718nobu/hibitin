@@ -29,7 +29,7 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'library';
+type PageName = 'today' | 'history' | 'todos' | 'schedule' | 'library';
 type MenuViewName =
   | 'list'
   | 'schedule'
@@ -48,7 +48,7 @@ type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
-type TodoViewName = 'overview' | TodoStatus;
+type TodoViewName = 'todo' | 'date' | 'folders' | 'completed';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
@@ -150,11 +150,6 @@ const activeTodoStatusOptions = todoStatusOptions.filter(
     option.key !== 'completed',
 );
 
-const todoViewOptions: { key: TodoViewName; icon: string; label: string; title: string }[] = [
-  { key: 'overview', icon: '📋', label: '一覧', title: 'やること一覧' },
-  ...todoStatusOptions,
-];
-
 const todoStatusHeadings: Record<TodoStatus, string> = {
   today: '今日のやること',
   tomorrow: '明日のやること',
@@ -166,7 +161,9 @@ const todoStatusHeadings: Record<TodoStatus, string> = {
 const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'today', icon: '🎮', label: '今日' },
   { key: 'history', icon: '📒', label: 'スタンプ帳' },
-  { key: 'library', icon: '🎒', label: '持ちもの' },
+  { key: 'todos', icon: '✅', label: 'やること' },
+  { key: 'schedule', icon: '📅', label: 'スケジュール' },
+  { key: 'library', icon: '🎒', label: 'かばん' },
 ];
 
 const menuViewOptions: {
@@ -189,12 +186,11 @@ const menuViewOptions: {
 ];
 
 const libraryCategories: {
-  key: 'today' | 'tools' | 'log' | 'player' | 'system';
+  key: 'tools' | 'log' | 'player' | 'system';
   icon: string;
   title: string;
   items: Exclude<MenuViewName, 'list'>[];
 }[] = [
-  { key: 'today', icon: '☀️', title: '今日', items: ['schedule', 'todos'] },
   { key: 'tools', icon: '🧰', title: 'アイテム', items: ['timer'] },
   { key: 'log', icon: '📝', title: 'ログ', items: ['recordMemo', 'recordEvents', 'recordAnyMemo', 'recordAdvanced'] },
   { key: 'player', icon: '👤', title: 'プレイヤー', items: ['achievements', 'status'] },
@@ -629,6 +625,7 @@ const PLAYER_BADGES_STORAGE_KEY = 'hibitin:playerBadges:v1';
 const PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v2';
 const LEGACY_PLAYER_UNLOCKS_STORAGE_KEY = 'hibitin:playerUnlocks:v1';
 const TODO_ITEMS_STORAGE_KEY = 'hibitin:todos:v2';
+const TODO_FOLDERS_STORAGE_KEY = 'hibitin:todoFolders:v1';
 const TODO_ROLLOVER_STORAGE_KEY = 'hibitin:todos:lastRolloverDate:v1';
 const RECORD_DISPLAY_MODE_STORAGE_KEY = 'hibitin:recordDisplayMode:v1';
 const ANY_MEMO_ITEMS_STORAGE_KEY = 'hibitin:anyMemoItems:v1';
@@ -2833,6 +2830,8 @@ type ManagedTodoItem = {
   id: string;
   text: string;
   status: TodoStatus;
+  dueDate?: string;
+  folderId?: string;
   completed: boolean;
   createdAt: string;
   updatedAt: string;
@@ -2845,6 +2844,15 @@ type ManagedTodoItem = {
 };
 
 type ManagedTodos = ManagedTodoItem[];
+
+type TodoFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type TodoFolders = TodoFolder[];
 
 type DailyScheduleItem = {
   id: string;
@@ -2871,6 +2879,9 @@ const createDailyTodoId = () =>
 
 const createManagedTodoId = () =>
   `managed-todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createTodoFolderId = () =>
+  `todo-folder-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2968,7 +2979,7 @@ const isActiveTodoStatus = (value: TodoStatus): value is ActiveTodoStatus =>
 const createManagedTodoItem = (
   text = '',
   status: TodoStatus = 'today',
-  options: Partial<Pick<ManagedTodoItem, 'id' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus' | 'pendingReview'>> = {},
+  options: Partial<Pick<ManagedTodoItem, 'id' | 'dueDate' | 'folderId' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus' | 'pendingReview'>> = {},
 ): ManagedTodoItem => {
   const timestamp = new Date().toISOString();
   const completed = status === 'completed' || Boolean(options.completed);
@@ -2983,6 +2994,8 @@ const createManagedTodoItem = (
     id: options.id ?? createManagedTodoId(),
     text,
     status,
+    ...(options.dueDate ? { dueDate: options.dueDate } : {}),
+    ...(options.folderId ? { folderId: options.folderId } : {}),
     completed,
     createdAt: options.createdAt ?? timestamp,
     updatedAt: options.updatedAt ?? timestamp,
@@ -3010,6 +3023,14 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
       const parsedTodo = todo as Partial<ManagedTodoItem>;
       const text = typeof parsedTodo.text === 'string' ? parsedTodo.text : '';
       const status = isTodoStatus(parsedTodo.status) ? parsedTodo.status : 'today';
+      const dueDate =
+        typeof parsedTodo.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsedTodo.dueDate)
+          ? parsedTodo.dueDate
+          : undefined;
+      const folderId =
+        typeof parsedTodo.folderId === 'string' && parsedTodo.folderId.trim()
+          ? parsedTodo.folderId
+          : undefined;
       const createdAt =
         typeof parsedTodo.createdAt === 'string' && !Number.isNaN(Date.parse(parsedTodo.createdAt))
           ? parsedTodo.createdAt
@@ -3048,6 +3069,8 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
             ? parsedTodo.id
             : createManagedTodoId(),
         completed: status === 'completed' || Boolean(parsedTodo.completed),
+        dueDate,
+        folderId,
         createdAt,
         updatedAt,
         completedAt,
@@ -3061,6 +3084,87 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
 
 const serializeManagedTodos = (todos: ManagedTodos) =>
   JSON.stringify(normalizeManagedTodos(todos));
+
+const normalizeTodoFolders = (folders: unknown): TodoFolders => {
+  if (!Array.isArray(folders)) {
+    return [];
+  }
+
+  return folders
+    .map((folder) => {
+      if (!folder || typeof folder !== 'object' || Array.isArray(folder)) {
+        return null;
+      }
+
+      const parsedFolder = folder as Partial<TodoFolder>;
+      const name = typeof parsedFolder.name === 'string' ? parsedFolder.name.trim() : '';
+
+      if (!name) {
+        return null;
+      }
+
+      const timestamp = new Date().toISOString();
+      const createdAt =
+        typeof parsedFolder.createdAt === 'string' && !Number.isNaN(Date.parse(parsedFolder.createdAt))
+          ? parsedFolder.createdAt
+          : timestamp;
+      const updatedAt =
+        typeof parsedFolder.updatedAt === 'string' && !Number.isNaN(Date.parse(parsedFolder.updatedAt))
+          ? parsedFolder.updatedAt
+          : createdAt;
+
+      return {
+        id:
+          typeof parsedFolder.id === 'string' && parsedFolder.id.trim()
+            ? parsedFolder.id
+            : createTodoFolderId(),
+        name,
+        createdAt,
+        updatedAt,
+      };
+    })
+    .filter((folder): folder is TodoFolder => Boolean(folder));
+};
+
+const loadTodoFolders = () => {
+  try {
+    return normalizeTodoFolders(JSON.parse(localStorage.getItem(TODO_FOLDERS_STORAGE_KEY) ?? '[]'));
+  } catch {
+    return [];
+  }
+};
+
+const saveTodoFolders = (folders: TodoFolders) => {
+  const normalizedFolders = normalizeTodoFolders(folders);
+
+  if (normalizedFolders.length > 0) {
+    localStorage.setItem(TODO_FOLDERS_STORAGE_KEY, JSON.stringify(normalizedFolders));
+    return;
+  }
+
+  localStorage.removeItem(TODO_FOLDERS_STORAGE_KEY);
+};
+
+const hydrateManagedTodoDates = (todos: ManagedTodos, todayDate: Date): ManagedTodos => {
+  const todayDateKey = getDateKey(todayDate);
+  const tomorrowDateKey = getDateKey(addDays(todayDate, 1));
+
+  return todos.map((todo) => {
+    if (todo.dueDate || todo.status === 'completed') {
+      return todo;
+    }
+
+    if (todo.status === 'today') {
+      return { ...todo, dueDate: todayDateKey };
+    }
+
+    if (todo.status === 'tomorrow') {
+      return { ...todo, dueDate: tomorrowDateKey };
+    }
+
+    return todo;
+  });
+};
 
 const getLegacyTodoDateKeys = () =>
   Object.keys(localStorage)
@@ -3090,15 +3194,16 @@ const migrateLegacyDailyTodos = (todayDate: Date): ManagedTodos => {
           completed: true,
           completedAt,
           originalStatus: dateKey === tomorrowDateKey ? 'tomorrow' : 'today',
+          dueDate: dateKey,
         });
       }
 
       if (dateKey === todayDateKey) {
-        return createManagedTodoItem(todo.text, 'today', baseOptions);
+        return createManagedTodoItem(todo.text, 'today', { ...baseOptions, dueDate: dateKey });
       }
 
       if (dateKey === tomorrowDateKey) {
-        return createManagedTodoItem(todo.text, 'tomorrow', baseOptions);
+        return createManagedTodoItem(todo.text, 'tomorrow', { ...baseOptions, dueDate: dateKey });
       }
 
       return createManagedTodoItem(todo.text, dateKey < todayDateKey ? 'soon' : 'someday', baseOptions);
@@ -3177,59 +3282,11 @@ const loadManagedTodos = (todayDate: Date): ManagedTodos => {
       })()
     : migrateLegacyDailyTodos(todayDate);
 
-  return applyTodoRollover(loadedTodos, todayDate);
-};
-
-const getManagedTodoStats = (todos: ManagedTodos, status: TodoStatus) => {
-  const filteredTodos = todos.filter((todo) => {
-    if (!hasManagedTodoText(todo) || todo.pendingReview) {
-      return false;
-    }
-
-    if (status === 'completed') {
-      return todo.status === 'completed';
-    }
-
-    return todo.status === status;
-  });
-
-  return {
-    completedCount: filteredTodos.filter((todo) => todo.completed).length,
-    totalCount: filteredTodos.length,
-  };
-};
-
-const getManagedTodoRows = (todos: ManagedTodos, status: ActiveTodoStatus) => {
-  const statusTodos = todos.filter(
-    (todo) => todo.status === status && !todo.pendingReview,
-  );
-
-  if (statusTodos.some((todo) => !hasManagedTodoText(todo))) {
-    return statusTodos;
-  }
-
-  return [
-    ...statusTodos,
-    createManagedTodoItem('', status, {
-      id: `new-${status}`,
-      completed: false,
-    }),
-  ];
+  return applyTodoRollover(hydrateManagedTodoDates(loadedTodos, todayDate), todayDate);
 };
 
 const getTodoStatusLabel = (status: TodoStatus) =>
   todoStatusOptions.find((option) => option.key === status)?.title ?? status;
-
-const getActiveTodoStatusOption = (status: ActiveTodoStatus) =>
-  activeTodoStatusOptions.find((option) => option.key === status) ?? activeTodoStatusOptions[0];
-
-const getVisibleManagedTodosByStatus = (todos: ManagedTodos, status: ActiveTodoStatus) =>
-  todos.filter(
-    (todo) =>
-      todo.status === status &&
-      hasManagedTodoText(todo) &&
-      !todo.pendingReview,
-  );
 
 const hasScheduleValue = (scheduleItem: DailyScheduleItem) =>
   scheduleItem.time.trim().length > 0 || scheduleItem.text.trim().length > 0;
@@ -4706,7 +4763,7 @@ function App() {
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
   const [scheduleYear, setScheduleYear] = useState(() => today.getFullYear());
-  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('month');
+  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('year');
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [recordDisplayMode, setRecordDisplayMode] =
@@ -4714,7 +4771,20 @@ function App() {
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
-  const [todoView, setTodoView] = useState<TodoViewName>('overview');
+  const [todoView, setTodoView] = useState<TodoViewName>('todo');
+  const [todoMonth, setTodoMonth] = useState(() => getMonthStart(today));
+  const [selectedTodoDate, setSelectedTodoDate] = useState<Date | null>(null);
+  const [newTodoText, setNewTodoText] = useState('');
+  const [newTodoDateText, setNewTodoDateText] = useState('');
+  const [activeTodoMenuId, setActiveTodoMenuId] = useState<string | null>(null);
+  const [todoFolders, setTodoFolders] = useState<TodoFolders>(() => loadTodoFolders());
+  const [selectedTodoFolderId, setSelectedTodoFolderId] = useState<string | null>(null);
+  const [newTodoFolderName, setNewTodoFolderName] = useState('');
+  const [newTodoFolderText, setNewTodoFolderText] = useState('');
+  const [activeTodoFolderMenuId, setActiveTodoFolderMenuId] = useState<string | null>(null);
+  const newTodoInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const newTodoDateInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const newTodoFolderInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [managedTodoDrafts, setManagedTodoDrafts] = useState<Record<ActiveTodoStatus, string>>({
     today: '',
     tomorrow: '',
@@ -5002,8 +5072,8 @@ function App() {
     todayKey,
   );
   const isTodayQuestView = page === 'today';
-  const isMenuScheduleView = page === 'library' && menuView === 'schedule';
-  const isMenuTodoView = page === 'library' && menuView === 'todos';
+  const isMenuScheduleView = page === 'schedule' || (page === 'library' && menuView === 'schedule');
+  const isMenuTodoView = page === 'todos' || (page === 'library' && menuView === 'todos');
   const isMenuTimerView = page === 'library' && menuView === 'timer';
   const isMenuNotesView = false;
   const isMenuStatusView = page === 'library' && menuView === 'status';
@@ -5178,6 +5248,11 @@ function App() {
     [masteryStats],
   );
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
+  const todoMonthLabel = monthFormatter.format(todoMonth);
+  const todoMonthDates = useMemo(
+    () => getMonthDateCells(todoMonth).filter((date): date is Date => Boolean(date)),
+    [todoMonth],
+  );
   const scheduleMonthLabel = monthFormatter.format(scheduleMonth);
   const scheduleMonthDates = useMemo(
     () => getMonthDateCells(scheduleMonth).filter((date): date is Date => Boolean(date)),
@@ -5596,6 +5671,19 @@ function App() {
   }, [anyMemoTab, menuView, page]);
 
   useEffect(() => {
+    if (!isTodayTodoView || todoView !== 'todo') {
+      return;
+    }
+
+    const focusTimerId = window.setTimeout(() => {
+      newTodoInputRef.current?.focus({ preventScroll: true });
+      adjustTextareaHeight(newTodoInputRef.current);
+    }, 120);
+
+    return () => window.clearTimeout(focusTimerId);
+  }, [isTodayTodoView, todoView]);
+
+  useEffect(() => {
     if (!anyMemoStatusMessage) {
       return;
     }
@@ -5789,6 +5877,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(TODO_ITEMS_STORAGE_KEY, serializeManagedTodos(managedTodos));
   }, [managedTodos]);
+
+  useEffect(() => {
+    saveTodoFolders(todoFolders);
+  }, [todoFolders]);
 
   useEffect(() => {
     if (pendingTodoReviews.length === 0) {
@@ -8851,6 +8943,242 @@ function App() {
     setManagedTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== id));
   };
 
+  const getTodoStatusForDueDate = (dueDate?: string): ActiveTodoStatus => {
+    if (!dueDate) {
+      return 'soon';
+    }
+
+    const tomorrowKey = getDateKey(addDays(today, 1));
+
+    if (dueDate === todayKey) {
+      return 'today';
+    }
+
+    if (dueDate === tomorrowKey) {
+      return 'tomorrow';
+    }
+
+    return 'someday';
+  };
+
+  const addManagedTodoQuick = (text: string, dueDate?: string, folderId?: string) => {
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+      return false;
+    }
+
+    const timestamp = new Date().toISOString();
+    setManagedTodos((currentTodos) => [
+      ...currentTodos,
+      createManagedTodoItem(trimmedText, getTodoStatusForDueDate(dueDate), {
+        dueDate,
+        folderId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    ]);
+
+    return true;
+  };
+
+  const submitNewTodo = () => {
+    if (!addManagedTodoQuick(newTodoText)) {
+      return;
+    }
+
+    setNewTodoText('');
+    window.setTimeout(() => {
+      newTodoInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+  };
+
+  const submitNewTodoForDate = (date: Date) => {
+    const dateKey = getDateKey(date);
+
+    if (!addManagedTodoQuick(newTodoDateText, dateKey)) {
+      return;
+    }
+
+    setNewTodoDateText('');
+    window.setTimeout(() => {
+      newTodoDateInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+  };
+
+  const submitNewTodoForFolder = (folderId: string) => {
+    if (!addManagedTodoQuick(newTodoFolderText, undefined, folderId)) {
+      return;
+    }
+
+    setNewTodoFolderText('');
+    setTodoFolders((currentFolders) =>
+      currentFolders.map((folder) =>
+        folder.id === folderId ? { ...folder, updatedAt: new Date().toISOString() } : folder,
+      ),
+    );
+    window.setTimeout(() => {
+      newTodoFolderInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+  };
+
+  const updateManagedTodoDueDate = (id: string, dueDate?: string) => {
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.id === id && todo.status !== 'completed'
+          ? {
+              ...todo,
+              dueDate,
+              status: getTodoStatusForDueDate(dueDate),
+              pendingReview: undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          : todo,
+      ),
+    );
+  };
+
+  const updateManagedTodoFolder = (id: string, folderId?: string) => {
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.id === id
+          ? {
+              ...todo,
+              ...(folderId ? { folderId } : { folderId: undefined }),
+              updatedAt: new Date().toISOString(),
+            }
+          : todo,
+      ),
+    );
+
+    if (folderId) {
+      setTodoFolders((currentFolders) =>
+        currentFolders.map((folder) =>
+          folder.id === folderId ? { ...folder, updatedAt: new Date().toISOString() } : folder,
+        ),
+      );
+    }
+  };
+
+  const createTodoFolder = (name: string) => {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      return null;
+    }
+
+    const timestamp = new Date().toISOString();
+    const folder: TodoFolder = {
+      id: createTodoFolderId(),
+      name: trimmedName,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    setTodoFolders((currentFolders) => [folder, ...currentFolders]);
+    return folder;
+  };
+
+  const submitNewTodoFolder = () => {
+    const folder = createTodoFolder(newTodoFolderName);
+
+    if (!folder) {
+      return;
+    }
+
+    setNewTodoFolderName('');
+  };
+
+  const promptCreateTodoFolderForTodo = (todoId: string) => {
+    const folderName = window.prompt('新しいフォルダ名');
+    const folder = folderName ? createTodoFolder(folderName) : null;
+
+    if (folder) {
+      updateManagedTodoFolder(todoId, folder.id);
+    }
+    setActiveTodoMenuId(null);
+  };
+
+  const renameTodoFolder = (folder: TodoFolder) => {
+    const nextName = window.prompt('フォルダ名を変更', folder.name)?.trim();
+
+    if (!nextName) {
+      return;
+    }
+
+    setTodoFolders((currentFolders) =>
+      currentFolders.map((currentFolder) =>
+        currentFolder.id === folder.id
+          ? { ...currentFolder, name: nextName, updatedAt: new Date().toISOString() }
+          : currentFolder,
+      ),
+    );
+    setActiveTodoFolderMenuId(null);
+  };
+
+  const deleteTodoFolder = (folder: TodoFolder) => {
+    if (!window.confirm('フォルダだけを削除します。中のやることは残ります。')) {
+      return;
+    }
+
+    setTodoFolders((currentFolders) => currentFolders.filter((currentFolder) => currentFolder.id !== folder.id));
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.folderId === folder.id
+          ? { ...todo, folderId: undefined, updatedAt: new Date().toISOString() }
+          : todo,
+      ),
+    );
+    if (selectedTodoFolderId === folder.id) {
+      setSelectedTodoFolderId(null);
+    }
+    setActiveTodoFolderMenuId(null);
+  };
+
+  const openTodayTodoDateView = () => {
+    resetEditUiState();
+    setPage('todos');
+    setMenuView('list');
+    setTodoView('date');
+    setTodoMonth(getMonthStart(today));
+    setSelectedTodoDate(today);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const copyManagedTodoText = async (todo: ManagedTodoItem) => {
+    try {
+      await navigator.clipboard?.writeText(todo.text);
+    } catch {
+      window.prompt('コピーしてください', todo.text);
+    }
+    setActiveTodoMenuId(null);
+  };
+
+  const focusManagedTodo = (todoId: string) => {
+    window.setTimeout(() => {
+      document.getElementById(`managed-todo-text-${todoId}`)?.focus();
+    }, 0);
+    setActiveTodoMenuId(null);
+  };
+
+  const confirmDeleteManagedTodo = (todo: ManagedTodoItem) => {
+    if (window.confirm('このやることを削除しますか？')) {
+      deleteManagedTodo(todo.id);
+    }
+    setActiveTodoMenuId(null);
+  };
+
+  const moveTodoMonth = (months: number) => {
+    setTodoMonth((currentMonth) => addMonths(currentMonth, months));
+    setSelectedTodoDate(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const showTodoToday = () => {
+    setTodoMonth(getMonthStart(today));
+    setSelectedTodoDate(today);
+  };
+
   const applyTodoReviewActions = (actions: Record<string, TodoReviewAction>) => {
     const hasCompletionAction = pendingTodoReviews.some(
       (todo) => (actions[todo.id] ?? 'today') === 'completed',
@@ -9469,11 +9797,29 @@ function App() {
       if (nextPage === 'library') {
         setMenuView('list');
       }
+      if (nextPage === 'schedule') {
+        scheduleTodayScrollMonthRef.current = null;
+        setScheduleMonth(getMonthStart(today));
+        setScheduleYear(today.getFullYear());
+        setSelectedScheduleDate(null);
+        setScheduleView('year');
+      }
       return;
     }
 
     resetEditUiState();
     if (nextPage === 'library') {
+      setMenuView('list');
+    }
+    if (nextPage === 'schedule') {
+      scheduleTodayScrollMonthRef.current = null;
+      setMenuView('list');
+      setScheduleMonth(getMonthStart(today));
+      setScheduleYear(today.getFullYear());
+      setSelectedScheduleDate(null);
+      setScheduleView('year');
+    }
+    if (nextPage === 'todos') {
       setMenuView('list');
     }
     setPage(nextPage);
@@ -9488,7 +9834,7 @@ function App() {
       setScheduleMonth(getMonthStart(today));
       setScheduleYear(today.getFullYear());
       setSelectedScheduleDate(null);
-      setScheduleView('month');
+      setScheduleView('year');
     }
     const nextRecordView = libraryRecordViewMap[nextMenuView];
     if (nextRecordView) {
@@ -9503,8 +9849,8 @@ function App() {
   const openTodayScheduleView = () => {
     resetEditUiState();
     scheduleTodayScrollMonthRef.current = null;
-    setPage('library');
-    setMenuView('schedule');
+    setPage('schedule');
+    setMenuView('list');
     setScheduleMonth(getMonthStart(today));
     setScheduleYear(today.getFullYear());
     setSelectedScheduleDate(null);
@@ -10306,7 +10652,7 @@ function App() {
           {isLibraryDetailView && (
             <button
               className="header-back-icon-button"
-              aria-label={isAnyMemoFolderDetailView ? 'フォルダ一覧へ戻る' : '持ちもの一覧へ戻る'}
+              aria-label={isAnyMemoFolderDetailView ? 'フォルダ一覧へ戻る' : 'かばん一覧へ戻る'}
               onClick={() => returnFromLibraryDetail()}
               type="button"
             >
@@ -10321,17 +10667,19 @@ function App() {
               </>
             )}
             {page === 'history' && 'スタンプ帳'}
-            {page === 'library' && menuView === 'list' && '持ちもの'}
+            {page === 'todos' && 'やること'}
+            {page === 'schedule' && 'スケジュール'}
+            {page === 'library' && menuView === 'list' && 'かばん'}
             {page === 'library' && menuView !== 'list' && activeMenuViewOption
               ? `${activeMenuViewOption.icon} ${activeMenuViewOption.label}`
               : ''}
           </h1>
-          {isLibraryRecordView && <p className="record-header-kicker">持ちもの</p>}
+          {isLibraryRecordView && <p className="record-header-kicker">かばん</p>}
           {page === 'today' && <p className="daily-message">{dailyMessage}</p>}
         </header>
 
         {page === 'library' && menuView === 'list' && (
-          <section className="menu-page library-page" aria-label="持ちもの">
+          <section className="menu-page library-page" aria-label="かばん">
             {libraryCategories.map((category) => (
               <section
                 className="library-category"
@@ -11318,7 +11666,7 @@ function App() {
                       <li>本日の日替わりクエスト連続記録</li>
                       <li>記憶系固定クエスト完了によるPT獲得</li>
                       <li>記憶系固定クエスト本文削除によるPT取消</li>
-                      <li>持ちもの内のショップ</li>
+                      <li>かばん内のショップ</li>
                       <li>所持PT表示</li>
                       <li>PTによるフリークエスト枠購入</li>
                       <li>PT支出履歴</li>
@@ -11517,6 +11865,60 @@ function App() {
               )}
             </button>
           </section>
+          );
+        })()}
+
+        {isTodayQuestView && isToday && (() => {
+          const todayTodoItems = managedTodos
+            .filter((todo) =>
+              hasManagedTodoText(todo) &&
+              !todo.pendingReview &&
+              todo.status !== 'completed' &&
+              !todo.completed &&
+              todo.dueDate === todayKey,
+            );
+          const visibleTodoItems = todayTodoItems.slice(0, 3);
+          const remainingTodoCount = Math.max(0, todayTodoItems.length - visibleTodoItems.length);
+
+          if (todayTodoItems.length === 0) {
+            return null;
+          }
+
+          return (
+            <section className="today-todo-summary-card" aria-label="今日のやること">
+              <div className="today-todo-summary-header">
+                <button
+                  className="today-todo-summary-title"
+                  onClick={openTodayTodoDateView}
+                  type="button"
+                >
+                  <h2>✅ 今日のやること</h2>
+                  <span>{todayTodoItems.length}件</span>
+                  <i aria-hidden="true">›</i>
+                </button>
+              </div>
+              <div className="today-todo-summary-list">
+                {visibleTodoItems.map((todo) => (
+                  <label key={todo.id}>
+                    <input
+                      checked={todo.completed}
+                      onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{todo.text}</span>
+                  </label>
+                ))}
+              </div>
+              {remainingTodoCount > 0 && (
+                <button
+                  className="today-todo-summary-more"
+                  onClick={openTodayTodoDateView}
+                  type="button"
+                >
+                  ほか{remainingTodoCount}件
+                </button>
+              )}
+            </section>
           );
         })()}
 
@@ -12282,9 +12684,9 @@ function App() {
           >
             <div className="schedule-view-tabs" aria-label="スケジュール表示切り替え">
               {([
+                ['year', '一覧'],
                 ['today', '今日'],
                 ['month', '今月'],
-                ['year', '年間'],
               ] as const).map(([view, label]) => (
                 <button
                   aria-current={scheduleView === view ? 'page' : undefined}
@@ -12671,9 +13073,146 @@ function App() {
             .filter((todo) =>
               hasManagedTodoText(todo) &&
               !todo.pendingReview &&
-              todo.status === 'completed',
+              (todo.status === 'completed' || todo.completed),
             )
             .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''));
+          const activeTodos = managedTodos
+            .filter((todo) =>
+              hasManagedTodoText(todo) &&
+              !todo.pendingReview &&
+              todo.status !== 'completed' &&
+              !todo.completed,
+            )
+            .sort((first, second) => (second.createdAt ?? '').localeCompare(first.createdAt ?? ''));
+          const formatTodoDueDate = (dateKey: string) => {
+            const date = getDateFromKey(dateKey);
+
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+          };
+          const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => (
+            <div className="todo-actions-menu" data-open={activeTodoMenuId === todo.id ? 'true' : 'false'}>
+              <button
+                aria-expanded={activeTodoMenuId === todo.id}
+                aria-label={`${todo.text}の操作`}
+                onClick={() => setActiveTodoMenuId((currentId) => currentId === todo.id ? null : todo.id)}
+                type="button"
+              >
+                …
+              </button>
+              {activeTodoMenuId === todo.id && (
+                <div className="todo-actions-panel">
+                  {!options.completed && (
+                    <>
+                      <button onClick={() => focusManagedTodo(todo.id)} type="button">
+                        編集
+                      </button>
+                      <label>
+                        日付を設定／変更
+                        <input
+                          onChange={(event) => updateManagedTodoDueDate(todo.id, event.target.value || undefined)}
+                          type="date"
+                          value={todo.dueDate ?? ''}
+                        />
+                      </label>
+                      {todo.dueDate && (
+                        <button onClick={() => updateManagedTodoDueDate(todo.id, undefined)} type="button">
+                          日付を外す
+                        </button>
+                      )}
+                      <label>
+                        フォルダへ移動
+                        <select
+                          onChange={(event) => {
+                            if (event.target.value === '__new__') {
+                              promptCreateTodoFolderForTodo(todo.id);
+                              return;
+                            }
+
+                            updateManagedTodoFolder(todo.id, event.target.value || undefined);
+                            setActiveTodoMenuId(null);
+                          }}
+                          value={todo.folderId ?? ''}
+                        >
+                          <option value="">フォルダなし</option>
+                          {todoFolders.map((folder) => (
+                            <option key={folder.id} value={folder.id}>
+                              {folder.name}
+                            </option>
+                          ))}
+                          <option value="__new__">＋ 新しいフォルダ</option>
+                        </select>
+                      </label>
+                      {todo.folderId && (
+                        <button onClick={() => updateManagedTodoFolder(todo.id, undefined)} type="button">
+                          フォルダから外す
+                        </button>
+                      )}
+                      <button onClick={() => copyManagedTodoText(todo)} type="button">
+                        コピー
+                      </button>
+                    </>
+                  )}
+                  {options.completed && (
+                    <select
+                      aria-label={`${todo.text}を未完了へ戻す`}
+                      onChange={(event) => {
+                        const nextStatus = event.target.value as ActiveTodoStatus;
+
+                        if (nextStatus) {
+                          restoreManagedTodo(todo.id, nextStatus);
+                          setActiveTodoMenuId(null);
+                        }
+                      }}
+                      value=""
+                    >
+                      <option value="" disabled>
+                        未完了へ戻す
+                      </option>
+                      {activeTodoStatusOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button onClick={() => confirmDeleteManagedTodo(todo)} type="button">
+                    削除
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+          const renderTodoRow = (todo: ManagedTodoItem, index: number) => (
+            <article className="todo-capture-row" key={todo.id}>
+              <input
+                aria-label={`やること ${index + 1}を完了`}
+                checked={todo.completed}
+                onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
+                type="checkbox"
+              />
+              <div className="todo-capture-main">
+                <textarea
+                  aria-label={`やること ${index + 1}`}
+                  id={`managed-todo-text-${todo.id}`}
+                  onBlur={cleanupManagedTodos}
+                  onChange={(event) => {
+                    adjustTextareaHeight(event.currentTarget);
+                    updateManagedTodoText(
+                      todo.id,
+                      isActiveTodoStatus(todo.status) ? todo.status : 'soon',
+                      event.target.value,
+                    );
+                  }}
+                  placeholder="やること"
+                  ref={adjustTextareaHeight}
+                  rows={1}
+                  value={todo.text}
+                />
+                {todo.dueDate && <time>{formatTodoDueDate(todo.dueDate)}</time>}
+              </div>
+              {renderTodoActions(todo)}
+            </article>
+          );
           const renderManagedTodoRows = (
             status: ActiveTodoStatus,
             rows: ManagedTodoItem[],
@@ -12816,68 +13355,39 @@ function App() {
               )}
             </div>
           );
+          void renderManagedTodoRows;
 
           return (
-            <section className="todo-manager-page record-view-content" aria-label="やること管理">
-              <div className="todo-manager-intro">
-                <p>予定は日時、やることは今の置き場所で整理します。</p>
-              </div>
-              <div className="todo-status-tabs" aria-label="やることの区分切り替え">
-                {todoViewOptions.map((option) => (
+            <section className="todo-manager-page record-view-content" aria-label="やること">
+              <div className="todo-status-tabs todo-primary-tabs" aria-label="やること表示切り替え">
+                {([
+                  ['todo', 'やること'],
+                  ['date', '日付'],
+                  ['folders', 'フォルダ'],
+                ] as const).map(([view, label]) => (
                   <button
-                    aria-current={todoView === option.key ? 'page' : undefined}
-                    data-active={todoView === option.key ? 'true' : 'false'}
-                    key={option.key}
-                    onClick={() => setTodoView(option.key)}
+                    aria-current={todoView === view ? 'page' : undefined}
+                    data-active={todoView === view ? 'true' : 'false'}
+                    key={view}
+                    onClick={() => setTodoView(view)}
                     type="button"
                   >
-                    <span aria-hidden="true">{option.icon}</span>
-                    {option.label}
+                    {label}
                   </button>
                 ))}
               </div>
-              {todoView === 'overview' ? (
-                <section className="todo-overview-list" aria-label="やること一覧">
-                  {activeTodoStatusOptions.map((option) => {
-                    const rows = getVisibleManagedTodosByStatus(managedTodos, option.key);
-                    const rowsWithDraft = [
-                      ...rows,
-                      createManagedTodoItem('', option.key, {
-                        id: `new-${option.key}`,
-                        completed: false,
-                      }),
-                    ];
-                    const isDropTarget =
-                      todoDropTarget?.status === option.key && todoDropTarget.beforeId === null;
 
-                    return (
-                      <article
-                        className="todo-overview-section"
-                        data-drop-target={isDropTarget ? 'true' : 'false'}
-                        data-status={option.key}
-                        key={option.key}
-                        onDragOver={(event) =>
-                          updateManagedTodoDropTarget(event, option.key, null)
-                        }
-                        onDrop={(event) => dropManagedTodo(event, option.key, null)}
-                      >
-                        <div className="todo-overview-header">
-                          <h2>{option.icon} {option.title}</h2>
-                          <span>{rows.length}件</span>
-                        </div>
-                        {renderManagedTodoRows(option.key, rowsWithDraft, {
-                          compactEmpty: true,
-                          placeholder: '＋追加',
-                        })}
-                      </article>
-                    );
-                  })}
-                </section>
-              ) : todoView === 'completed' ? (
+              {todoView === 'completed' && (
                 <section className="daily-todo-card todo-manager-card" aria-label="やり終えたこと">
                   <div className="daily-todo-header">
                     <h2>✅ やり終えたこと</h2>
-                    <span>{completedTodos.length}件</span>
+                    <button
+                      className="todo-subtle-link"
+                      onClick={() => setTodoView('todo')}
+                      type="button"
+                    >
+                      戻る
+                    </button>
                   </div>
                   <div className="todo-completed-list">
                     {completedTodos.length > 0 ? (
@@ -12889,48 +13399,10 @@ function App() {
                               {todo.completedAt
                                 ? `${backupDateTimeFormatter.format(new Date(todo.completedAt))} 完了`
                                 : '完了日時不明'}
-                              {' / '}
-                              元の区分: {getTodoStatusLabel(todo.originalStatus ?? (
-                                isActiveTodoStatus(todo.status) ? todo.status : 'today'
-                              ))}
-                              {todo.createdAt && (
-                                <>
-                                  {' / '}
-                                  作成: {backupDateTimeFormatter.format(new Date(todo.createdAt))}
-                                </>
-                              )}
+                              {todo.dueDate ? ` / 日付: ${formatTodoDueDate(todo.dueDate)}` : ''}
                             </span>
                           </div>
-                          <div className="todo-completed-actions">
-                            <select
-                              aria-label={`${todo.text}を未完了へ戻す`}
-                              onChange={(event) => {
-                                const nextStatus = event.target.value as ActiveTodoStatus;
-
-                                if (nextStatus) {
-                                  restoreManagedTodo(todo.id, nextStatus);
-                                }
-                              }}
-                              value=""
-                            >
-                              <option value="" disabled>
-                                戻す先
-                              </option>
-                              {activeTodoStatusOptions.map((option) => (
-                                <option key={option.key} value={option.key}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              aria-label={`${todo.text}を履歴から削除`}
-                              className="daily-todo-delete-button"
-                              onClick={() => deleteManagedTodo(todo.id)}
-                              type="button"
-                            >
-                              ×
-                            </button>
-                          </div>
+                          {renderTodoActions(todo, { completed: true })}
                         </article>
                       ))
                     ) : (
@@ -12938,25 +13410,342 @@ function App() {
                     )}
                   </div>
                 </section>
-              ) : (() => {
-                const currentStatus = todoView;
-                const rows = getManagedTodoRows(managedTodos, currentStatus);
-                const stats = getManagedTodoStats(managedTodos, currentStatus);
-                const statusOption = getActiveTodoStatusOption(currentStatus);
+              )}
+
+              {todoView === 'todo' && (
+                <>
+                  <section className="todo-capture-card" aria-label="やることを追加">
+                    <textarea
+                      aria-label="新しいやること"
+                      onChange={(event) => {
+                        adjustTextareaHeight(event.currentTarget);
+                        setNewTodoText(event.target.value);
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                          submitNewTodo();
+                        }
+                      }}
+                      placeholder="やることを入力する"
+                      ref={(element) => {
+                        newTodoInputRef.current = element;
+                        if (element) {
+                          adjustTextareaHeight(element);
+                        }
+                      }}
+                      rows={2}
+                      value={newTodoText}
+                    />
+                    <div className="todo-capture-actions">
+                      <button
+                        disabled={!newTodoText.trim()}
+                        onClick={submitNewTodo}
+                        type="button"
+                      >
+                        追加
+                      </button>
+                    </div>
+                  </section>
+                  <section className="todo-capture-list" aria-label="未完了のやること">
+                    <div className="todo-capture-list-header">
+                      <h2>未完了</h2>
+                      <button
+                        className="todo-subtle-link"
+                        onClick={() => setTodoView('completed')}
+                        type="button"
+                      >
+                        完了
+                      </button>
+                    </div>
+                    {activeTodos.length > 0 ? (
+                      activeTodos.map(renderTodoRow)
+                    ) : (
+                      <p className="todo-completed-empty">思いついたことを上に追加できます。</p>
+                    )}
+                  </section>
+                </>
+              )}
+
+              {todoView === 'date' && (
+                <section className="todo-date-page" aria-label="日付ごとのやること">
+                  <div className="records-month-header">
+                    <button
+                      aria-label="前の月のやることへ"
+                      onClick={() => moveTodoMonth(-1)}
+                      type="button"
+                    >
+                      ‹
+                    </button>
+                    <h2>{todoMonthLabel}</h2>
+                    <button
+                      aria-label="次の月のやることへ"
+                      onClick={() => moveTodoMonth(1)}
+                      type="button"
+                    >
+                      ›
+                    </button>
+                  </div>
+                  <button className="todo-today-button" onClick={showTodoToday} type="button">
+                    今日へ
+                  </button>
+                  <div className="records-day-list todo-date-list">
+                    {todoMonthDates.map((todoDate) => {
+                      const dateKey = getDateKey(todoDate);
+                      const dateTodos = activeTodos.filter((todo) => todo.dueDate === dateKey);
+                      const holidayName = getHolidayName(todoDate);
+                      const dayKind = getDateDisplayKind(todoDate);
+                      const dateTitle = `${todoDate.getMonth() + 1}月${todoDate.getDate()}日（${
+                        weekdayShortLabels[todoDate.getDay()]
+                      }${holidayName ? `・${holidayName}` : ''}）`;
+
+                      return (
+                        <article
+                          className="record-day-card todo-date-card"
+                          data-day-kind={dayKind}
+                          data-empty={dateTodos.length === 0 ? 'true' : 'false'}
+                          data-today={dateKey === todayKey ? 'true' : 'false'}
+                          key={dateKey}
+                        >
+                          <button
+                            className="record-day-toggle"
+                            onClick={() => {
+                              setSelectedTodoDate(todoDate);
+                              setNewTodoDateText('');
+                            }}
+                            type="button"
+                          >
+                            <span className="record-day-date">📋 {dateTitle}</span>
+                            {(dateKey === todayKey || dateTodos.length > 0) && (
+                              <span className="record-day-meta">
+                                {dateKey === todayKey && <strong>今日</strong>}
+                                {dateTodos.length > 0 && `${dateTodos.length}件`}
+                              </span>
+                            )}
+                          </button>
+                          {dateTodos.length > 0 && (
+                            <div className="record-day-body todo-date-body">
+                              {dateTodos.slice(0, 3).map((todo) => (
+                                <p key={todo.id}>・{todo.text}</p>
+                              ))}
+                              {dateTodos.length > 3 && <small>ほか{dateTodos.length - 3}件</small>}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {todoView === 'folders' && (() => {
+                const selectedFolder = selectedTodoFolderId
+                  ? todoFolders.find((folder) => folder.id === selectedTodoFolderId) ?? null
+                  : null;
+                const sortedFolders = [...todoFolders].sort((first, second) =>
+                  (second.updatedAt ?? '').localeCompare(first.updatedAt ?? ''),
+                );
+                const folderTodos = selectedFolder
+                  ? activeTodos.filter((todo) => todo.folderId === selectedFolder.id)
+                  : [];
+
+                if (selectedFolder) {
+                  return (
+                    <section className="todo-folder-page" aria-label={`${selectedFolder.name}のやること`}>
+                      <div className="todo-folder-detail-header">
+                        <button
+                          aria-label="フォルダ一覧へ戻る"
+                          onClick={() => setSelectedTodoFolderId(null)}
+                          type="button"
+                        >
+                          ‹
+                        </button>
+                        <h2>📁 {selectedFolder.name}</h2>
+                        <span>{folderTodos.length}件</span>
+                      </div>
+                      <section className="todo-capture-card" aria-label={`${selectedFolder.name}へ追加`}>
+                        <textarea
+                          aria-label={`${selectedFolder.name}へ追加するやること`}
+                          onChange={(event) => {
+                            adjustTextareaHeight(event.currentTarget);
+                            setNewTodoFolderText(event.target.value);
+                          }}
+                          placeholder="このフォルダにやることを入力する"
+                          ref={(element) => {
+                            newTodoFolderInputRef.current = element;
+                            if (element) {
+                              adjustTextareaHeight(element);
+                            }
+                          }}
+                          rows={2}
+                          value={newTodoFolderText}
+                        />
+                        <div className="todo-capture-actions">
+                          <button
+                            disabled={!newTodoFolderText.trim()}
+                            onClick={() => submitNewTodoForFolder(selectedFolder.id)}
+                            type="button"
+                          >
+                            追加
+                          </button>
+                        </div>
+                      </section>
+                      <section className="todo-capture-list" aria-label={`${selectedFolder.name}の未完了`}>
+                        <div className="todo-capture-list-header">
+                          <h2>未完了</h2>
+                          <button
+                            className="todo-subtle-link"
+                            onClick={() => setTodoView('completed')}
+                            type="button"
+                          >
+                            完了
+                          </button>
+                        </div>
+                        {folderTodos.length > 0 ? (
+                          folderTodos.map(renderTodoRow)
+                        ) : (
+                          <p className="todo-completed-empty">このフォルダのやることはまだありません。</p>
+                        )}
+                      </section>
+                    </section>
+                  );
+                }
 
                 return (
-                  <section
-                    className="daily-todo-card todo-manager-card"
-                    aria-label={todoStatusHeadings[currentStatus]}
-                  >
-                    <div className="daily-todo-header">
-                      <h2>{statusOption.icon} {todoStatusHeadings[currentStatus]}</h2>
-                      <span>{stats.totalCount}件</span>
+                  <section className="todo-folder-page" aria-label="やることフォルダ">
+                    <section className="todo-folder-create-card" aria-label="フォルダを作る">
+                      <input
+                        aria-label="新しいフォルダ名"
+                        onChange={(event) => setNewTodoFolderName(event.target.value)}
+                        placeholder="フォルダ名"
+                        type="text"
+                        value={newTodoFolderName}
+                      />
+                      <button
+                        disabled={!newTodoFolderName.trim()}
+                        onClick={submitNewTodoFolder}
+                        type="button"
+                      >
+                        ＋ フォルダを作る
+                      </button>
+                    </section>
+                    <div className="todo-folder-list">
+                      {sortedFolders.length > 0 ? (
+                        sortedFolders.map((folder) => {
+                          const incompleteCount = activeTodos.filter((todo) => todo.folderId === folder.id).length;
+
+                          return (
+                            <article className="todo-folder-card" key={folder.id}>
+                              <button
+                                className="todo-folder-open"
+                                onClick={() => setSelectedTodoFolderId(folder.id)}
+                                type="button"
+                              >
+                                <span aria-hidden="true">📁</span>
+                                <strong>{folder.name}</strong>
+                                <small>{incompleteCount}件</small>
+                                <i aria-hidden="true">›</i>
+                              </button>
+                              <div className="todo-actions-menu" data-open={activeTodoFolderMenuId === folder.id ? 'true' : 'false'}>
+                                <button
+                                  aria-expanded={activeTodoFolderMenuId === folder.id}
+                                  aria-label={`${folder.name}の操作`}
+                                  onClick={() =>
+                                    setActiveTodoFolderMenuId((currentId) => currentId === folder.id ? null : folder.id)
+                                  }
+                                  type="button"
+                                >
+                                  …
+                                </button>
+                                {activeTodoFolderMenuId === folder.id && (
+                                  <div className="todo-actions-panel">
+                                    <button onClick={() => renameTodoFolder(folder)} type="button">
+                                      名前を変更
+                                    </button>
+                                    <button onClick={() => deleteTodoFolder(folder)} type="button">
+                                      削除
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <p className="todo-completed-empty">テーマごとにフォルダを作れます。</p>
+                      )}
                     </div>
-                    {renderManagedTodoRows(currentStatus, rows, {
-                      placeholder: '＋追加',
-                    })}
                   </section>
+                );
+              })()}
+
+              {selectedTodoDate && (() => {
+                const dateKey = getDateKey(selectedTodoDate);
+                const selectedDateTodos = activeTodos.filter((todo) => todo.dueDate === dateKey);
+                const holidayName = getHolidayName(selectedTodoDate);
+                const dateTitle = `${selectedTodoDate.getMonth() + 1}月${selectedTodoDate.getDate()}日（${
+                  weekdayShortLabels[selectedTodoDate.getDay()]
+                }${holidayName ? `・${holidayName}` : ''}）`;
+
+                return (
+                  <div
+                    className="record-editor-backdrop"
+                    role="presentation"
+                    onClick={() => setSelectedTodoDate(null)}
+                  >
+                    <section
+                      aria-label={`${dateTitle}のやること`}
+                      className="record-editor-panel todo-date-editor-panel"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="record-editor-header">
+                        <div>
+                          <p>📋 日付のやること</p>
+                          <h2>{dateTitle}</h2>
+                        </div>
+                        <button
+                          aria-label="日付のやることを閉じる"
+                          onClick={() => setSelectedTodoDate(null)}
+                          type="button"
+                        >
+                          閉じる
+                        </button>
+                      </div>
+                      <section className="todo-capture-card" aria-label={`${dateTitle}へ追加`}>
+                        <textarea
+                          aria-label={`${dateTitle}へ追加するやること`}
+                          onChange={(event) => {
+                            adjustTextareaHeight(event.currentTarget);
+                            setNewTodoDateText(event.target.value);
+                          }}
+                          placeholder="この日にやることを入力する"
+                          ref={(element) => {
+                            newTodoDateInputRef.current = element;
+                            if (element) {
+                              adjustTextareaHeight(element);
+                            }
+                          }}
+                          rows={2}
+                          value={newTodoDateText}
+                        />
+                        <div className="todo-capture-actions">
+                          <button
+                            disabled={!newTodoDateText.trim()}
+                            onClick={() => submitNewTodoForDate(selectedTodoDate)}
+                            type="button"
+                          >
+                            追加
+                          </button>
+                        </div>
+                      </section>
+                      <div className="todo-capture-list">
+                        {selectedDateTodos.length > 0 ? (
+                          selectedDateTodos.map(renderTodoRow)
+                        ) : (
+                          <p className="todo-completed-empty">この日のやることはまだありません。</p>
+                        )}
+                      </div>
+                    </section>
+                  </div>
                 );
               })()}
             </section>
