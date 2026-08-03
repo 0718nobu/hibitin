@@ -5481,6 +5481,48 @@ h1 {
   gap: 12px;
 }
 
+.todo-selection-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgb(199 225 196 / 76%);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgb(255 255 250 / 84%);
+  color: #31573c;
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.todo-selection-inline button,
+.todo-subtle-action {
+  min-height: 32px;
+  border: 1px solid rgb(122 184 139 / 36%);
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: #ffffff;
+  color: #2b714b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.todo-bulk-status {
+  margin: 0;
+  color: #4d7a58;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.todo-date-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .todo-manager-intro {
   border: 1px solid rgb(205 226 190 / 72%);
   border-radius: 12px;
@@ -7081,10 +7123,27 @@ h1 {
 }
 
 .todo-capture-list-header h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
   color: #31573c;
   font-size: 0.94rem;
   font-weight: 1000;
+}
+
+.todo-capture-list-header h2 span {
+  color: #66846a;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.todo-capture-list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .todo-capture-row {
@@ -7113,6 +7172,22 @@ h1 {
 
 .todo-capture-row[data-completed='true'] .todo-capture-main {
   opacity: 0.64;
+}
+
+.todo-capture-row[data-selecting='true'] {
+  cursor: pointer;
+}
+
+.todo-capture-row[data-selected='true'] {
+  border-color: rgb(37 159 94 / 68%);
+  background: rgb(236 252 240 / 92%);
+  box-shadow:
+    inset 0 0 0 1px rgb(42 172 101 / 16%),
+    0 8px 18px rgb(43 120 70 / 10%);
+}
+
+.todo-capture-row[data-selecting='true'] > input[type='checkbox'] {
+  accent-color: #e2a100;
 }
 
 .todo-capture-row[data-completed='true'] textarea {
@@ -7224,6 +7299,122 @@ h1 {
   color: #637263;
   font-size: 0.72rem;
   font-weight: 900;
+}
+
+.todo-actions-panel .todo-due-date-editor {
+  gap: 6px;
+}
+
+.todo-due-date-editor > span {
+  color: #637263;
+}
+
+.todo-due-date-editor small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #7a8978;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.todo-actions-panel .todo-due-date-editor small input {
+  width: 54px;
+  min-height: 28px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.todo-due-date-fields {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.todo-actions-panel .todo-due-date-fields input {
+  width: 42px;
+  min-height: 32px;
+  padding: 5px 6px;
+  text-align: center;
+}
+
+.todo-due-date-fields span {
+  color: #536a55;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.todo-due-date-editor strong {
+  color: #c84838;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.todo-bulk-action-bar {
+  position: fixed;
+  right: 10px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  left: 10px;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 620px;
+  margin: 0 auto;
+  border: 1px solid rgb(140 207 157 / 78%);
+  border-radius: 16px;
+  padding: 8px;
+  background: rgb(255 255 250 / 96%);
+  box-shadow: 0 16px 34px rgb(25 79 45 / 18%);
+}
+
+.todo-bulk-action-bar > span {
+  flex: 0 0 auto;
+  color: #31573c;
+  font-size: 0.78rem;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.todo-bulk-action-bar button,
+.todo-bulk-action-bar select,
+.todo-bulk-action-bar label {
+  min-height: 34px;
+  border: 1px solid rgb(122 184 139 / 36%);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #2b714b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 950;
+}
+
+.todo-bulk-action-bar button {
+  padding: 5px 10px;
+}
+
+.todo-bulk-action-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px 4px 9px;
+}
+
+.todo-bulk-action-bar input[type='date'] {
+  width: 32px;
+  min-width: 32px;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.todo-bulk-action-bar select {
+  min-width: 94px;
+  max-width: 128px;
+  padding: 5px 8px;
 }
 
 .todo-today-button {

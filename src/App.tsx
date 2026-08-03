@@ -2869,6 +2869,12 @@ type ScheduleDetailDraft = {
   error?: string;
   message?: string;
 };
+type TodoDueDateDraft = {
+  year?: string;
+  month: string;
+  day: string;
+  error?: string;
+};
 
 type NormalizeDailyTodoOptions = {
   preserveEmptyIds?: Iterable<string>;
@@ -4802,6 +4808,10 @@ function App() {
   const [newTodoText, setNewTodoText] = useState('');
   const [newTodoDateText, setNewTodoDateText] = useState('');
   const [activeTodoMenuId, setActiveTodoMenuId] = useState<string | null>(null);
+  const [todoDueDateDrafts, setTodoDueDateDrafts] = useState<Record<string, TodoDueDateDraft>>({});
+  const [isTodoSelectionMode, setIsTodoSelectionMode] = useState(false);
+  const [selectedTodoIds, setSelectedTodoIds] = useState<Record<string, boolean>>({});
+  const [todoBulkStatusMessage, setTodoBulkStatusMessage] = useState('');
   const [todoFolders, setTodoFolders] = useState<TodoFolders>(() => loadTodoFolders());
   const [selectedTodoFolderId, setSelectedTodoFolderId] = useState<string | null>(null);
   const [newTodoFolderName, setNewTodoFolderName] = useState('');
@@ -9156,11 +9166,112 @@ function App() {
               dueDate,
               status: getTodoStatusForDueDate(dueDate),
               pendingReview: undefined,
-              updatedAt: new Date().toISOString(),
-            }
-          : todo,
-      ),
-    );
+	              updatedAt: new Date().toISOString(),
+	            }
+	          : todo,
+	      ),
+	    );
+    setTodoDueDateDrafts((currentDrafts) => {
+      if (!currentDrafts[id]) {
+        return currentDrafts;
+      }
+
+      const nextDrafts = { ...currentDrafts };
+      delete nextDrafts[id];
+      return nextDrafts;
+    });
+	  };
+
+  const getTodoDueDateDraft = (todo: ManagedTodoItem): TodoDueDateDraft => {
+    const draft = todoDueDateDrafts[todo.id];
+
+    if (draft) {
+      return draft;
+    }
+
+    if (todo.dueDate) {
+      const dueDate = getDateFromKey(todo.dueDate);
+
+      return {
+        year: String(dueDate.getFullYear()),
+        month: String(dueDate.getMonth() + 1),
+        day: String(dueDate.getDate()),
+      };
+    }
+
+    return {
+      year: String(today.getFullYear()),
+      month: '',
+      day: '',
+    };
+  };
+
+  const updateTodoDueDateDraft = (todoId: string, patch: Partial<TodoDueDateDraft>) => {
+    setTodoDueDateDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [todoId]: {
+        ...(currentDrafts[todoId] ?? { year: String(today.getFullYear()), month: '', day: '' }),
+        ...patch,
+        ...(patch.error === undefined ? { error: undefined } : {}),
+      },
+    }));
+  };
+
+  const commitTodoDueDateDraft = (
+    todo: ManagedTodoItem,
+    options: { allowTodayFallback?: boolean } = {},
+  ) => {
+    const draft = getTodoDueDateDraft(todo);
+    const hasMonth = draft.month.trim().length > 0;
+    const hasDay = draft.day.trim().length > 0;
+
+    if (!hasMonth && !hasDay) {
+      if (!options.allowTodayFallback) {
+        return false;
+      }
+
+      updateManagedTodoDueDate(todo.id, todayKey);
+      setActiveTodoMenuId(null);
+      return true;
+    }
+
+    if (!hasMonth || !hasDay) {
+      updateTodoDueDateDraft(todo.id, { error: '月と日を入力してください' });
+      return false;
+    }
+
+    const monthNumber = Number(draft.month);
+    const dayNumber = Number(draft.day);
+    let yearNumber = Number(draft.year || today.getFullYear());
+
+    if (
+      !Number.isInteger(yearNumber) ||
+      yearNumber < 1900 ||
+      !Number.isInteger(monthNumber) ||
+      monthNumber < 1 ||
+      monthNumber > 12 ||
+      !Number.isInteger(dayNumber) ||
+      dayNumber < 1 ||
+      dayNumber > 31
+    ) {
+      updateTodoDueDateDraft(todo.id, { error: '有効な月日を入力してください' });
+      return false;
+    }
+
+    const targetDate = new Date(yearNumber, monthNumber - 1, dayNumber);
+
+    if (
+      targetDate.getFullYear() !== yearNumber ||
+      targetDate.getMonth() !== monthNumber - 1 ||
+      targetDate.getDate() !== dayNumber
+    ) {
+      updateTodoDueDateDraft(todo.id, { error: '存在する日付を入力してください' });
+      return false;
+    }
+
+    updateManagedTodoDueDate(todo.id, getDateKey(targetDate));
+    setActiveTodoMenuId(null);
+    return true;
   };
 
   const updateManagedTodoFolder = (id: string, folderId?: string) => {
@@ -9184,6 +9295,181 @@ function App() {
       );
     }
   };
+
+  const clearTodoSelection = () => {
+    setIsTodoSelectionMode(false);
+    setSelectedTodoIds({});
+  };
+
+  const enterTodoSelectionMode = () => {
+    setActiveTodoMenuId(null);
+    setIsTodoSelectionMode(true);
+    setSelectedTodoIds({});
+  };
+
+  const toggleTodoSelection = (id: string) => {
+    setSelectedTodoIds((currentIds) => {
+      const nextIds = { ...currentIds };
+
+      if (nextIds[id]) {
+        delete nextIds[id];
+      } else {
+        nextIds[id] = true;
+      }
+
+      return nextIds;
+    });
+  };
+
+  const selectVisibleTodos = (todos: ManagedTodoItem[]) => {
+    setSelectedTodoIds(
+      todos.reduce<Record<string, boolean>>((nextIds, todo) => {
+        if (todo.status !== 'completed' && hasManagedTodoText(todo)) {
+          nextIds[todo.id] = true;
+        }
+
+        return nextIds;
+      }, {}),
+    );
+  };
+
+  const getSelectedTodoIdList = () =>
+    Object.entries(selectedTodoIds)
+      .filter(([, selected]) => selected)
+      .map(([id]) => id);
+
+  const showTodoBulkStatus = (message: string) => {
+    setTodoBulkStatusMessage(message);
+    window.setTimeout(() => setTodoBulkStatusMessage(''), 2200);
+  };
+
+  const bulkUpdateSelectedTodoDueDate = (dueDate?: string) => {
+    const targetIds = new Set(getSelectedTodoIdList());
+
+    if (targetIds.size === 0) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        targetIds.has(todo.id) && todo.status !== 'completed'
+          ? {
+              ...todo,
+              dueDate,
+              status: getTodoStatusForDueDate(dueDate),
+              pendingReview: undefined,
+              updatedAt: timestamp,
+            }
+          : todo,
+      ),
+    );
+    showTodoBulkStatus(
+      dueDate === todayKey
+        ? `${targetIds.size}件を今日に設定しました`
+        : dueDate
+          ? `${targetIds.size}件の日付を設定しました`
+          : `${targetIds.size}件の日付を外しました`,
+    );
+    clearTodoSelection();
+  };
+
+  const bulkUpdateSelectedTodoFolder = (folderId?: string) => {
+    const targetIds = new Set(getSelectedTodoIdList());
+
+    if (targetIds.size === 0) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        targetIds.has(todo.id) && todo.status !== 'completed'
+          ? {
+              ...todo,
+              ...(folderId ? { folderId } : { folderId: undefined }),
+              updatedAt: timestamp,
+            }
+          : todo,
+      ),
+    );
+
+    if (folderId) {
+      setTodoFolders((currentFolders) =>
+        currentFolders.map((folder) =>
+          folder.id === folderId ? { ...folder, updatedAt: timestamp } : folder,
+        ),
+      );
+    }
+
+    showTodoBulkStatus(
+      folderId
+        ? `${targetIds.size}件をフォルダへ移動しました`
+        : `${targetIds.size}件をフォルダなしにしました`,
+    );
+    clearTodoSelection();
+  };
+
+  const bulkCreateTodoFolderAndMove = () => {
+    const folderName = window.prompt('新しいフォルダ名');
+    const folder = folderName ? createTodoFolder(folderName) : null;
+
+    if (folder) {
+      bulkUpdateSelectedTodoFolder(folder.id);
+    }
+  };
+
+  useEffect(() => {
+    setIsTodoSelectionMode(false);
+    setSelectedTodoIds({});
+    setActiveTodoMenuId(null);
+    setActiveTodoFolderMenuId(null);
+  }, [page, todoView, selectedTodoFolderId, selectedTodoDate]);
+
+  useEffect(() => {
+    if (!activeTodoMenuId && !activeTodoFolderMenuId) {
+      return undefined;
+    }
+
+    const closeTodoMenus = () => {
+      setActiveTodoMenuId(null);
+      setActiveTodoFolderMenuId(null);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+
+	      if (target?.closest('.todo-actions-menu')) {
+	        return;
+	      }
+
+	      if (activeTodoMenuId) {
+	        const activeTodo = managedTodos.find((todo) => todo.id === activeTodoMenuId);
+
+	        if (activeTodo) {
+	          commitTodoDueDateDraft(activeTodo);
+	        }
+	      }
+
+	      closeTodoMenus();
+	    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeTodoMenus();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', closeTodoMenus, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', closeTodoMenus, true);
+    };
+  }, [activeTodoFolderMenuId, activeTodoMenuId, managedTodos, todoDueDateDrafts]);
 
   const createTodoFolder = (name: string) => {
     const trimmedName = name.trim();
@@ -13432,36 +13718,119 @@ function App() {
             completedAt && !Number.isNaN(Date.parse(completedAt))
               ? backupDateTimeFormatter.format(new Date(completedAt))
               : '';
-          const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => (
-            <div className="todo-actions-menu" data-open={activeTodoMenuId === todo.id ? 'true' : 'false'}>
-              <button
-                aria-expanded={activeTodoMenuId === todo.id}
-                aria-label={`${todo.text}の操作`}
-                onClick={() => setActiveTodoMenuId((currentId) => currentId === todo.id ? null : todo.id)}
-                type="button"
-              >
+          const selectedTodoCount = getSelectedTodoIdList().length;
+	          const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => (
+	            <div className="todo-actions-menu" data-open={activeTodoMenuId === todo.id ? 'true' : 'false'}>
+	              <button
+	                aria-expanded={activeTodoMenuId === todo.id}
+	                aria-label={`${todo.text}の操作`}
+	                onClick={() => {
+	                  setActiveTodoFolderMenuId(null);
+	                  setActiveTodoMenuId((currentId) => currentId === todo.id ? null : todo.id);
+	                }}
+	                type="button"
+	              >
                 …
               </button>
-              {activeTodoMenuId === todo.id && (
-                <div className="todo-actions-panel">
-                  {!options.completed && (
-                    <>
-                      <button onClick={() => focusManagedTodo(todo.id)} type="button">
-                        編集
-                      </button>
-                      <label>
-                        日付を設定／変更
-                        <input
-                          onChange={(event) => updateManagedTodoDueDate(todo.id, event.target.value || undefined)}
-                          type="date"
-                          value={todo.dueDate ?? ''}
-                        />
-                      </label>
-                      {todo.dueDate && (
-                        <button onClick={() => updateManagedTodoDueDate(todo.id, undefined)} type="button">
-                          日付を外す
-                        </button>
-                      )}
+	              {activeTodoMenuId === todo.id && (
+	                <div className="todo-actions-panel">
+	                  {!options.completed && (
+	                    <>
+	                      <button onClick={() => focusManagedTodo(todo.id)} type="button">
+	                        編集
+	                      </button>
+	                      <button
+	                        onClick={() => {
+	                          if (todo.dueDate !== todayKey) {
+	                            updateManagedTodoDueDate(todo.id, todayKey);
+	                          }
+	                          setActiveTodoMenuId(null);
+	                        }}
+	                        type="button"
+	                      >
+	                        {todo.dueDate === todayKey ? '⭐ 今日やる ✓' : '⭐ 今日やる'}
+	                      </button>
+	                      {(() => {
+	                        const dueDraft = getTodoDueDateDraft(todo);
+	                        const todayMonthPlaceholder = String(today.getMonth() + 1);
+	                        const todayDayPlaceholder = String(today.getDate());
+
+	                        return (
+	                          <label className="todo-due-date-editor">
+	                            <span>日付を設定／変更</span>
+	                            <small>
+	                              <input
+	                                aria-label={`${todo.text}の日付の年`}
+	                                inputMode="numeric"
+	                                maxLength={4}
+	                                onChange={(event) =>
+	                                  updateTodoDueDateDraft(todo.id, {
+	                                    year: event.target.value.replace(/\D/g, '').slice(0, 4),
+	                                  })
+	                                }
+	                                placeholder={String(today.getFullYear())}
+	                                value={dueDraft.year ?? ''}
+	                              />
+	                              年
+	                            </small>
+	                            <div className="todo-due-date-fields">
+	                              <input
+	                                aria-label={`${todo.text}の日付の月`}
+	                                inputMode="numeric"
+	                                maxLength={2}
+	                                onChange={(event) =>
+	                                  updateTodoDueDateDraft(todo.id, {
+	                                    year: dueDraft.year || String(today.getFullYear()),
+	                                    month: event.target.value.replace(/\D/g, '').slice(0, 2),
+	                                  })
+	                                }
+	                                onKeyDown={(event) => {
+	                                  if (event.key === 'Enter') {
+	                                    event.preventDefault();
+	                                    document.getElementById(`todo-due-day-${todo.id}`)?.focus();
+	                                  }
+	                                }}
+	                                placeholder={todayMonthPlaceholder}
+	                                value={dueDraft.month}
+	                              />
+	                              <span>月</span>
+	                              <input
+	                                aria-label={`${todo.text}の日付の日`}
+	                                id={`todo-due-day-${todo.id}`}
+	                                inputMode="numeric"
+	                                maxLength={2}
+	                                onChange={(event) =>
+	                                  updateTodoDueDateDraft(todo.id, {
+	                                    year: dueDraft.year || String(today.getFullYear()),
+	                                    day: event.target.value.replace(/\D/g, '').slice(0, 2),
+	                                  })
+	                                }
+	                                onKeyDown={(event) => {
+	                                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+	                                    event.preventDefault();
+	                                    commitTodoDueDateDraft(todo, { allowTodayFallback: true });
+	                                  }
+	                                }}
+	                                placeholder={todayDayPlaceholder}
+	                                value={dueDraft.day}
+	                              />
+	                              <span>日</span>
+	                            </div>
+	                            {dueDraft.error && <strong>{dueDraft.error}</strong>}
+	                          </label>
+	                        );
+	                      })()}
+	                      {todo.dueDate && (
+	                        <button
+	                          onClick={() => {
+	                            updateManagedTodoDueDate(todo.id, undefined);
+	                            setActiveTodoMenuId(null);
+	                          }}
+	                          type="button"
+	                        >
+	                          日付を外す
+	                        </button>
+	                      )}
                       <label>
                         フォルダへ移動
                         <select
@@ -13485,11 +13854,17 @@ function App() {
                           <option value="__new__">＋ 新しいフォルダ</option>
                         </select>
                       </label>
-                      {todo.folderId && (
-                        <button onClick={() => updateManagedTodoFolder(todo.id, undefined)} type="button">
-                          フォルダから外す
-                        </button>
-                      )}
+	                      {todo.folderId && (
+	                        <button
+	                          onClick={() => {
+	                            updateManagedTodoFolder(todo.id, undefined);
+	                            setActiveTodoMenuId(null);
+	                          }}
+	                          type="button"
+	                        >
+	                          フォルダから外す
+	                        </button>
+	                      )}
                       <button onClick={() => copyManagedTodoText(todo)} type="button">
                         コピー
                       </button>
@@ -13509,28 +13884,55 @@ function App() {
                     >
                       未完了に戻す
                     </button>
-                  )}
-                  <button onClick={() => confirmDeleteManagedTodo(todo)} type="button">
-                    削除
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-          const renderTodoRow = (todo: ManagedTodoItem, index: number) => (
-            <article
-              className="todo-capture-row"
-              data-completed={todo.completed ? 'true' : 'false'}
-              key={todo.id}
-            >
-              <input
-                aria-label={`やること ${index + 1}を完了`}
-                checked={todo.completed}
-                onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
-                type="checkbox"
-              />
-              <div className="todo-capture-main">
-                <textarea
+	                  )}
+	                  <button onClick={() => confirmDeleteManagedTodo(todo)} type="button">
+	                    削除
+	                  </button>
+	                </div>
+	              )}
+	            </div>
+	          );
+	          const renderTodoRow = (todo: ManagedTodoItem, index: number) => {
+	            const isSelected = Boolean(selectedTodoIds[todo.id]);
+
+	            return (
+	            <article
+	              className="todo-capture-row"
+	              data-completed={todo.completed ? 'true' : 'false'}
+	              data-selecting={isTodoSelectionMode ? 'true' : 'false'}
+	              data-selected={isSelected ? 'true' : 'false'}
+	              key={todo.id}
+	              onClick={(event) => {
+	                if (!isTodoSelectionMode) {
+	                  return;
+	                }
+
+	                const target = event.target as HTMLElement;
+	                if (target.closest('button, input, textarea, select, label')) {
+	                  return;
+	                }
+
+	                toggleTodoSelection(todo.id);
+	              }}
+	            >
+	              <input
+	                aria-label={
+	                  isTodoSelectionMode
+	                    ? `やること ${index + 1}を選択`
+	                    : `やること ${index + 1}を完了`
+	                }
+	                checked={isTodoSelectionMode ? isSelected : todo.completed}
+	                onChange={(event) => {
+	                  if (isTodoSelectionMode) {
+	                    toggleTodoSelection(todo.id);
+	                  } else {
+	                    toggleManagedTodo(todo.id, event.target.checked);
+	                  }
+	                }}
+	                type="checkbox"
+	              />
+	              <div className="todo-capture-main">
+	                <textarea
                   aria-label={`やること ${index + 1}`}
                   id={`managed-todo-text-${todo.id}`}
                   onBlur={cleanupManagedTodos}
@@ -13541,28 +13943,64 @@ function App() {
                       isActiveTodoStatus(todo.status) ? todo.status : 'soon',
                       event.target.value,
                     );
-                  }}
-                  placeholder="やること"
-                  ref={adjustTextareaHeight}
-                  rows={1}
-                  value={todo.text}
+	                  }}
+	                  placeholder="やること"
+	                  readOnly={isTodoSelectionMode}
+	                  ref={adjustTextareaHeight}
+	                  rows={1}
+	                  value={todo.text}
                 />
                 {todo.dueDate && <time>{formatTodoDueDate(todo.dueDate)}</time>}
                 {todo.completed && formatTodoCompletedAt(todo.completedAt) && (
-                  <time>完了：{formatTodoCompletedAt(todo.completedAt)}</time>
-                )}
-              </div>
-              {todo.completed && todo.status !== 'completed' && (
-                <button
-                  className="todo-finalize-button"
-                  onClick={() => finalizeManagedTodo(todo.id)}
+	                  <time>完了：{formatTodoCompletedAt(todo.completedAt)}</time>
+	                )}
+	              </div>
+	              {!isTodoSelectionMode && todo.completed && todo.status !== 'completed' && (
+	                <button
+	                  className="todo-finalize-button"
+	                  onClick={() => finalizeManagedTodo(todo.id)}
                   type="button"
                 >
-                  完了
-                </button>
+	                  完了
+	                </button>
+	              )}
+	              {!isTodoSelectionMode && renderTodoActions(todo)}
+	            </article>
+	            );
+	          };
+          const renderTodoCaptureListHeader = (todos: ManagedTodoItem[]) => (
+            <div className="todo-capture-list-header">
+              <h2>
+                未完了
+                {isTodoSelectionMode && <span>{selectedTodoCount}件選択中</span>}
+              </h2>
+              {todos.length > 0 && (
+                <div className="todo-capture-list-actions">
+                  {isTodoSelectionMode && (
+                    <button
+                      className="todo-subtle-action"
+                      onClick={() => selectVisibleTodos(todos)}
+                      type="button"
+                    >
+                      すべて選択
+                    </button>
+                  )}
+                  <button
+                    className="todo-subtle-action"
+                    onClick={() => {
+                      if (isTodoSelectionMode) {
+                        clearTodoSelection();
+                      } else {
+                        enterTodoSelectionMode();
+                      }
+                    }}
+                    type="button"
+                  >
+                    {isTodoSelectionMode ? 'キャンセル' : '選択'}
+                  </button>
+                </div>
               )}
-              {renderTodoActions(todo)}
-            </article>
+            </div>
           );
           const renderManagedTodoRows = (
             status: ActiveTodoStatus,
@@ -13708,23 +14146,27 @@ function App() {
           );
           void renderManagedTodoRows;
 
-          return (
-            <section className="todo-manager-page record-view-content" aria-label="やること">
-              <div className="todo-status-tabs todo-primary-tabs" aria-label="やること表示切り替え">
-                {([
-                  ['todo', '一覧'],
+	          return (
+	            <section className="todo-manager-page record-view-content" aria-label="やること">
+	              {todoBulkStatusMessage && <p className="todo-bulk-status">{todoBulkStatusMessage}</p>}
+	              <div className="todo-status-tabs todo-primary-tabs" aria-label="やること表示切り替え">
+	                {([
+	                  ['todo', '一覧'],
                   ['date', '日付'],
                   ['folders', 'フォルダ'],
                   ['completed', '完了済み'],
                 ] as const).map(([view, label]) => (
                   <button
                     aria-current={todoView === view ? 'page' : undefined}
-                    data-active={todoView === view ? 'true' : 'false'}
-                    key={view}
-                    onClick={() => setTodoView(view)}
-                    type="button"
-                  >
-                    {label}
+	                    data-active={todoView === view ? 'true' : 'false'}
+	                    key={view}
+	                    onClick={() => {
+	                      clearTodoSelection();
+	                      setTodoView(view);
+	                    }}
+	                    type="button"
+	                  >
+	                    {label}
                   </button>
                 ))}
               </div>
@@ -13781,11 +14223,9 @@ function App() {
                       rows={1}
                       value={newTodoText}
                     />
-                  </section>
-                  <section className="todo-capture-list" aria-label="未完了のやること">
-                    <div className="todo-capture-list-header">
-                      <h2>未完了</h2>
-                    </div>
+	                  </section>
+	                  <section className="todo-capture-list" aria-label="未完了のやること">
+	                    {renderTodoCaptureListHeader(activeTodos)}
                     {activeTodos.length > 0 ? (
                       activeTodos.map(renderTodoRow)
                     ) : (
@@ -13883,7 +14323,10 @@ function App() {
                       <div className="todo-folder-detail-header">
                         <button
                           aria-label="フォルダ一覧へ戻る"
-                          onClick={() => setSelectedTodoFolderId(null)}
+                          onClick={() => {
+                            clearTodoSelection();
+                            setSelectedTodoFolderId(null);
+                          }}
                           type="button"
                         >
                           ‹
@@ -13914,9 +14357,7 @@ function App() {
                         />
                       </section>
                       <section className="todo-capture-list" aria-label={`${selectedFolder.name}の未完了`}>
-                        <div className="todo-capture-list-header">
-                          <h2>未完了</h2>
-                        </div>
+	                        {renderTodoCaptureListHeader(folderTodos)}
                         {folderTodos.length > 0 ? (
                           folderTodos.map(renderTodoRow)
                         ) : (
@@ -13963,14 +14404,15 @@ function App() {
                                 <i aria-hidden="true">›</i>
                               </button>
                               <div className="todo-actions-menu" data-open={activeTodoFolderMenuId === folder.id ? 'true' : 'false'}>
-                                <button
-                                  aria-expanded={activeTodoFolderMenuId === folder.id}
-                                  aria-label={`${folder.name}の操作`}
-                                  onClick={() =>
-                                    setActiveTodoFolderMenuId((currentId) => currentId === folder.id ? null : folder.id)
-                                  }
-                                  type="button"
-                                >
+	                                <button
+	                                  aria-expanded={activeTodoFolderMenuId === folder.id}
+	                                  aria-label={`${folder.name}の操作`}
+	                                  onClick={() => {
+	                                    setActiveTodoMenuId(null);
+	                                    setActiveTodoFolderMenuId((currentId) => currentId === folder.id ? null : folder.id);
+	                                  }}
+	                                  type="button"
+	                                >
                                   …
                                 </button>
                                 {activeTodoFolderMenuId === folder.id && (
@@ -14004,29 +14446,37 @@ function App() {
                 }${holidayName ? `・${holidayName}` : ''}）`;
 
                 return (
-                  <div
-                    className="record-editor-backdrop"
-                    role="presentation"
-                    onClick={() => setSelectedTodoDate(null)}
-                  >
+	                  <div
+	                    className="record-editor-backdrop"
+	                    role="presentation"
+	                    onClick={() => {
+	                      clearTodoSelection();
+	                      setSelectedTodoDate(null);
+	                    }}
+	                  >
                     <section
                       aria-label={`${dateTitle}のやること`}
                       className="record-editor-panel todo-date-editor-panel"
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <div className="record-editor-header">
-                        <div>
-                          <p>📋 日付のやること</p>
-                          <h2>{dateTitle}</h2>
-                        </div>
-                        <button
-                          aria-label="日付のやることを閉じる"
-                          onClick={() => setSelectedTodoDate(null)}
-                          type="button"
-                        >
-                          閉じる
-                        </button>
-                      </div>
+	                      <div className="record-editor-header">
+	                        <div>
+	                          <p>📋 日付のやること</p>
+	                          <h2>{dateTitle}</h2>
+	                        </div>
+	                        <div className="todo-date-editor-actions">
+	                          <button
+	                            aria-label="日付のやることを閉じる"
+	                            onClick={() => {
+	                              clearTodoSelection();
+	                              setSelectedTodoDate(null);
+	                            }}
+	                            type="button"
+	                          >
+	                            閉じる
+	                          </button>
+	                        </div>
+	                      </div>
                       <section className="todo-capture-card" aria-label={`${dateTitle}へ追加`}>
                         <textarea
                           aria-label={`${dateTitle}へ追加するやること`}
@@ -14049,9 +14499,10 @@ function App() {
                           value={newTodoDateText}
                         />
                       </section>
-                      <div className="todo-capture-list">
-                        {selectedDateTodos.length > 0 ? (
-                          selectedDateTodos.map(renderTodoRow)
+	                      <div className="todo-capture-list">
+	                        {renderTodoCaptureListHeader(selectedDateTodos)}
+	                        {selectedDateTodos.length > 0 ? (
+	                          selectedDateTodos.map(renderTodoRow)
                         ) : (
                           <p className="todo-completed-empty">この日のやることはまだありません。</p>
                         )}
@@ -14059,10 +14510,67 @@ function App() {
                     </section>
                   </div>
                 );
-              })()}
-            </section>
-          );
-        })()}
+	              })()}
+	              {isTodoSelectionMode && selectedTodoCount > 0 && (
+	                <div className="todo-bulk-action-bar" aria-label="選択したやることの一括操作">
+	                  <span>{selectedTodoCount}件</span>
+	                  <button onClick={() => bulkUpdateSelectedTodoDueDate(todayKey)} type="button">
+	                    今日やる
+	                  </button>
+	                  <button
+	                    onClick={() => bulkUpdateSelectedTodoDueDate(getDateKey(addDays(today, 1)))}
+	                    type="button"
+	                  >
+	                    明日
+	                  </button>
+	                  <label>
+	                    日付
+	                    <input
+	                      aria-label="選択したやることの日付を設定"
+	                      onChange={(event) => {
+	                        if (event.target.value) {
+	                          bulkUpdateSelectedTodoDueDate(event.target.value);
+	                        }
+	                      }}
+	                      type="date"
+	                    />
+	                  </label>
+	                  <select
+	                    aria-label="選択したやることのフォルダを設定"
+	                    defaultValue=""
+	                    onChange={(event) => {
+	                      if (event.target.value === '__new__') {
+	                        bulkCreateTodoFolderAndMove();
+	                        event.currentTarget.value = '';
+	                        return;
+	                      }
+
+	                      if (event.target.value === '__none__') {
+	                        bulkUpdateSelectedTodoFolder(undefined);
+	                        return;
+	                      }
+
+	                      if (event.target.value) {
+	                        bulkUpdateSelectedTodoFolder(event.target.value);
+	                      }
+	                    }}
+	                  >
+	                    <option value="" disabled>
+	                      フォルダ
+	                    </option>
+	                    <option value="__none__">フォルダなし</option>
+	                    {todoFolders.map((folder) => (
+	                      <option key={folder.id} value={folder.id}>
+	                        {folder.name}
+	                      </option>
+	                    ))}
+	                    <option value="__new__">＋ 新しいフォルダ</option>
+	                  </select>
+	                </div>
+	              )}
+	            </section>
+	          );
+	        })()}
 
         {isLibraryAnyMemoView && (
           <section
