@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type TouchEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -43,7 +44,7 @@ type MenuViewName =
   | 'status'
   | 'shop'
   | 'settings';
-type ScheduleViewName = 'today' | 'month' | 'year';
+type ScheduleViewName = 'list' | 'today' | 'year';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
@@ -2861,10 +2862,13 @@ type DailyScheduleItem = {
 };
 
 type DailySchedule = DailyScheduleItem[];
-type DailyScheduleDraftItem = DailyScheduleItem & {
-  touched: boolean;
+type ScheduleDetailDraft = {
+  hour: string;
+  minute: string;
+  text: string;
+  error?: string;
+  message?: string;
 };
-type DailyScheduleDrafts = Record<string, DailyScheduleDraftItem[]>;
 
 type NormalizeDailyTodoOptions = {
   preserveEmptyIds?: Iterable<string>;
@@ -3236,18 +3240,6 @@ const applyTodoRollover = (todos: ManagedTodos, todayDate: Date) => {
       return todo;
     }
 
-    if (todo.completed) {
-      return {
-        ...todo,
-        status: 'completed' as const,
-        completed: true,
-        completedAt: todo.completedAt ?? getEndOfDateIso(lastRolloverDateKey),
-        originalStatus: isActiveTodoStatus(todo.status) ? todo.status : 'today',
-        pendingReview: undefined,
-        updatedAt: rolloverTimestamp,
-      };
-    }
-
     if (todo.pendingReview) {
       return todo;
     }
@@ -3291,6 +3283,23 @@ const getTodoStatusLabel = (status: TodoStatus) =>
 const hasScheduleValue = (scheduleItem: DailyScheduleItem) =>
   scheduleItem.time.trim().length > 0 || scheduleItem.text.trim().length > 0;
 
+const getScheduleTimeMinutes = (time: string) => {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+};
+
 const createDailyScheduleItem = (
   time = '',
   text = '',
@@ -3300,17 +3309,6 @@ const createDailyScheduleItem = (
   time,
   text,
 });
-
-const createDailyScheduleDraftItem = (): DailyScheduleDraftItem => ({
-  ...createDailyScheduleItem(getRoundedNextHalfHourTime()),
-  touched: false,
-});
-
-const hasScheduleDraftValue = (scheduleDraft: DailyScheduleDraftItem) =>
-  scheduleDraft.touched && hasScheduleValue(scheduleDraft);
-
-const hasPendingScheduleDraft = (scheduleDraft: DailyScheduleDraftItem) =>
-  !hasScheduleDraftValue(scheduleDraft);
 
 const sortDailySchedule = (schedule: DailySchedule) =>
   [...schedule].sort((first, second) => {
@@ -3591,6 +3589,28 @@ const saveDailyRecordEntry = (
     ...currentEntry,
     saved: true,
     savedAt: currentEntry.savedAt ?? new Date().toISOString(),
+  };
+
+  return normalizeDailyRecordEntries(nextEntries);
+};
+
+const updateSavedDailyRecordEntryText = (
+  entries: DailyRecordEntries,
+  index: number,
+  value: string,
+): DailyRecordEntries => {
+  const nextEntries = [...entries];
+  const currentEntry = nextEntries[index];
+
+  if (!currentEntry?.saved) {
+    return normalizeDailyRecordEntries(nextEntries);
+  }
+
+  nextEntries[index] = {
+    ...currentEntry,
+    text: value,
+    saved: hasMeaningfulText(value),
+    savedAt: currentEntry.savedAt,
   };
 
   return normalizeDailyRecordEntries(nextEntries);
@@ -4019,7 +4039,7 @@ const getSectionsForTarget = (
 
 const getTargetLabel = (target: ResolvedEditTarget) => {
   if (target.kind === 'template') {
-    return target.template === 'normal' ? 'ノーマルクエスト' : '休日クエスト';
+    return target.template === 'normal' ? '通常ルーティン' : '休日ルーティン';
   }
 
   return `${target.dateKey}だけのクエスト`;
@@ -4033,7 +4053,7 @@ const getRoutineKindLabel = (kind: RoutineKind) => {
     return '個別カスタム';
   }
 
-  return kind === 'normal' ? 'ノーマルクエスト' : '休日クエスト';
+  return kind === 'normal' ? '通常ルーティン' : '休日ルーティン';
 };
 
 const dailySectionIds: StartSection[] = ['morning', 'noon', 'evening', 'night'];
@@ -4737,6 +4757,7 @@ function App() {
   const dailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const dailyMemoCardRef = useRef<HTMLElement>(null);
   const dailyEventCardRef = useRef<HTMLElement>(null);
+  const dailyRecordEditTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const historyDailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
   const historyDailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTimerStateRef = useRef<StoredTimerState | null>(null);
@@ -4746,6 +4767,8 @@ function App() {
   const scheduleTodayScrollMonthRef = useRef<string | null>(null);
   const recordTodayScrollMonthRef = useRef<string | null>(null);
   const composingScheduleIdsRef = useRef<Set<string>>(new Set());
+  const scheduleDetailSavingKeysRef = useRef<Set<string>>(new Set());
+  const scheduleListScrollYearRef = useRef<string | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -4763,14 +4786,16 @@ function App() {
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
   const [scheduleYear, setScheduleYear] = useState(() => today.getFullYear());
-  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('year');
+  const [scheduleView, setScheduleView] = useState<ScheduleViewName>('list');
+  const [selectedScheduleYearMonth, setSelectedScheduleYearMonth] = useState<number | null>(null);
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [recordDisplayMode, setRecordDisplayMode] =
     useState<RecordDisplayMode>(() => loadRecordDisplayMode());
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
-  const [scheduleDrafts, setScheduleDrafts] = useState<DailyScheduleDrafts>({});
+  const [scheduleDetailDrafts, setScheduleDetailDrafts] = useState<Record<string, ScheduleDetailDraft>>({});
+  const [activeScheduleMenuId, setActiveScheduleMenuId] = useState<string | null>(null);
   const [todoView, setTodoView] = useState<TodoViewName>('todo');
   const [todoMonth, setTodoMonth] = useState(() => getMonthStart(today));
   const [selectedTodoDate, setSelectedTodoDate] = useState<Date | null>(null);
@@ -4821,6 +4846,10 @@ function App() {
   const questDateLabel = formatQuestDateLabel(selectedDate);
   const historySelectedDateKey = historySelectedDate ? getDateKey(historySelectedDate) : '';
   const historyDateLabel = historySelectedDate ? formatQuestDateLabel(historySelectedDate) : '';
+  const shouldShowManagedTodoInWorkingList = (todo: ManagedTodoItem) =>
+    todo.status !== 'completed';
+  const shouldShowManagedTodoInCompletedHistory = (todo: ManagedTodoItem) =>
+    todo.status === 'completed';
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const eventStorageKey = getDailyEventStorageKey(selectedDate);
@@ -4970,6 +4999,12 @@ function App() {
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
   const [dailyMemoDateKey, setDailyMemoDateKey] = useState(() => todayKey);
+  const [editingDailyRecord, setEditingDailyRecord] = useState<{
+    kind: CoreRoutineKind;
+    index: number;
+    text: string;
+    originalText: string;
+  } | null>(null);
   const [dailyTodos, setDailyTodos] = useState(() => loadDailyTodos(today));
   const [dailyTodosDateKey, setDailyTodosDateKey] = useState(() => todayKey);
   const [managedTodos, setManagedTodos] = useState<ManagedTodos>(() => loadManagedTodos(today));
@@ -5253,7 +5288,6 @@ function App() {
     () => getMonthDateCells(todoMonth).filter((date): date is Date => Boolean(date)),
     [todoMonth],
   );
-  const scheduleMonthLabel = monthFormatter.format(scheduleMonth);
   const scheduleMonthDates = useMemo(
     () => getMonthDateCells(scheduleMonth).filter((date): date is Date => Boolean(date)),
     [scheduleMonth, scheduleRevision],
@@ -5406,7 +5440,8 @@ function App() {
   useEffect(() => {
     if (
       !isTodayScheduleView ||
-      scheduleView !== 'month' ||
+      scheduleView !== 'year' ||
+      selectedScheduleYearMonth !== today.getMonth() ||
       getDateKey(scheduleMonth) !== getDateKey(getMonthStart(today))
     ) {
       return;
@@ -5424,7 +5459,30 @@ function App() {
         .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${todayKey}"]`)
         ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
-  }, [isTodayScheduleView, scheduleMonth, scheduleView, today, todayKey]);
+  }, [isTodayScheduleView, scheduleMonth, scheduleView, selectedScheduleYearMonth, today, todayKey]);
+
+  useEffect(() => {
+    if (
+      !isTodayScheduleView ||
+      scheduleView !== 'list' ||
+      scheduleYear !== today.getFullYear()
+    ) {
+      return;
+    }
+
+    const scrollKey = `schedule-list:${scheduleYear}:${today.getMonth()}`;
+
+    if (scheduleListScrollYearRef.current === scrollKey) {
+      return;
+    }
+
+    scheduleListScrollYearRef.current = scrollKey;
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-schedule-list-month="${today.getMonth()}"]`)
+        ?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    });
+  }, [isTodayScheduleView, scheduleView, scheduleYear, today, todayKey]);
   useEffect(() => {
     if (!isLibraryRecordView || getDateKey(recordMonth) !== getDateKey(getMonthStart(today))) {
       return;
@@ -5682,6 +5740,31 @@ function App() {
 
     return () => window.clearTimeout(focusTimerId);
   }, [isTodayTodoView, todoView]);
+
+  useEffect(() => {
+    if (!editingDailyRecord) {
+      return;
+    }
+
+    const focusTimerId = window.setTimeout(() => {
+      const textarea = dailyRecordEditTextareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      adjustTextareaHeight(textarea);
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 80);
+
+    return () => window.clearTimeout(focusTimerId);
+  }, [editingDailyRecord?.kind, editingDailyRecord?.index]);
+
+  useEffect(() => {
+    setEditingDailyRecord(null);
+  }, [selectedDateKey]);
 
   useEffect(() => {
     if (!anyMemoStatusMessage) {
@@ -8788,13 +8871,36 @@ function App() {
           };
         }
 
-        // Checked items stay in their current bucket for the rest of the day.
-        // The next local date rollover moves them into the completed history.
+        // Checked items stay in place until the user explicitly finalizes them.
         return {
           ...todo,
           completed: true,
           completedAt: timestamp,
           originalStatus: todo.originalStatus ?? todo.status,
+          updatedAt: timestamp,
+        };
+      });
+    });
+  };
+
+  const finalizeManagedTodo = (id: string) => {
+    setManagedTodos((currentTodos) => {
+      const timestamp = new Date().toISOString();
+
+      return currentTodos.map((todo) => {
+        if (todo.id !== id || !hasManagedTodoText(todo) || todo.status === 'completed') {
+          return todo;
+        }
+
+        return {
+          ...todo,
+          status: 'completed' as const,
+          completed: true,
+          completedAt: todo.completedAt ?? timestamp,
+          originalStatus:
+            todo.originalStatus ??
+            (isActiveTodoStatus(todo.status) ? todo.status : getTodoStatusForDueDate(todo.dueDate)),
+          pendingReview: undefined,
           updatedAt: timestamp,
         };
       });
@@ -8989,6 +9095,7 @@ function App() {
 
     setNewTodoText('');
     window.setTimeout(() => {
+      adjustTextareaHeight(newTodoInputRef.current);
       newTodoInputRef.current?.focus({ preventScroll: true });
     }, 0);
   };
@@ -9002,6 +9109,7 @@ function App() {
 
     setNewTodoDateText('');
     window.setTimeout(() => {
+      adjustTextareaHeight(newTodoDateInputRef.current);
       newTodoDateInputRef.current?.focus({ preventScroll: true });
     }, 0);
   };
@@ -9018,8 +9126,25 @@ function App() {
       ),
     );
     window.setTimeout(() => {
+      adjustTextareaHeight(newTodoFolderInputRef.current);
       newTodoFolderInputRef.current?.focus({ preventScroll: true });
     }, 0);
+  };
+
+  const handleTodoCaptureKeyDown = (
+    event: ReactKeyboardEvent<HTMLTextAreaElement>,
+    submit: () => void,
+  ) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    submit();
   };
 
   const updateManagedTodoDueDate = (id: string, dueDate?: string) => {
@@ -9639,6 +9764,98 @@ function App() {
     setScheduleRevision((revision) => revision + 1);
   };
 
+  const getEmptyScheduleDetailDraft = (): ScheduleDetailDraft => ({
+    hour: '',
+    minute: '',
+    text: '',
+  });
+
+  const getScheduleDetailDraft = (dateKey: string) =>
+    scheduleDetailDrafts[dateKey] ?? getEmptyScheduleDetailDraft();
+
+  const updateScheduleDetailDraft = (
+    date: Date,
+    patch: Partial<ScheduleDetailDraft>,
+  ) => {
+    const dateKey = getDateKey(date);
+
+    setScheduleDetailDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [dateKey]: {
+        ...(currentDrafts[dateKey] ?? getEmptyScheduleDetailDraft()),
+        ...patch,
+        ...(patch.error === undefined ? { error: undefined } : {}),
+        ...(patch.message === undefined ? { message: undefined } : {}),
+      },
+    }));
+  };
+
+  const commitScheduleDetailDraft = (date: Date) => {
+    const dateKey = getDateKey(date);
+    const draft = scheduleDetailDrafts[dateKey] ?? getEmptyScheduleDetailDraft();
+    const text = draft.text.trim();
+
+    if (scheduleDetailSavingKeysRef.current.has(dateKey) || !text) {
+      return;
+    }
+
+    const hasHour = draft.hour.trim().length > 0;
+    const hasMinute = draft.minute.trim().length > 0;
+    let scheduleTime = '';
+
+    if (!hasHour && hasMinute) {
+      updateScheduleDetailDraft(date, {
+        error: '分を入れる場合は時も入力してください',
+      });
+      return;
+    }
+
+    if (!hasHour && !hasMinute) {
+      scheduleTime = getRoundedNextHalfHourTime(today);
+    } else {
+      const hourNumber = Number(draft.hour);
+      const minuteNumber = hasMinute ? Number(draft.minute) : 0;
+
+      if (!Number.isInteger(hourNumber) || hourNumber < 0 || hourNumber > 23) {
+        updateScheduleDetailDraft(date, {
+          error: '時は0〜23で入力してください',
+        });
+        return;
+      }
+
+      if (!Number.isInteger(minuteNumber) || minuteNumber < 0 || minuteNumber > 59) {
+        updateScheduleDetailDraft(date, {
+          error: '分は0〜59で入力してください',
+        });
+        return;
+      }
+
+      scheduleTime = `${String(hourNumber).padStart(2, '0')}:${String(minuteNumber).padStart(2, '0')}`;
+    }
+
+    scheduleDetailSavingKeysRef.current.add(dateKey);
+    const currentSchedule = loadDailySchedule(date);
+    const nextSchedule = upsertDailyScheduleItem(
+      currentSchedule,
+      createDailyScheduleItem(scheduleTime, text),
+    );
+
+    saveScheduleForDate(date, nextSchedule);
+    setScheduleDetailDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [dateKey]: {
+        ...getEmptyScheduleDetailDraft(),
+        message: '予定を追加しました',
+      },
+    }));
+    window.setTimeout(() => {
+      scheduleDetailSavingKeysRef.current.delete(dateKey);
+      document
+        .querySelector<HTMLInputElement>(`[data-schedule-detail-text="${dateKey}"]`)
+        ?.focus({ preventScroll: true });
+    }, 0);
+  };
+
   const updateScheduleItem = (
     date: Date,
     item: DailyScheduleItem,
@@ -9659,60 +9876,6 @@ function App() {
     saveScheduleForDate(date, nextSchedule, preserveOptions);
   };
 
-  const addScheduleDraftRow = (
-    date: Date,
-  ) => {
-    const dateKey = getDateKey(date);
-
-    setScheduleDrafts((currentDrafts) => {
-      const currentRows = currentDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
-
-      if (currentRows.some(hasPendingScheduleDraft)) {
-        return currentDrafts;
-      }
-
-      return {
-        ...currentDrafts,
-        [dateKey]: [createDailyScheduleDraftItem()],
-      };
-    });
-  };
-
-  const updateScheduleDraft = (
-    date: Date,
-    draft: DailyScheduleDraftItem,
-    field: keyof Pick<DailyScheduleItem, 'time' | 'text'>,
-    value: string,
-  ) => {
-    const dateKey = getDateKey(date);
-    const currentRows = scheduleDrafts[dateKey] ?? [draft];
-    const nextDraft = {
-      ...draft,
-      [field]: value,
-      touched: true,
-    };
-    const isComposing = composingScheduleIdsRef.current.has(draft.id);
-    const preserveOptions = isComposing ? { preserveEmptyIds: [draft.id] } : {};
-    const nextRows = currentRows
-      .map((currentDraft) => (currentDraft.id === draft.id ? nextDraft : currentDraft))
-      .filter((currentDraft) => currentDraft.id === draft.id || hasScheduleDraftValue(currentDraft));
-    const normalizedRows = nextRows.length > 0
-      ? nextRows
-      : [createDailyScheduleDraftItem()];
-
-    const currentSchedule = loadDailySchedule(date);
-    const nextSchedule = hasScheduleValue(nextDraft) || isComposing
-      ? upsertDailyScheduleItem(currentSchedule, nextDraft, preserveOptions)
-      : deleteDailyScheduleItem(currentSchedule, nextDraft.id);
-
-    saveScheduleForDate(date, nextSchedule, preserveOptions);
-
-    setScheduleDrafts((currentDrafts) => ({
-      ...currentDrafts,
-      [dateKey]: normalizedRows,
-    }));
-  };
-
   const startScheduleComposition = (id: string) => {
     composingScheduleIdsRef.current.add(id);
   };
@@ -9722,32 +9885,10 @@ function App() {
     updateScheduleItem(date, item, 'text', value);
   };
 
-  const endScheduleDraftComposition = (date: Date, draft: DailyScheduleDraftItem, value: string) => {
-    composingScheduleIdsRef.current.delete(draft.id);
-    updateScheduleDraft(date, draft, 'text', value);
-  };
-
   const removeScheduleItem = (date: Date, id: string) => {
     const currentSchedule = loadDailySchedule(date);
 
     saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
-  };
-
-  const removeScheduleDraft = (date: Date, id: string) => {
-    const dateKey = getDateKey(date);
-    const currentSchedule = loadDailySchedule(date);
-
-    composingScheduleIdsRef.current.delete(id);
-    saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
-    setScheduleDrafts((currentDrafts) => {
-      const currentRows = currentDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
-      const nextRows = currentRows.filter((scheduleDraft) => scheduleDraft.id !== id);
-
-      return {
-        ...currentDrafts,
-        [dateKey]: nextRows.length > 0 ? nextRows : [createDailyScheduleDraftItem()],
-      };
-    });
   };
 
   const openScheduleEditor = (date: Date) => {
@@ -9756,28 +9897,9 @@ function App() {
     setSelectedScheduleDate(date);
   };
 
-  const openScheduleEditorForToday = () => {
-    openScheduleEditor(today);
-  };
-
-  const changeSelectedScheduleDate = (dateValue: string) => {
-    if (!dateValue) {
-      return;
-    }
-
-    const nextDate = getDateFromKey(dateValue);
-
-    openScheduleEditor(nextDate);
-  };
-
-  const moveScheduleMonth = (months: number) => {
-    setScheduleMonth((currentMonth) => addMonths(currentMonth, months));
-    setSelectedScheduleDate(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   const moveScheduleYear = (years: number) => {
     setScheduleYear((currentYear) => currentYear + years);
+    setSelectedScheduleYearMonth(null);
     setSelectedScheduleDate(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -9799,10 +9921,12 @@ function App() {
       }
       if (nextPage === 'schedule') {
         scheduleTodayScrollMonthRef.current = null;
+        scheduleListScrollYearRef.current = null;
         setScheduleMonth(getMonthStart(today));
         setScheduleYear(today.getFullYear());
+        setSelectedScheduleYearMonth(null);
         setSelectedScheduleDate(null);
-        setScheduleView('year');
+        setScheduleView('list');
       }
       return;
     }
@@ -9813,11 +9937,13 @@ function App() {
     }
     if (nextPage === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
+      scheduleListScrollYearRef.current = null;
       setMenuView('list');
       setScheduleMonth(getMonthStart(today));
       setScheduleYear(today.getFullYear());
+      setSelectedScheduleYearMonth(null);
       setSelectedScheduleDate(null);
-      setScheduleView('year');
+      setScheduleView('list');
     }
     if (nextPage === 'todos') {
       setMenuView('list');
@@ -9831,10 +9957,12 @@ function App() {
     setMenuView(nextMenuView);
     if (nextMenuView === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
+      scheduleListScrollYearRef.current = null;
       setScheduleMonth(getMonthStart(today));
       setScheduleYear(today.getFullYear());
+      setSelectedScheduleYearMonth(null);
       setSelectedScheduleDate(null);
-      setScheduleView('year');
+      setScheduleView('list');
     }
     const nextRecordView = libraryRecordViewMap[nextMenuView];
     if (nextRecordView) {
@@ -9849,10 +9977,12 @@ function App() {
   const openTodayScheduleView = () => {
     resetEditUiState();
     scheduleTodayScrollMonthRef.current = null;
+    scheduleListScrollYearRef.current = null;
     setPage('schedule');
     setMenuView('list');
     setScheduleMonth(getMonthStart(today));
     setScheduleYear(today.getFullYear());
+    setSelectedScheduleYearMonth(null);
     setSelectedScheduleDate(null);
     setScheduleView('today');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -10290,6 +10420,51 @@ function App() {
       </span>
     );
   };
+  const startDailyRecordEdit = (
+    kind: CoreRoutineKind,
+    index: number,
+    text: string,
+  ) => {
+    if (
+      editingDailyRecord &&
+      editingDailyRecord.text !== editingDailyRecord.originalText &&
+      !window.confirm('編集中の内容を破棄して、別の記録を編集しますか？')
+    ) {
+      return;
+    }
+
+    setEditingDailyRecord({
+      kind,
+      index,
+      text,
+      originalText: text,
+    });
+  };
+  const cancelDailyRecordEdit = () => {
+    setEditingDailyRecord(null);
+  };
+  const saveDailyRecordEdit = () => {
+    if (!editingDailyRecord) {
+      return;
+    }
+
+    const { kind, index, text } = editingDailyRecord;
+
+    if (kind === 'memo') {
+      setDailyMemoDateKey(selectedDateKey);
+      setDailyMemo((currentEntries) =>
+        updateSavedDailyRecordEntryText(currentEntries, index, text),
+      );
+    } else {
+      setDailyEventDateKey(selectedDateKey);
+      setDailyEvent((currentEntries) =>
+        updateSavedDailyRecordEntryText(currentEntries, index, text),
+      );
+    }
+
+    setRecordRevision((revision) => revision + 1);
+    setEditingDailyRecord(null);
+  };
   const renderTodayDailyRecordCard = (kind: CoreRoutineKind) => {
     const isMemo = kind === 'memo';
     const entries = isMemo ? dailyMemo : dailyEvent;
@@ -10327,11 +10502,65 @@ function App() {
           <div className="today-record-saved-list">
             {savedEntries.map(({ entry, index }) => {
               const savedTime = formatDailyRecordSavedTime(entry.savedAt);
+              const isEditing =
+                editingDailyRecord?.kind === kind && editingDailyRecord.index === index;
 
               return (
-                <article className="today-record-saved-item" key={`${kind}-saved-${index}`}>
-                  <p>{entry.text.trim()}</p>
-                  {savedTime && <time dateTime={entry.savedAt}>{savedTime}</time>}
+                <article
+                  className="today-record-saved-item"
+                  data-editing={isEditing ? 'true' : 'false'}
+                  key={`${kind}-saved-${index}`}
+                >
+                  {isEditing ? (
+                    <div className="today-record-edit-row">
+                      <textarea
+                        aria-label={`${label} ${index + 1}を編集`}
+                        onChange={(event) => {
+                          adjustTextareaHeight(event.currentTarget);
+                          setEditingDailyRecord((currentEdit) =>
+                            currentEdit && currentEdit.kind === kind && currentEdit.index === index
+                              ? { ...currentEdit, text: event.target.value }
+                              : currentEdit,
+                          );
+                        }}
+                        onKeyDown={(event) => {
+                          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                            event.preventDefault();
+                            saveDailyRecordEdit();
+                          }
+                        }}
+                        ref={(element) => {
+                          dailyRecordEditTextareaRef.current = element;
+                          adjustTextareaHeight(element);
+                        }}
+                        rows={isMemo ? 2 : 4}
+                        value={editingDailyRecord.text}
+                      />
+                      <div className="today-record-edit-actions">
+                        <button onClick={cancelDailyRecordEdit} type="button">
+                          キャンセル
+                        </button>
+                        <button
+                          disabled={!hasMeaningfulText(editingDailyRecord.text)}
+                          onClick={saveDailyRecordEdit}
+                          type="button"
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className="today-record-saved-text-button"
+                        onClick={() => startDailyRecordEdit(kind, index, entry.text)}
+                        type="button"
+                      >
+                        {entry.text.trim()}
+                      </button>
+                      {savedTime && <time dateTime={entry.savedAt}>{savedTime}</time>}
+                    </>
+                  )}
                 </article>
               );
             })}
@@ -10357,7 +10586,7 @@ function App() {
 
                     adjustTextareaHeight(element);
                   }}
-                  rows={isMemo ? 2 : 4}
+                  rows={1}
                   value={entry.text}
                 />
                 <button
@@ -11837,28 +12066,45 @@ function App() {
         )}
 
         {isTodayQuestView && isToday && todayScheduleItems.length > 0 && (() => {
+          const currentMinutes = today.getHours() * 60 + today.getMinutes();
+          const nextScheduleItem = todayScheduleItems.find((scheduleItem) => {
+            const scheduleMinutes = getScheduleTimeMinutes(scheduleItem.time);
+
+            return scheduleMinutes !== null && scheduleMinutes >= currentMinutes;
+          });
           const visibleScheduleItems = todayScheduleItems.slice(0, 3);
           const remainingScheduleCount = Math.max(0, todayScheduleItems.length - visibleScheduleItems.length);
 
           return (
-          <section className="today-schedule-summary-card" aria-label="スケジュール">
+          <section className="today-schedule-summary-card" aria-label="今日のスケジュール">
             <button
               className="today-schedule-summary-button"
               onClick={openTodayScheduleView}
               type="button"
             >
               <div className="today-schedule-summary-header">
-                <h2>🕒 スケジュール</h2>
+                <h2>🕒 今日のスケジュール</h2>
                 <span>{todayScheduleItems.length}件</span>
                 <i aria-hidden="true">›</i>
               </div>
               <div className="today-schedule-summary-list">
-                {visibleScheduleItems.map((scheduleItem) => (
-                  <p key={scheduleItem.id}>
-                    <time>{scheduleItem.time || '終日'}</time>
-                    <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
-                  </p>
-                ))}
+                {visibleScheduleItems.map((scheduleItem) => {
+                  const scheduleMinutes = getScheduleTimeMinutes(scheduleItem.time);
+                  const isPastSchedule =
+                    scheduleMinutes !== null && scheduleMinutes < currentMinutes;
+                  const isNextSchedule = nextScheduleItem?.id === scheduleItem.id;
+
+                  return (
+                    <p
+                      data-next={isNextSchedule ? 'true' : 'false'}
+                      data-past={isPastSchedule ? 'true' : 'false'}
+                      key={scheduleItem.id}
+                    >
+                      <time>{scheduleItem.time || '終日'}</time>
+                      <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                    </p>
+                  );
+                })}
               </div>
               {remainingScheduleCount > 0 && (
                 <p className="today-schedule-summary-more">ほか{remainingScheduleCount}件</p>
@@ -11873,8 +12119,7 @@ function App() {
             .filter((todo) =>
               hasManagedTodoText(todo) &&
               !todo.pendingReview &&
-              todo.status !== 'completed' &&
-              !todo.completed &&
+              shouldShowManagedTodoInWorkingList(todo) &&
               todo.dueDate === todayKey,
             );
           const visibleTodoItems = todayTodoItems.slice(0, 3);
@@ -11899,7 +12144,7 @@ function App() {
               </div>
               <div className="today-todo-summary-list">
                 {visibleTodoItems.map((todo) => (
-                  <label key={todo.id}>
+                  <label data-completed={todo.completed ? 'true' : 'false'} key={todo.id}>
                     <input
                       checked={todo.completed}
                       onChange={(event) => toggleManagedTodo(todo.id, event.target.checked)}
@@ -12684,9 +12929,9 @@ function App() {
           >
             <div className="schedule-view-tabs" aria-label="スケジュール表示切り替え">
               {([
-                ['year', '一覧'],
+                ['list', '一覧'],
                 ['today', '今日'],
-                ['month', '今月'],
+                ['year', '年間'],
               ] as const).map(([view, label]) => (
                 <button
                   aria-current={scheduleView === view ? 'page' : undefined}
@@ -12698,11 +12943,6 @@ function App() {
                   {label}
                 </button>
               ))}
-            </div>
-            <div className="schedule-common-action">
-              <button onClick={openScheduleEditorForToday} type="button">
-                ＋ 予定を入力する
-              </button>
             </div>
             {scheduleView === 'today' && (() => {
               const todayScheduleItems = loadDailySchedule(today);
@@ -12739,84 +12979,11 @@ function App() {
                 </section>
               );
             })()}
-            {scheduleView === 'month' && (
-              <>
-                <div className="records-month-header">
-                  <button
-                    aria-label="前の月のスケジュールへ"
-                    onClick={() => moveScheduleMonth(-1)}
-                    type="button"
-                  >
-                    ‹
-                  </button>
-                  <h2>{scheduleMonthLabel}</h2>
-                  <button
-                    aria-label="次の月のスケジュールへ"
-                    onClick={() => moveScheduleMonth(1)}
-                    type="button"
-                  >
-                    ›
-                  </button>
-                </div>
-                <div className="records-day-list schedule-day-list">
-                  {scheduleMonthDates.map((scheduleDate) => {
-                    const dateKey = getDateKey(scheduleDate);
-                    const holidayName = getHolidayName(scheduleDate);
-                    const dayKind = getDateDisplayKind(scheduleDate);
-                    const scheduleItems = loadDailySchedule(scheduleDate);
-                    const hasSchedule = scheduleItems.length > 0;
-                    const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
-                      weekdayShortLabels[scheduleDate.getDay()]
-                    }${holidayName ? `・${holidayName}` : ''}）`;
-
-                    return (
-                      <article
-                        className="record-day-card schedule-day-card"
-                        data-date-key={dateKey}
-                        data-day-kind={dayKind}
-                        data-empty={!hasSchedule ? 'true' : 'false'}
-                        data-today={dateKey === todayKey ? 'true' : 'false'}
-                        key={dateKey}
-                      >
-                        <button
-                          className="record-day-toggle"
-                          onClick={() => openScheduleEditor(scheduleDate)}
-                          type="button"
-                        >
-                          <span className="record-day-date">
-                            🗓️ {dateTitle}
-                          </span>
-                          {(dateKey === todayKey || hasSchedule) && (
-                            <span className="record-day-meta">
-                              {dateKey === todayKey && <strong>今日</strong>}
-                              {hasSchedule && `${scheduleItems.length}件`}
-                            </span>
-                          )}
-                        </button>
-
-                        {hasSchedule && (
-                          <div className="record-day-body schedule-day-body">
-                            <div className="schedule-read-list">
-                              {scheduleItems.map((scheduleItem) => (
-                                <p key={scheduleItem.id}>
-                                  <time>{scheduleItem.time || '--:--'}</time>
-                                  <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-            {scheduleView === 'year' && (
-              <section className="schedule-year-panel" aria-label={`${scheduleYear}年のスケジュール`}>
+            {scheduleView === 'list' && (
+              <section className="schedule-year-panel" aria-label={`${scheduleYear}年のスケジュール一覧`}>
                 <div className="schedule-year-header">
                   <button
-                    aria-label="前年のスケジュールへ"
+                    aria-label="前年のスケジュール一覧へ"
                     onClick={() => moveScheduleYear(-1)}
                     type="button"
                   >
@@ -12824,56 +12991,195 @@ function App() {
                   </button>
                   <h2>{scheduleYear}年</h2>
                   <button
-                    aria-label="翌年のスケジュールへ"
+                    aria-label="翌年のスケジュール一覧へ"
                     onClick={() => moveScheduleYear(1)}
                     type="button"
                   >
                     ›
                   </button>
                 </div>
-                {yearlyScheduleGroups.length === 0 ? (
-                  <p className="schedule-year-empty">この年の予定はまだありません</p>
-                ) : (
-                  <div className="schedule-year-list">
-                    {yearlyScheduleGroups.map((monthGroup) => (
-                      <section className="schedule-year-month" key={monthGroup.monthIndex}>
-                        <h3>{monthGroup.monthIndex + 1}月</h3>
-                        <div className="schedule-year-days">
-                          {monthGroup.days.map(({ date, dateKey, items }) => {
-                            const holidayName = getHolidayName(date);
-                            const dateTitle = `${date.getMonth() + 1}月${date.getDate()}日（${
-                              weekdayShortLabels[date.getDay()]
-                            }${holidayName ? `・${holidayName}` : ''}）`;
+                <div className="schedule-year-list">
+                  {Array.from({ length: 12 }, (_, monthIndex) => {
+                    const monthGroup = yearlyScheduleGroups.find(
+                      (group) => group.monthIndex === monthIndex,
+                    );
+                    const monthCells = getMonthDateCells(new Date(scheduleYear, monthIndex, 1));
+                    const scheduleCount =
+                      monthGroup?.days.reduce((total, day) => total + day.items.length, 0) ?? 0;
+
+                    return (
+                      <section
+                        className="schedule-year-month schedule-list-month"
+                        data-schedule-list-month={monthIndex}
+                        key={monthIndex}
+                      >
+                        <div className="schedule-list-month-header">
+                          <h3>{monthIndex + 1}月</h3>
+                          {scheduleCount > 0 && <span>{scheduleCount}件</span>}
+                        </div>
+                        <div className="schedule-list-calendar" aria-label={`${monthIndex + 1}月のカレンダー`}>
+                          {weekdayShortLabels.map((weekdayLabel) => (
+                            <span className="schedule-list-weekday" key={weekdayLabel}>
+                              {weekdayLabel}
+                            </span>
+                          ))}
+                          {monthCells.map((date, cellIndex) => {
+                            if (!date) {
+                              return (
+                                <span
+                                  aria-hidden="true"
+                                  className="schedule-list-day-empty"
+                                  key={`empty-${monthIndex}-${cellIndex}`}
+                                />
+                              );
+                            }
+
+                            const dateKey = getDateKey(date);
+                            const scheduleItems = loadDailySchedule(date);
+                            const firstSchedule = scheduleItems[0];
+                            const dayKind = getDateDisplayKind(date);
 
                             return (
-                              <article className="schedule-year-day" key={dateKey}>
-                                <button
-                                  className="schedule-year-date-button"
-                                  onClick={() => openScheduleEditor(date)}
-                                  type="button"
-                                >
-                                  {dateTitle}
-                                </button>
-                                <div className="schedule-year-items">
-                                  {items.map((scheduleItem) => (
-                                    <button
-                                      className="schedule-year-item"
-                                      key={scheduleItem.id}
-                                      onClick={() => openScheduleEditor(date)}
-                                      type="button"
-                                    >
-                                      <time>{scheduleItem.time || '--:--'}</time>
-                                      <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </article>
+                              <button
+                                className="schedule-list-day-button"
+                                data-day-kind={dayKind}
+                                data-has-schedule={scheduleItems.length > 0 ? 'true' : 'false'}
+                                data-today={dateKey === todayKey ? 'true' : 'false'}
+                                key={dateKey}
+                                onClick={() => openScheduleEditor(date)}
+                                type="button"
+                              >
+                                <span className="schedule-list-day-number">{date.getDate()}</span>
+                                {scheduleItems.length > 0 && (
+                                  <span className="schedule-list-day-count">{scheduleItems.length}件</span>
+                                )}
+                                {firstSchedule && (
+                                  <span className="schedule-list-day-preview">
+                                    {firstSchedule.time ? `${firstSchedule.time} ` : ''}
+                                    {firstSchedule.text.trim() || '（内容未入力）'}
+                                  </span>
+                                )}
+                              </button>
                             );
                           })}
                         </div>
                       </section>
-                    ))}
-                  </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            {scheduleView === 'year' && (
+              <section className="schedule-year-panel" aria-label={`${scheduleYear}年の年間スケジュール`}>
+                <div className="schedule-year-header">
+                  <button
+                    aria-label="前年の年間スケジュールへ"
+                    onClick={() => moveScheduleYear(-1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <h2>{scheduleYear}年</h2>
+                  <button
+                    aria-label="翌年の年間スケジュールへ"
+                    onClick={() => moveScheduleYear(1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                </div>
+                <div className="schedule-year-month-grid" aria-label="月を選択">
+                  {Array.from({ length: 12 }, (_, monthIndex) => {
+                    const monthGroup = yearlyScheduleGroups.find(
+                      (group) => group.monthIndex === monthIndex,
+                    );
+                    const scheduleCount =
+                      monthGroup?.days.reduce((total, day) => total + day.items.length, 0) ?? 0;
+                    const firstSchedule = monthGroup?.days[0]?.items[0];
+
+                    return (
+                      <button
+                        className="schedule-year-month-button"
+                        data-active={selectedScheduleYearMonth === monthIndex ? 'true' : 'false'}
+                        key={monthIndex}
+                        onClick={() => {
+                          setSelectedScheduleYearMonth(monthIndex);
+                          setScheduleMonth(new Date(scheduleYear, monthIndex, 1));
+                          setSelectedScheduleDate(null);
+                        }}
+                        type="button"
+                      >
+                        <span className="schedule-year-month-name">{monthIndex + 1}月</span>
+                        {scheduleCount > 0 && (
+                          <span className="schedule-year-month-count">{scheduleCount}件</span>
+                        )}
+                        {firstSchedule && (
+                          <span className="schedule-year-month-preview">
+                            {firstSchedule.time ? `${firstSchedule.time} ` : ''}
+                            {firstSchedule.text.trim() || '（内容未入力）'}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedScheduleYearMonth !== null && (
+                  <section
+                    className="schedule-year-month-detail"
+                    aria-label={`${scheduleYear}年${selectedScheduleYearMonth + 1}月の日付一覧`}
+                  >
+                    <h3>{selectedScheduleYearMonth + 1}月</h3>
+                    <div className="records-day-list schedule-day-list">
+                      {scheduleMonthDates.map((scheduleDate) => {
+                        const dateKey = getDateKey(scheduleDate);
+                        const holidayName = getHolidayName(scheduleDate);
+                        const dayKind = getDateDisplayKind(scheduleDate);
+                        const scheduleItems = loadDailySchedule(scheduleDate);
+                        const hasSchedule = scheduleItems.length > 0;
+                        const dateTitle = `${scheduleDate.getMonth() + 1}月${scheduleDate.getDate()}日（${
+                          weekdayShortLabels[scheduleDate.getDay()]
+                        }${holidayName ? `・${holidayName}` : ''}）`;
+
+                        return (
+                          <article
+                            className="record-day-card schedule-day-card"
+                            data-date-key={dateKey}
+                            data-day-kind={dayKind}
+                            data-empty={!hasSchedule ? 'true' : 'false'}
+                            data-today={dateKey === todayKey ? 'true' : 'false'}
+                            key={dateKey}
+                          >
+                            <button
+                              className="record-day-toggle"
+                              onClick={() => openScheduleEditor(scheduleDate)}
+                              type="button"
+                            >
+                              <span className="record-day-date">🗓️ {dateTitle}</span>
+                              {(dateKey === todayKey || hasSchedule) && (
+                                <span className="record-day-meta">
+                                  {dateKey === todayKey && <strong>今日</strong>}
+                                  {hasSchedule && `${scheduleItems.length}件`}
+                                </span>
+                              )}
+                            </button>
+
+                            {hasSchedule && (
+                              <div className="record-day-body schedule-day-body">
+                                <div className="schedule-read-list">
+                                  {scheduleItems.map((scheduleItem) => (
+                                    <p key={scheduleItem.id}>
+                                      <time>{scheduleItem.time || '--:--'}</time>
+                                      <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
                 )}
               </section>
             )}
@@ -12885,17 +13191,16 @@ function App() {
                 weekdayShortLabels[scheduleDate.getDay()]
               }${holidayName ? `・${holidayName}` : ''}）`;
               const scheduleItems = loadDailySchedule(scheduleDate);
-              const scheduleDraftRows = scheduleDrafts[dateKey] ?? [createDailyScheduleDraftItem()];
-              const scheduleDraftIds = new Set(scheduleDraftRows.map((draft) => draft.id));
-              const visibleScheduleItems = scheduleItems.filter(
-                (scheduleItem) => !scheduleDraftIds.has(scheduleItem.id),
-              );
+              const scheduleDetailDraft = getScheduleDetailDraft(dateKey);
 
               return (
                 <div
                   className="record-editor-backdrop"
                   role="presentation"
-                  onClick={() => setSelectedScheduleDate(null)}
+                  onClick={() => {
+                    setSelectedScheduleDate(null);
+                    setActiveScheduleMenuId(null);
+                  }}
                 >
                   <section
                     aria-label={`${dateTitle}のスケジュール編集`}
@@ -12904,12 +13209,15 @@ function App() {
                   >
                     <div className="record-editor-header">
                       <div>
-                        <p>🗓️ 予定を入力する</p>
+                        <p>🗓️ 1日のスケジュール</p>
                         <h2>{dateTitle}</h2>
                       </div>
                       <button
                         aria-label="スケジュール編集を閉じる"
-                        onClick={() => setSelectedScheduleDate(null)}
+                        onClick={() => {
+                          setSelectedScheduleDate(null);
+                          setActiveScheduleMenuId(null);
+                        }}
                         type="button"
                       >
                         閉じる
@@ -12917,148 +13225,180 @@ function App() {
                     </div>
                     <div className="record-field schedule-field">
                       <label>
-                        🗓️ 予定を入力する
+                        スケジュール
                       </label>
-                      <div className="schedule-date-field">
-                        <label htmlFor="schedule-editor-date">日付</label>
-                        <input
-                          id="schedule-editor-date"
-                          onChange={(event) => changeSelectedScheduleDate(event.target.value)}
-                          type="date"
-                          value={dateKey}
-                        />
-                      </div>
-                      <div className="schedule-editor-new-list">
-                        {scheduleDraftRows.map((scheduleDraft, index) => (
-                          <div
-                            className="schedule-editor-row schedule-editor-new-row"
-                            data-new={hasScheduleDraftValue(scheduleDraft) ? 'false' : 'true'}
-                            key={scheduleDraft.id}
-                          >
-                            <input
-                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}の時間`}
-                              onChange={(event) =>
-                                updateScheduleDraft(
-                                  scheduleDate,
-                                  scheduleDraft,
-                                  'time',
-                                  event.target.value,
-                                )
-                              }
-                              onInput={(event) =>
-                                updateScheduleDraft(
-                                  scheduleDate,
-                                  scheduleDraft,
-                                  'time',
-                                  event.currentTarget.value,
-                                )
-                              }
-                              type="time"
-                              value={scheduleDraft.time}
-                            />
-                            <input
-                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}の内容`}
-                              onCompositionEnd={(event) =>
-                                endScheduleDraftComposition(
-                                  scheduleDate,
-                                  scheduleDraft,
-                                  event.currentTarget.value,
-                                )
-                              }
-                              onCompositionStart={() => startScheduleComposition(scheduleDraft.id)}
-                              onChange={(event) =>
-                                updateScheduleDraft(
-                                  scheduleDate,
-                                  scheduleDraft,
-                                  'text',
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="スケジュールを追加"
-                              type="text"
-                              value={scheduleDraft.text}
-                            />
-                            <button
-                              aria-label={`${dateTitle}の新しいスケジュール ${index + 1}を追加`}
-                              className="schedule-new-mark"
-                              disabled={!hasScheduleDraftValue(scheduleDraft)}
-                              onClick={() => addScheduleDraftRow(scheduleDate)}
-                              type="button"
-                            >
-                              追加
-                            </button>
-                            {hasScheduleDraftValue(scheduleDraft) && (
-                              <button
-                                aria-label={`${dateTitle}の新しいスケジュール ${index + 1}を削除`}
-                                className="schedule-delete-button"
-                                onClick={() => removeScheduleDraft(scheduleDate, scheduleDraft.id)}
-                                type="button"
+                      {scheduleItems.length > 0 ? (
+                        <div className="schedule-editor-list">
+                          {scheduleItems.map((scheduleItem, index) => (
+                            <div className="schedule-editor-row" key={scheduleItem.id}>
+                              <input
+                                aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
+                                onChange={(event) =>
+                                  updateScheduleItem(
+                                    scheduleDate,
+                                    scheduleItem,
+                                    'time',
+                                    event.target.value,
+                                  )
+                                }
+                                onInput={(event) =>
+                                  updateScheduleItem(
+                                    scheduleDate,
+                                    scheduleItem,
+                                    'time',
+                                    event.currentTarget.value,
+                                  )
+                                }
+                                type="time"
+                                value={scheduleItem.time}
+                              />
+                              <input
+                                aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
+                                id={`schedule-item-text-${scheduleItem.id}`}
+                                onCompositionEnd={(event) =>
+                                  endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
+                                }
+                                onCompositionStart={() => startScheduleComposition(scheduleItem.id)}
+                                onChange={(event) =>
+                                  updateScheduleItem(
+                                    scheduleDate,
+                                    scheduleItem,
+                                    'text',
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="スケジュール内容"
+                                type="text"
+                                value={scheduleItem.text}
+                              />
+                              <div
+                                className="todo-actions-menu schedule-actions-menu"
+                                data-open={activeScheduleMenuId === scheduleItem.id ? 'true' : 'false'}
                               >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      {visibleScheduleItems.length > 0 && (
-                        <details className="schedule-existing-details">
-                          <summary>
-                            <span>今日の予定（{visibleScheduleItems.length}件）</span>
-                          </summary>
-                          <div className="schedule-editor-list">
-                            {visibleScheduleItems.map((scheduleItem, index) => (
-                              <div className="schedule-editor-row" key={scheduleItem.id}>
-                                <input
-                                  aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
-                                  onChange={(event) =>
-                                    updateScheduleItem(
-                                      scheduleDate,
-                                      scheduleItem,
-                                      'time',
-                                      event.target.value,
-                                    )
-                                  }
-                                  onInput={(event) =>
-                                    updateScheduleItem(
-                                      scheduleDate,
-                                      scheduleItem,
-                                      'time',
-                                      event.currentTarget.value,
-                                    )
-                                  }
-                                  type="time"
-                                  value={scheduleItem.time}
-                                />
-                                <input
-                                  aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
-                                  onCompositionEnd={(event) =>
-                                    endScheduleComposition(scheduleDate, scheduleItem, event.currentTarget.value)
-                                  }
-                                  onCompositionStart={() => startScheduleComposition(scheduleItem.id)}
-                                  onChange={(event) =>
-                                    updateScheduleItem(
-                                      scheduleDate,
-                                      scheduleItem,
-                                      'text',
-                                      event.target.value,
-                                    )
-                                  }
-                                  placeholder="スケジュール内容"
-                                  type="text"
-                                  value={scheduleItem.text}
-                                />
                                 <button
-                                  aria-label={`${dateTitle}のスケジュール ${index + 1}を削除`}
-                                  className="schedule-delete-button"
-                                  onClick={() => removeScheduleItem(scheduleDate, scheduleItem.id)}
+                                  aria-expanded={activeScheduleMenuId === scheduleItem.id}
+                                  aria-label={`${dateTitle}のスケジュール ${index + 1}の操作`}
+                                  onClick={() =>
+                                    setActiveScheduleMenuId((currentId) =>
+                                      currentId === scheduleItem.id ? null : scheduleItem.id,
+                                    )
+                                  }
                                   type="button"
                                 >
-                                  ×
+                                  …
                                 </button>
+                                {activeScheduleMenuId === scheduleItem.id && (
+                                  <div className="todo-actions-panel">
+                                    <button
+                                      onClick={() => {
+                                        document
+                                          .getElementById(`schedule-item-text-${scheduleItem.id}`)
+                                          ?.focus();
+                                        setActiveScheduleMenuId(null);
+                                      }}
+                                      type="button"
+                                    >
+                                      編集
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        removeScheduleItem(scheduleDate, scheduleItem.id);
+                                        setActiveScheduleMenuId(null);
+                                      }}
+                                      type="button"
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        </details>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="record-editor-empty">この日の予定はまだありません。</p>
+                      )}
+                    </div>
+                    <div className="record-field schedule-field">
+                      <label>
+                        予定を追加
+                      </label>
+                      <div className="schedule-detail-add-row">
+                        <div className="schedule-detail-time-fields">
+                          <label>
+                            <input
+                              aria-label={`${dateTitle}へ追加する予定の時`}
+                              inputMode="numeric"
+                              maxLength={2}
+                              onChange={(event) =>
+                                updateScheduleDetailDraft(scheduleDate, {
+                                  hour: event.target.value.replace(/\D/g, '').slice(0, 2),
+                                })
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  document
+                                    .querySelector<HTMLInputElement>(`[data-schedule-detail-minute="${dateKey}"]`)
+                                    ?.focus();
+                                }
+                              }}
+                              placeholder="時"
+                              value={scheduleDetailDraft.hour}
+                            />
+                            <span>時</span>
+                          </label>
+                          <label>
+                            <input
+                              aria-label={`${dateTitle}へ追加する予定の分`}
+                              data-schedule-detail-minute={dateKey}
+                              inputMode="numeric"
+                              maxLength={2}
+                              onChange={(event) =>
+                                updateScheduleDetailDraft(scheduleDate, {
+                                  minute: event.target.value.replace(/\D/g, '').slice(0, 2),
+                                })
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  document
+                                    .querySelector<HTMLInputElement>(`[data-schedule-detail-text="${dateKey}"]`)
+                                    ?.focus();
+                                }
+                              }}
+                              placeholder="分"
+                              value={scheduleDetailDraft.minute}
+                            />
+                            <span>分</span>
+                          </label>
+                        </div>
+                        <input
+                          aria-label={`${dateTitle}へ追加する予定名`}
+                          data-schedule-detail-text={dateKey}
+                          enterKeyHint="done"
+                          onBlur={() => commitScheduleDetailDraft(scheduleDate)}
+                          onChange={(event) =>
+                            updateScheduleDetailDraft(scheduleDate, { text: event.target.value })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                              event.preventDefault();
+                              commitScheduleDetailDraft(scheduleDate);
+                            }
+                          }}
+                          placeholder="予定を入力する"
+                          type="text"
+                          value={scheduleDetailDraft.text}
+                        />
+                      </div>
+                      {(scheduleDetailDraft.error || scheduleDetailDraft.message) && (
+                        <p
+                          className="schedule-detail-status"
+                          data-error={scheduleDetailDraft.error ? 'true' : 'false'}
+                        >
+                          {scheduleDetailDraft.error || scheduleDetailDraft.message}
+                        </p>
                       )}
                     </div>
                   </section>
@@ -13073,15 +13413,14 @@ function App() {
             .filter((todo) =>
               hasManagedTodoText(todo) &&
               !todo.pendingReview &&
-              (todo.status === 'completed' || todo.completed),
+              shouldShowManagedTodoInCompletedHistory(todo),
             )
             .sort((first, second) => (second.completedAt ?? '').localeCompare(first.completedAt ?? ''));
           const activeTodos = managedTodos
             .filter((todo) =>
               hasManagedTodoText(todo) &&
               !todo.pendingReview &&
-              todo.status !== 'completed' &&
-              !todo.completed,
+              shouldShowManagedTodoInWorkingList(todo),
             )
             .sort((first, second) => (second.createdAt ?? '').localeCompare(first.createdAt ?? ''));
           const formatTodoDueDate = (dateKey: string) => {
@@ -13089,6 +13428,10 @@ function App() {
 
             return `${date.getMonth() + 1}/${date.getDate()}`;
           };
+          const formatTodoCompletedAt = (completedAt?: string) =>
+            completedAt && !Number.isNaN(Date.parse(completedAt))
+              ? backupDateTimeFormatter.format(new Date(completedAt))
+              : '';
           const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => (
             <div className="todo-actions-menu" data-open={activeTodoMenuId === todo.id ? 'true' : 'false'}>
               <button
@@ -13153,27 +13496,19 @@ function App() {
                     </>
                   )}
                   {options.completed && (
-                    <select
-                      aria-label={`${todo.text}を未完了へ戻す`}
-                      onChange={(event) => {
-                        const nextStatus = event.target.value as ActiveTodoStatus;
+                    <button
+                      onClick={() => {
+                        const nextStatus = todo.originalStatus && isActiveTodoStatus(todo.originalStatus)
+                          ? todo.originalStatus
+                          : getTodoStatusForDueDate(todo.dueDate);
 
-                        if (nextStatus) {
-                          restoreManagedTodo(todo.id, nextStatus);
-                          setActiveTodoMenuId(null);
-                        }
+                        restoreManagedTodo(todo.id, nextStatus);
+                        setActiveTodoMenuId(null);
                       }}
-                      value=""
+                      type="button"
                     >
-                      <option value="" disabled>
-                        未完了へ戻す
-                      </option>
-                      {activeTodoStatusOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      未完了に戻す
+                    </button>
                   )}
                   <button onClick={() => confirmDeleteManagedTodo(todo)} type="button">
                     削除
@@ -13183,7 +13518,11 @@ function App() {
             </div>
           );
           const renderTodoRow = (todo: ManagedTodoItem, index: number) => (
-            <article className="todo-capture-row" key={todo.id}>
+            <article
+              className="todo-capture-row"
+              data-completed={todo.completed ? 'true' : 'false'}
+              key={todo.id}
+            >
               <input
                 aria-label={`やること ${index + 1}を完了`}
                 checked={todo.completed}
@@ -13209,7 +13548,19 @@ function App() {
                   value={todo.text}
                 />
                 {todo.dueDate && <time>{formatTodoDueDate(todo.dueDate)}</time>}
+                {todo.completed && formatTodoCompletedAt(todo.completedAt) && (
+                  <time>完了：{formatTodoCompletedAt(todo.completedAt)}</time>
+                )}
               </div>
+              {todo.completed && todo.status !== 'completed' && (
+                <button
+                  className="todo-finalize-button"
+                  onClick={() => finalizeManagedTodo(todo.id)}
+                  type="button"
+                >
+                  完了
+                </button>
+              )}
               {renderTodoActions(todo)}
             </article>
           );
@@ -13361,9 +13712,10 @@ function App() {
             <section className="todo-manager-page record-view-content" aria-label="やること">
               <div className="todo-status-tabs todo-primary-tabs" aria-label="やること表示切り替え">
                 {([
-                  ['todo', 'やること'],
+                  ['todo', '一覧'],
                   ['date', '日付'],
                   ['folders', 'フォルダ'],
+                  ['completed', '完了済み'],
                 ] as const).map(([view, label]) => (
                   <button
                     aria-current={todoView === view ? 'page' : undefined}
@@ -13380,33 +13732,29 @@ function App() {
               {todoView === 'completed' && (
                 <section className="daily-todo-card todo-manager-card" aria-label="やり終えたこと">
                   <div className="daily-todo-header">
-                    <h2>✅ やり終えたこと</h2>
-                    <button
-                      className="todo-subtle-link"
-                      onClick={() => setTodoView('todo')}
-                      type="button"
-                    >
-                      戻る
-                    </button>
+                    <h2>✅ 完了済み</h2>
                   </div>
                   <div className="todo-completed-list">
                     {completedTodos.length > 0 ? (
-                      completedTodos.map((todo) => (
-                        <article className="todo-completed-item" key={todo.id}>
-                          <div>
-                            <p>{todo.text}</p>
-                            <span>
-                              {todo.completedAt
-                                ? `${backupDateTimeFormatter.format(new Date(todo.completedAt))} 完了`
-                                : '完了日時不明'}
-                              {todo.dueDate ? ` / 日付: ${formatTodoDueDate(todo.dueDate)}` : ''}
-                            </span>
-                          </div>
-                          {renderTodoActions(todo, { completed: true })}
-                        </article>
-                      ))
+                      completedTodos.map((todo) => {
+                        const folderName = todo.folderId
+                          ? todoFolders.find((folder) => folder.id === todo.folderId)?.name
+                          : undefined;
+
+                        return (
+                          <article className="todo-completed-item" key={todo.id}>
+                            <div>
+                              <p>✓ {todo.text}</p>
+                              <span>{formatTodoCompletedAt(todo.completedAt) ? `完了：${formatTodoCompletedAt(todo.completedAt)}` : '完了日時不明'}</span>
+                              {todo.dueDate && <span>日付：{formatTodoDueDate(todo.dueDate)}</span>}
+                              {folderName && <span>フォルダ：{folderName}</span>}
+                            </div>
+                            {renderTodoActions(todo, { completed: true })}
+                          </article>
+                        );
+                      })
                     ) : (
-                      <p className="todo-completed-empty">やり終えたことはまだありません。</p>
+                      <p className="todo-completed-empty">完了済みのやることはまだありません。</p>
                     )}
                   </div>
                 </section>
@@ -13421,11 +13769,8 @@ function App() {
                         adjustTextareaHeight(event.currentTarget);
                         setNewTodoText(event.target.value);
                       }}
-                      onKeyDown={(event) => {
-                        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                          submitNewTodo();
-                        }
-                      }}
+                      onKeyDown={(event) => handleTodoCaptureKeyDown(event, submitNewTodo)}
+                      enterKeyHint="done"
                       placeholder="やることを入力する"
                       ref={(element) => {
                         newTodoInputRef.current = element;
@@ -13433,29 +13778,13 @@ function App() {
                           adjustTextareaHeight(element);
                         }
                       }}
-                      rows={2}
+                      rows={1}
                       value={newTodoText}
                     />
-                    <div className="todo-capture-actions">
-                      <button
-                        disabled={!newTodoText.trim()}
-                        onClick={submitNewTodo}
-                        type="button"
-                      >
-                        追加
-                      </button>
-                    </div>
                   </section>
                   <section className="todo-capture-list" aria-label="未完了のやること">
                     <div className="todo-capture-list-header">
                       <h2>未完了</h2>
-                      <button
-                        className="todo-subtle-link"
-                        onClick={() => setTodoView('completed')}
-                        type="button"
-                      >
-                        完了
-                      </button>
                     </div>
                     {activeTodos.length > 0 ? (
                       activeTodos.map(renderTodoRow)
@@ -13569,6 +13898,10 @@ function App() {
                             adjustTextareaHeight(event.currentTarget);
                             setNewTodoFolderText(event.target.value);
                           }}
+                          onKeyDown={(event) =>
+                            handleTodoCaptureKeyDown(event, () => submitNewTodoForFolder(selectedFolder.id))
+                          }
+                          enterKeyHint="done"
                           placeholder="このフォルダにやることを入力する"
                           ref={(element) => {
                             newTodoFolderInputRef.current = element;
@@ -13576,29 +13909,13 @@ function App() {
                               adjustTextareaHeight(element);
                             }
                           }}
-                          rows={2}
+                          rows={1}
                           value={newTodoFolderText}
                         />
-                        <div className="todo-capture-actions">
-                          <button
-                            disabled={!newTodoFolderText.trim()}
-                            onClick={() => submitNewTodoForFolder(selectedFolder.id)}
-                            type="button"
-                          >
-                            追加
-                          </button>
-                        </div>
                       </section>
                       <section className="todo-capture-list" aria-label={`${selectedFolder.name}の未完了`}>
                         <div className="todo-capture-list-header">
                           <h2>未完了</h2>
-                          <button
-                            className="todo-subtle-link"
-                            onClick={() => setTodoView('completed')}
-                            type="button"
-                          >
-                            完了
-                          </button>
                         </div>
                         {folderTodos.length > 0 ? (
                           folderTodos.map(renderTodoRow)
@@ -13717,6 +14034,10 @@ function App() {
                             adjustTextareaHeight(event.currentTarget);
                             setNewTodoDateText(event.target.value);
                           }}
+                          onKeyDown={(event) =>
+                            handleTodoCaptureKeyDown(event, () => submitNewTodoForDate(selectedTodoDate))
+                          }
+                          enterKeyHint="done"
                           placeholder="この日にやることを入力する"
                           ref={(element) => {
                             newTodoDateInputRef.current = element;
@@ -13724,18 +14045,9 @@ function App() {
                               adjustTextareaHeight(element);
                             }
                           }}
-                          rows={2}
+                          rows={1}
                           value={newTodoDateText}
                         />
-                        <div className="todo-capture-actions">
-                          <button
-                            disabled={!newTodoDateText.trim()}
-                            onClick={() => submitNewTodoForDate(selectedTodoDate)}
-                            type="button"
-                          >
-                            追加
-                          </button>
-                        </div>
                       </section>
                       <div className="todo-capture-list">
                         {selectedDateTodos.length > 0 ? (
@@ -15316,14 +15628,14 @@ function App() {
               onClick={() => saveDisplayedRoutineAsTemplate('normal')}
               type="button"
             >
-              編集内容をノーマルクエストにコピー
+              編集内容を通常ルーティンに反映
             </button>
             <button
               className="default-template-button"
               onClick={() => saveDisplayedRoutineAsTemplate('holiday')}
               type="button"
             >
-              編集内容を休日クエストにコピー
+              編集内容を休日ルーティンに反映
             </button>
             {page === 'today' && (
               <button

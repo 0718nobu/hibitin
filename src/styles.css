@@ -4620,8 +4620,8 @@ h1 {
 
 .today-schedule-summary-header h2 {
   margin: 0;
-  color: #164e34;
-  font-size: 1.02rem;
+  color: #123f2d;
+  font-size: 1.04rem;
   font-weight: 1000;
   line-height: 1.35;
 }
@@ -4668,7 +4668,25 @@ h1 {
 
 .today-schedule-summary-list span {
   min-width: 0;
+  font-weight: 1000;
   white-space: pre-wrap;
+}
+
+.today-schedule-summary-list p[data-next='true'] time,
+.today-schedule-summary-list p[data-next='true'] span {
+  color: #d83a2f;
+  font-weight: 1000;
+  text-shadow: 0 0 0 #d83a2f;
+}
+
+.today-schedule-summary-list p[data-past='true']:not([data-next='true']) {
+  opacity: 0.48;
+}
+
+.today-schedule-summary-list p[data-past='true']:not([data-next='true']) time,
+.today-schedule-summary-list p[data-past='true']:not([data-next='true']) span {
+  color: #8b948c;
+  font-weight: 760;
 }
 
 .today-schedule-summary-more {
@@ -4762,6 +4780,15 @@ h1 {
 .today-todo-summary-list span {
   min-width: 0;
   white-space: pre-wrap;
+}
+
+.today-todo-summary-list label[data-completed='true'] {
+  opacity: 0.58;
+}
+
+.today-todo-summary-list label[data-completed='true'] span {
+  color: #6f7b70;
+  text-decoration: line-through;
 }
 
 .today-todo-summary-more {
@@ -5482,12 +5509,12 @@ h1 {
 }
 
 .todo-primary-tabs {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .todo-primary-tabs button {
   min-height: 44px;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 .todo-status-tabs button {
@@ -6839,27 +6866,6 @@ h1 {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 68%);
 }
 
-.schedule-common-action {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.schedule-common-action button {
-  min-height: 40px;
-  border: 1px solid rgb(22 151 92 / 42%);
-  border-radius: 999px;
-  padding: 0 16px;
-  background: linear-gradient(180deg, #35c987 0%, #0d9d63 100%);
-  color: #ffffff;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 950;
-  box-shadow:
-    0 8px 16px rgb(24 132 83 / 16%),
-    inset 0 1px 0 rgb(255 255 255 / 42%);
-}
-
 .schedule-today-panel {
   position: relative;
   display: grid;
@@ -7018,13 +7024,13 @@ h1 {
 }
 
 .todo-capture-card textarea {
-  min-height: 64px;
+  min-height: 44px;
   border: 1px solid rgb(184 218 181 / 78%);
   border-radius: 12px;
-  padding: 11px 12px;
+  padding: 10px 12px;
   background: rgb(255 255 255 / 82%);
   font-size: 0.94rem;
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
 .todo-capture-card textarea:focus {
@@ -7084,7 +7090,7 @@ h1 {
 .todo-capture-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: start;
   gap: 8px;
   border: 1px solid rgb(204 222 193 / 70%);
@@ -7098,6 +7104,20 @@ h1 {
   height: 20px;
   margin-top: 5px;
   accent-color: #24945f;
+}
+
+.todo-capture-row[data-completed='true'] {
+  border-color: rgb(188 211 180 / 72%);
+  background: rgb(247 252 245 / 82%);
+}
+
+.todo-capture-row[data-completed='true'] .todo-capture-main {
+  opacity: 0.64;
+}
+
+.todo-capture-row[data-completed='true'] textarea {
+  color: #6f7b70;
+  text-decoration: line-through;
 }
 
 .todo-capture-main {
@@ -7121,6 +7141,26 @@ h1 {
   color: #4c7556;
   font-size: 0.72rem;
   font-weight: 900;
+}
+
+.todo-finalize-button {
+  align-self: center;
+  min-height: 34px;
+  border: 1px solid rgb(38 151 89 / 34%);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgb(238 250 235 / 92%);
+  color: #2d7048;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 950;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgb(39 91 50 / 8%);
+}
+
+.todo-finalize-button:active {
+  transform: scale(0.97);
 }
 
 .todo-actions-menu {
@@ -7443,9 +7483,96 @@ h1 {
   gap: 14px;
 }
 
+.schedule-year-month-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.schedule-year-month-button {
+  display: grid;
+  min-height: 74px;
+  gap: 4px;
+  align-content: center;
+  border: 1px solid rgb(204 224 198 / 82%);
+  border-radius: 12px;
+  padding: 10px 11px;
+  background: rgb(255 255 250 / 86%);
+  color: #274938;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 5px 14px rgb(64 83 54 / 5%);
+}
+
+.schedule-year-month-button[data-active='true'] {
+  border-color: rgb(50 169 108 / 72%);
+  background: linear-gradient(180deg, rgb(237 252 240 / 95%), rgb(255 255 250 / 92%));
+  box-shadow: 0 9px 18px rgb(49 128 75 / 13%);
+}
+
+.schedule-year-month-name {
+  font-size: 0.98rem;
+  font-weight: 950;
+}
+
+.schedule-year-month-count {
+  justify-self: start;
+  border: 1px solid rgb(46 166 102 / 30%);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgb(236 250 235 / 88%);
+  color: #267144;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.schedule-year-month-preview {
+  min-width: 0;
+  color: #647466;
+  font-size: 0.76rem;
+  font-weight: 760;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-year-month-detail {
+  display: grid;
+  gap: 9px;
+  border-top: 1px dashed rgb(186 215 188 / 82%);
+  margin-top: 2px;
+  padding-top: 12px;
+}
+
+.schedule-year-month-detail h3 {
+  margin: 0;
+  border-left: 3px solid #37a96c;
+  padding: 3px 0 3px 9px;
+  color: #235f40;
+  font-size: 0.96rem;
+  font-weight: 950;
+}
+
 .schedule-year-month {
   display: grid;
   gap: 8px;
+}
+
+.schedule-list-month {
+  scroll-margin-block: 84px 140px;
+  border: 1px solid rgb(207 226 201 / 78%);
+  border-radius: 13px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgb(255 255 250 / 86%), rgb(249 255 246 / 82%));
+  box-shadow: 0 6px 16px rgb(64 83 54 / 5%);
+}
+
+.schedule-list-month-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .schedule-year-month h3 {
@@ -7455,6 +7582,200 @@ h1 {
   color: #235f40;
   font-size: 0.96rem;
   font-weight: 950;
+}
+
+.schedule-list-month-header > span {
+  border: 1px solid rgb(46 166 102 / 28%);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgb(236 250 235 / 84%);
+  color: #267144;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.schedule-list-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.schedule-list-weekday {
+  color: #78917a;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.schedule-list-day-empty {
+  min-height: 54px;
+}
+
+.schedule-list-day-button {
+  display: grid;
+  min-height: 54px;
+  align-content: start;
+  gap: 2px;
+  border: 1px solid rgb(208 226 202 / 76%);
+  border-radius: 10px;
+  padding: 5px;
+  background: rgb(255 255 255 / 74%);
+  color: #304238;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.schedule-list-day-button[data-day-kind='saturday'] {
+  border-color: rgb(177 213 235 / 82%);
+  background: rgb(246 252 255 / 86%);
+}
+
+.schedule-list-day-button[data-day-kind='sunday'],
+.schedule-list-day-button[data-day-kind='holiday'] {
+  border-color: rgb(236 190 200 / 82%);
+  background: rgb(255 248 250 / 86%);
+}
+
+.schedule-list-day-button[data-today='true'] {
+  border-color: rgb(41 165 99 / 70%);
+  background: linear-gradient(180deg, rgb(235 252 240 / 96%), rgb(255 255 250 / 92%));
+  box-shadow: 0 0 0 2px rgb(51 169 106 / 10%);
+}
+
+.schedule-list-day-button[data-has-schedule='true'] {
+  border-color: rgb(62 166 103 / 38%);
+  background: rgb(249 255 246 / 95%);
+}
+
+.schedule-list-day-number {
+  color: #244634;
+  font-size: 0.82rem;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.schedule-list-day-count {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 1px 5px;
+  background: #20975f;
+  color: #ffffff;
+  font-size: 0.56rem;
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.schedule-list-day-preview {
+  min-width: 0;
+  color: #40564a;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-list-input-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(198 224 197 / 70%);
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: rgb(255 255 255 / 62%);
+}
+
+.schedule-list-date-fields {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+.schedule-list-date-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #536a55;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.schedule-list-date-fields input {
+  width: 36px;
+  min-height: 32px;
+  border: 1px solid rgb(193 218 190 / 82%);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #233a2c;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 750;
+  outline: none;
+  padding: 5px 4px;
+  text-align: center;
+}
+
+.schedule-list-text-input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid rgb(193 218 190 / 82%);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #233a2c;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+  outline: none;
+  padding: 5px 9px;
+}
+
+.schedule-list-date-fields input:focus,
+.schedule-list-text-input:focus {
+  border-color: rgb(55 169 108 / 62%);
+  box-shadow: 0 0 0 3px rgb(55 169 108 / 14%);
+}
+
+.schedule-list-input-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #2f8052;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.schedule-list-input-status[data-error='true'] {
+  color: #c84838;
+}
+
+@media (max-width: 420px) {
+  .schedule-list-input-row {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .schedule-list-date-fields {
+    gap: 4px;
+  }
+
+  .schedule-list-date-fields input {
+    width: 32px;
+    min-height: 30px;
+    font-size: 0.78rem;
+  }
+
+  .schedule-list-date-fields label {
+    font-size: 0.68rem;
+  }
+
+  .schedule-list-text-input {
+    min-height: 30px;
+    padding-inline: 7px;
+    font-size: 0.82rem;
+  }
 }
 
 .schedule-year-days {
@@ -7548,6 +7869,10 @@ h1 {
   background: rgb(255 255 255 / 58%);
 }
 
+.schedule-editor-panel {
+  max-height: min(90vh, 780px);
+}
+
 .schedule-date-field {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
@@ -7629,6 +7954,71 @@ h1 {
 .schedule-editor-row input:focus {
   border-color: rgb(47 155 91 / 46%);
   box-shadow: 0 0 0 3px rgb(67 184 112 / 12%);
+}
+
+.schedule-detail-add-row {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-detail-time-fields {
+  display: flex;
+  gap: 8px;
+}
+
+.schedule-detail-time-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #536a55;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.schedule-detail-time-fields input {
+  width: 54px;
+  min-height: 38px;
+  border: 1px solid rgb(198 218 190 / 86%);
+  border-radius: 9px;
+  background: #ffffff;
+  color: #25322b;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 850;
+  outline: none;
+  padding: 7px 8px;
+  text-align: center;
+}
+
+.schedule-detail-add-row > input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgb(198 218 190 / 86%);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #25322b;
+  font: inherit;
+  font-size: 0.94rem;
+  font-weight: 700;
+  outline: none;
+  padding: 8px 10px;
+}
+
+.schedule-detail-time-fields input:focus,
+.schedule-detail-add-row > input:focus {
+  border-color: rgb(47 155 91 / 46%);
+  box-shadow: 0 0 0 3px rgb(67 184 112 / 12%);
+}
+
+.schedule-detail-status {
+  margin: 2px 0 0;
+  color: #2f8052;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.schedule-detail-status[data-error='true'] {
+  color: #c84838;
 }
 
 .schedule-delete-button,
@@ -9049,24 +9439,57 @@ h1 {
   padding: 0 1px 8px;
 }
 
+.today-record-saved-item[data-editing='true'] {
+  gap: 8px;
+  border-bottom-color: rgb(137 205 168 / 46%);
+}
+
 .today-record-saved-item:last-child {
   border-bottom: 0;
   padding-bottom: 2px;
 }
 
-.today-record-saved-item p {
+.today-record-saved-text-button {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 8px;
+  background: transparent;
   margin: 0;
   color: #26372d;
+  cursor: pointer;
+  font: inherit;
   font-size: 0.9rem;
   font-weight: 400;
   line-height: 1.58;
+  text-align: left;
   white-space: pre-wrap;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 120ms ease;
+}
+
+.today-record-saved-text-button:hover,
+.today-record-saved-text-button:focus-visible {
+  border-color: rgb(137 205 168 / 42%);
+  background: rgb(245 255 244 / 78%);
+}
+
+.today-record-saved-text-button:active {
+  transform: scale(0.995);
+  background: rgb(233 249 234 / 86%);
 }
 
 .today-record-saved-item time {
   color: #82927f;
   font-size: 0.72rem;
   font-weight: 750;
+}
+
+.today-record-edit-row {
+  display: grid;
+  gap: 8px;
 }
 
 .today-record-write-fields {
@@ -9079,9 +9502,9 @@ h1 {
   gap: 7px;
 }
 
-.today-record-write-row textarea {
+.today-record-write-row textarea,
+.today-record-edit-row textarea {
   width: 100%;
-  min-height: 76px;
   max-height: 220px;
   resize: none;
   border: 1px solid #c8decf;
@@ -9097,16 +9520,56 @@ h1 {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%);
 }
 
-.today-record-write-card[data-record-kind='events'] textarea {
+.today-record-write-row textarea {
+  min-height: 44px;
+}
+
+.today-record-edit-row textarea {
+  min-height: 76px;
+}
+
+.today-record-write-card[data-record-kind='events'] .today-record-edit-row textarea {
   min-height: 118px;
 }
 
-.today-record-write-row textarea:focus {
+.today-record-write-row textarea:focus,
+.today-record-edit-row textarea:focus {
   border-color: #89cda8;
   outline: none;
   box-shadow:
     0 0 0 3px rgb(137 205 168 / 18%),
     inset 0 1px 0 rgb(255 255 255 / 72%);
+}
+
+.today-record-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.today-record-edit-actions button {
+  min-height: 38px;
+  border: 1px solid rgb(76 145 91 / 22%);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #ffffff, #eef8e9);
+  color: #2f7446;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.today-record-edit-actions button:last-child:not(:disabled) {
+  background: linear-gradient(180deg, #39bd7d 0%, #14915d 100%);
+  color: #ffffff;
+  box-shadow: 0 7px 14px rgb(30 138 88 / 14%);
+}
+
+.today-record-edit-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  box-shadow: none;
 }
 
 .today-record-write-save-button {
@@ -9592,11 +10055,6 @@ h1 {
   .schedule-view-tabs button {
     min-height: 36px;
     font-size: 0.78rem;
-  }
-
-  .schedule-common-action button {
-    width: 100%;
-    min-height: 42px;
   }
 
   .schedule-year-day {
