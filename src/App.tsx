@@ -44,7 +44,7 @@ type MenuViewName =
   | 'status'
   | 'shop'
   | 'settings';
-type ScheduleViewName = 'list' | 'today' | 'year';
+type ScheduleViewName = 'list' | 'agenda' | 'today' | 'year';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
@@ -2896,21 +2896,14 @@ const createTodoFolderId = () =>
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const getRoundedNextHalfHourTime = (date = new Date()) => {
-  const roundedDate = new Date(date);
-  roundedDate.setSeconds(0, 0);
-  const minutes = roundedDate.getMinutes();
+const scheduleTimeOptions = Array.from({ length: 48 }, (_, index) => {
+  const hours = Math.floor(index / 2);
+  const minutes = index % 2 === 0 ? 0 : 30;
 
-  if (minutes === 0) {
-    roundedDate.setMinutes(0);
-  } else if (minutes <= 30) {
-    roundedDate.setMinutes(30);
-  } else {
-    roundedDate.setHours(roundedDate.getHours() + 1, 0, 0, 0);
-  }
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+});
 
-  return `${String(roundedDate.getHours()).padStart(2, '0')}:${String(roundedDate.getMinutes()).padStart(2, '0')}`;
-};
+const formatScheduleTimeLabel = (time: string) => (time.trim() ? time : '未定');
 
 const createDailyTodoItem = (
   text = '',
@@ -4775,6 +4768,7 @@ function App() {
   const composingScheduleIdsRef = useRef<Set<string>>(new Set());
   const scheduleDetailSavingKeysRef = useRef<Set<string>>(new Set());
   const scheduleListScrollYearRef = useRef<string | null>(null);
+  const scheduleAgendaScrollYearRef = useRef<string | null>(null);
   const getInitialTimerState = () => {
     if (!initialTimerStateRef.current) {
       initialTimerStateRef.current = loadStoredTimerState();
@@ -5480,7 +5474,7 @@ function App() {
       return;
     }
 
-    const scrollKey = `schedule-list:${scheduleYear}:${today.getMonth()}`;
+    const scrollKey = `schedule-list:${scheduleYear}:${todayKey}`;
 
     if (scheduleListScrollYearRef.current === scrollKey) {
       return;
@@ -5489,10 +5483,42 @@ function App() {
     scheduleListScrollYearRef.current = scrollKey;
     window.requestAnimationFrame(() => {
       document
-        .querySelector<HTMLElement>(`[data-schedule-list-month="${today.getMonth()}"]`)
-        ?.scrollIntoView({ block: 'start', behavior: 'auto' });
+        .querySelector<HTMLElement>(`.schedule-list-day-button[data-today="true"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
   }, [isTodayScheduleView, scheduleView, scheduleYear, today, todayKey]);
+
+  useEffect(() => {
+    if (
+      !isTodayScheduleView ||
+      scheduleView !== 'agenda' ||
+      scheduleYear !== today.getFullYear() ||
+      yearlyScheduleGroups.length === 0
+    ) {
+      return;
+    }
+
+    const agendaDays = yearlyScheduleGroups.flatMap((group) => group.days);
+    const firstUpcomingDay = agendaDays.find((day) => day.dateKey >= todayKey);
+    const targetDay = firstUpcomingDay ?? agendaDays[agendaDays.length - 1];
+
+    if (!targetDay) {
+      return;
+    }
+
+    const scrollKey = `schedule-agenda:${scheduleYear}:${todayKey}:${targetDay.dateKey}`;
+
+    if (scheduleAgendaScrollYearRef.current === scrollKey) {
+      return;
+    }
+
+    scheduleAgendaScrollYearRef.current = scrollKey;
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-schedule-agenda-date="${targetDay.dateKey}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    });
+  }, [isTodayScheduleView, scheduleView, scheduleYear, today, todayKey, yearlyScheduleGroups]);
   useEffect(() => {
     if (!isLibraryRecordView || getDateKey(recordMonth) !== getDateKey(getMonthStart(today))) {
       return;
@@ -10059,6 +10085,35 @@ function App() {
   const getScheduleDetailDraft = (dateKey: string) =>
     scheduleDetailDrafts[dateKey] ?? getEmptyScheduleDetailDraft();
 
+  const getScheduleDetailDraftTime = (draft: ScheduleDetailDraft) => {
+    const hasHour = draft.hour.trim().length > 0;
+    const hasMinute = draft.minute.trim().length > 0;
+
+    if (!hasHour && !hasMinute) {
+      return '';
+    }
+
+    if (!hasHour) {
+      return '';
+    }
+
+    const hourNumber = Number(draft.hour);
+    const minuteNumber = hasMinute ? Number(draft.minute) : 0;
+
+    if (
+      !Number.isInteger(hourNumber) ||
+      hourNumber < 0 ||
+      hourNumber > 23 ||
+      !Number.isInteger(minuteNumber) ||
+      minuteNumber < 0 ||
+      minuteNumber > 59
+    ) {
+      return '';
+    }
+
+    return `${String(hourNumber).padStart(2, '0')}:${String(minuteNumber).padStart(2, '0')}`;
+  };
+
   const updateScheduleDetailDraft = (
     date: Date,
     patch: Partial<ScheduleDetailDraft>,
@@ -10097,7 +10152,7 @@ function App() {
     }
 
     if (!hasHour && !hasMinute) {
-      scheduleTime = getRoundedNextHalfHourTime(today);
+      scheduleTime = '';
     } else {
       const hourNumber = Number(draft.hour);
       const minuteNumber = hasMinute ? Number(draft.minute) : 0;
@@ -10208,6 +10263,7 @@ function App() {
       if (nextPage === 'schedule') {
         scheduleTodayScrollMonthRef.current = null;
         scheduleListScrollYearRef.current = null;
+        scheduleAgendaScrollYearRef.current = null;
         setScheduleMonth(getMonthStart(today));
         setScheduleYear(today.getFullYear());
         setSelectedScheduleYearMonth(null);
@@ -10224,6 +10280,7 @@ function App() {
     if (nextPage === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
       scheduleListScrollYearRef.current = null;
+      scheduleAgendaScrollYearRef.current = null;
       setMenuView('list');
       setScheduleMonth(getMonthStart(today));
       setScheduleYear(today.getFullYear());
@@ -10244,6 +10301,7 @@ function App() {
     if (nextMenuView === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
       scheduleListScrollYearRef.current = null;
+      scheduleAgendaScrollYearRef.current = null;
       setScheduleMonth(getMonthStart(today));
       setScheduleYear(today.getFullYear());
       setSelectedScheduleYearMonth(null);
@@ -10264,6 +10322,7 @@ function App() {
     resetEditUiState();
     scheduleTodayScrollMonthRef.current = null;
     scheduleListScrollYearRef.current = null;
+    scheduleAgendaScrollYearRef.current = null;
     setPage('schedule');
     setMenuView('list');
     setScheduleMonth(getMonthStart(today));
@@ -12386,7 +12445,7 @@ function App() {
                       data-past={isPastSchedule ? 'true' : 'false'}
                       key={scheduleItem.id}
                     >
-                      <time>{scheduleItem.time || '終日'}</time>
+                      <time>{formatScheduleTimeLabel(scheduleItem.time)}</time>
                       <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
                     </p>
                   );
@@ -13215,7 +13274,8 @@ function App() {
           >
             <div className="schedule-view-tabs" aria-label="スケジュール表示切り替え">
               {([
-                ['list', '一覧'],
+                ['list', 'カレンダー'],
+                ['agenda', '一覧'],
                 ['today', '今日'],
                 ['year', '年間'],
               ] as const).map(([view, label]) => (
@@ -13254,7 +13314,7 @@ function App() {
                           onClick={() => openScheduleEditor(today)}
                           type="button"
                         >
-                          <time>{scheduleItem.time || '--:--'}</time>
+                          <time>{formatScheduleTimeLabel(scheduleItem.time)}</time>
                           <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
                         </button>
                       ))}
@@ -13265,8 +13325,80 @@ function App() {
                 </section>
               );
             })()}
+            {scheduleView === 'agenda' && (
+              <section className="schedule-agenda-panel" aria-label={`${scheduleYear}年のスケジュール一覧`}>
+                <div className="schedule-year-header">
+                  <button
+                    aria-label="前年のスケジュール一覧へ"
+                    onClick={() => moveScheduleYear(-1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <h2>{scheduleYear}年</h2>
+                  <button
+                    aria-label="翌年のスケジュール一覧へ"
+                    onClick={() => moveScheduleYear(1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                </div>
+                {yearlyScheduleGroups.length > 0 ? (
+                  <div className="schedule-agenda-list">
+                    {yearlyScheduleGroups.map((monthGroup) => (
+                      <section className="schedule-agenda-month" key={monthGroup.monthIndex}>
+                        <h3>{monthGroup.monthIndex + 1}月</h3>
+                        <div className="schedule-agenda-days">
+                          {monthGroup.days.map((day) => {
+                            const holidayName = getHolidayName(day.date);
+                            const dateTitle = `${day.date.getMonth() + 1}月${day.date.getDate()}日（${
+                              weekdayShortLabels[day.date.getDay()]
+                            }${holidayName ? `・${holidayName}` : ''}）`;
+
+                            return (
+                              <article
+                                className="schedule-agenda-day"
+                                data-past={day.dateKey < todayKey ? 'true' : 'false'}
+                                data-schedule-agenda-date={day.dateKey}
+                                data-today={day.dateKey === todayKey ? 'true' : 'false'}
+                                key={day.dateKey}
+                              >
+                                <button
+                                  className="schedule-agenda-date-button"
+                                  onClick={() => openScheduleEditor(day.date)}
+                                  type="button"
+                                >
+                                  <span>{dateTitle}</span>
+                                  {day.dateKey === todayKey && <strong>今日</strong>}
+                                </button>
+                                <div className="schedule-agenda-items">
+                                  {day.items.map((scheduleItem) => (
+                                    <button
+                                      className="schedule-agenda-item"
+                                      key={scheduleItem.id}
+                                      onClick={() => openScheduleEditor(day.date)}
+                                      type="button"
+                                    >
+                                      <time>{formatScheduleTimeLabel(scheduleItem.time)}</time>
+                                      <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="schedule-year-empty">この年の予定はまだありません</p>
+                )}
+              </section>
+            )}
             {scheduleView === 'list' && (
-              <section className="schedule-year-panel" aria-label={`${scheduleYear}年のスケジュール一覧`}>
+              <section className="schedule-year-panel" aria-label={`${scheduleYear}年のスケジュールカレンダー`}>
                 <div className="schedule-year-header">
                   <button
                     aria-label="前年のスケジュール一覧へ"
@@ -13323,10 +13455,14 @@ function App() {
                             const dateKey = getDateKey(date);
                             const scheduleItems = loadDailySchedule(date);
                             const firstSchedule = scheduleItems[0];
+                            const holidayName = getHolidayName(date);
                             const dayKind = getDateDisplayKind(date);
 
                             return (
                               <button
+                                aria-label={`${date.getMonth() + 1}月${date.getDate()}日${
+                                  holidayName ? ` ${holidayName}` : ''
+                                }のスケジュール`}
                                 className="schedule-list-day-button"
                                 data-day-kind={dayKind}
                                 data-has-schedule={scheduleItems.length > 0 ? 'true' : 'false'}
@@ -13335,13 +13471,23 @@ function App() {
                                 onClick={() => openScheduleEditor(date)}
                                 type="button"
                               >
-                                <span className="schedule-list-day-number">{date.getDate()}</span>
+                                <span className="schedule-list-day-header">
+                                  <span className="schedule-list-day-number">{date.getDate()}</span>
+                                  {dateKey === todayKey && (
+                                    <span className="schedule-list-today-badge">今日</span>
+                                  )}
+                                </span>
+                                {holidayName && (
+                                  <span className="schedule-list-day-holiday" title={holidayName}>
+                                    {holidayName}
+                                  </span>
+                                )}
                                 {scheduleItems.length > 0 && (
                                   <span className="schedule-list-day-count">{scheduleItems.length}件</span>
                                 )}
                                 {firstSchedule && (
                                   <span className="schedule-list-day-preview">
-                                    {firstSchedule.time ? `${firstSchedule.time} ` : ''}
+                                    {`${formatScheduleTimeLabel(firstSchedule.time)} `}
                                     {firstSchedule.text.trim() || '（内容未入力）'}
                                   </span>
                                 )}
@@ -13401,7 +13547,7 @@ function App() {
                         )}
                         {firstSchedule && (
                           <span className="schedule-year-month-preview">
-                            {firstSchedule.time ? `${firstSchedule.time} ` : ''}
+                            {`${formatScheduleTimeLabel(firstSchedule.time)} `}
                             {firstSchedule.text.trim() || '（内容未入力）'}
                           </span>
                         )}
@@ -13454,7 +13600,7 @@ function App() {
                                 <div className="schedule-read-list">
                                   {scheduleItems.map((scheduleItem) => (
                                     <p key={scheduleItem.id}>
-                                      <time>{scheduleItem.time || '--:--'}</time>
+                                      <time>{formatScheduleTimeLabel(scheduleItem.time)}</time>
                                       <span>{scheduleItem.text.trim() || '（内容未入力）'}</span>
                                     </p>
                                   ))}
@@ -13517,7 +13663,7 @@ function App() {
                         <div className="schedule-editor-list">
                           {scheduleItems.map((scheduleItem, index) => (
                             <div className="schedule-editor-row" key={scheduleItem.id}>
-                              <input
+                              <select
                                 aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
                                 onChange={(event) =>
                                   updateScheduleItem(
@@ -13527,17 +13673,15 @@ function App() {
                                     event.target.value,
                                   )
                                 }
-                                onInput={(event) =>
-                                  updateScheduleItem(
-                                    scheduleDate,
-                                    scheduleItem,
-                                    'time',
-                                    event.currentTarget.value,
-                                  )
-                                }
-                                type="time"
                                 value={scheduleItem.time}
-                              />
+                              >
+                                <option value="">--:--</option>
+                                {scheduleTimeOptions.map((timeOption) => (
+                                  <option key={timeOption} value={timeOption}>
+                                    {timeOption}
+                                  </option>
+                                ))}
+                              </select>
                               <input
                                 aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
                                 id={`schedule-item-text-${scheduleItem.id}`}
@@ -13609,56 +13753,28 @@ function App() {
                       <label>
                         予定を追加
                       </label>
-                      <div className="schedule-detail-add-row">
-                        <div className="schedule-detail-time-fields">
-                          <label>
-                            <input
-                              aria-label={`${dateTitle}へ追加する予定の時`}
-                              inputMode="numeric"
-                              maxLength={2}
-                              onChange={(event) =>
-                                updateScheduleDetailDraft(scheduleDate, {
-                                  hour: event.target.value.replace(/\D/g, '').slice(0, 2),
-                                })
-                              }
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  document
-                                    .querySelector<HTMLInputElement>(`[data-schedule-detail-minute="${dateKey}"]`)
-                                    ?.focus();
-                                }
-                              }}
-                              placeholder="時"
-                              value={scheduleDetailDraft.hour}
-                            />
-                            <span>時</span>
-                          </label>
-                          <label>
-                            <input
-                              aria-label={`${dateTitle}へ追加する予定の分`}
-                              data-schedule-detail-minute={dateKey}
-                              inputMode="numeric"
-                              maxLength={2}
-                              onChange={(event) =>
-                                updateScheduleDetailDraft(scheduleDate, {
-                                  minute: event.target.value.replace(/\D/g, '').slice(0, 2),
-                                })
-                              }
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  document
-                                    .querySelector<HTMLInputElement>(`[data-schedule-detail-text="${dateKey}"]`)
-                                    ?.focus();
-                                }
-                              }}
-                              placeholder="分"
-                              value={scheduleDetailDraft.minute}
-                            />
-                            <span>分</span>
-                          </label>
-                        </div>
+                      <div className="schedule-detail-add-row schedule-editor-row" data-new="true">
+                        <select
+                          aria-label={`${dateTitle}へ追加する予定の時刻`}
+                          onChange={(event) => {
+                            const [hour = '', minute = ''] = event.target.value.split(':');
+
+                            updateScheduleDetailDraft(scheduleDate, { hour, minute });
+                            window.setTimeout(() => {
+                              document
+                                .querySelector<HTMLInputElement>(`[data-schedule-detail-text="${dateKey}"]`)
+                                ?.focus({ preventScroll: true });
+                            }, 0);
+                          }}
+                          value={getScheduleDetailDraftTime(scheduleDetailDraft)}
+                        >
+                          <option value="">--:--</option>
+                          {scheduleTimeOptions.map((timeOption) => (
+                            <option key={timeOption} value={timeOption}>
+                              {timeOption}
+                            </option>
+                          ))}
+                        </select>
                         <input
                           aria-label={`${dateTitle}へ追加する予定名`}
                           data-schedule-detail-text={dateKey}
