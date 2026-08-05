@@ -49,7 +49,7 @@ type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
-type TodoViewName = 'todo' | 'date' | 'folders' | 'completed';
+type TodoViewName = 'todo' | 'today' | 'date' | 'folders' | 'completed';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
@@ -2875,6 +2875,18 @@ type TodoDueDateDraft = {
   day: string;
   error?: string;
 };
+type TodoFloatingMenuPosition = {
+  id: string;
+  top: number;
+  left: number;
+  maxHeight: number;
+};
+type TodoAutoDraftMeta = {
+  dueDate?: string;
+  folderId?: string;
+};
+
+const TODO_AUTO_SAVE_DEBOUNCE_MS = 400;
 
 type NormalizeDailyTodoOptions = {
   preserveEmptyIds?: Iterable<string>;
@@ -4800,6 +4812,7 @@ function App() {
   const [todoMonth, setTodoMonth] = useState(() => getMonthStart(today));
   const [selectedTodoDate, setSelectedTodoDate] = useState<Date | null>(null);
   const [newTodoText, setNewTodoText] = useState('');
+  const [newTodoTodayText, setNewTodoTodayText] = useState('');
   const [newTodoDateText, setNewTodoDateText] = useState('');
   const [activeTodoMenuId, setActiveTodoMenuId] = useState<string | null>(null);
   const [todoDueDateDrafts, setTodoDueDateDrafts] = useState<Record<string, TodoDueDateDraft>>({});
@@ -4811,9 +4824,17 @@ function App() {
   const [newTodoFolderName, setNewTodoFolderName] = useState('');
   const [newTodoFolderText, setNewTodoFolderText] = useState('');
   const [activeTodoFolderMenuId, setActiveTodoFolderMenuId] = useState<string | null>(null);
+  const [todoFloatingMenuPosition, setTodoFloatingMenuPosition] =
+    useState<TodoFloatingMenuPosition | null>(null);
   const newTodoInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const newTodoTodayInputRef = useRef<HTMLTextAreaElement | null>(null);
   const newTodoDateInputRef = useRef<HTMLTextAreaElement | null>(null);
   const newTodoFolderInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const todoAutoDraftIdsRef = useRef<Record<string, string | undefined>>({});
+  const todoAutoDraftTextsRef = useRef<Record<string, string | undefined>>({});
+  const todoAutoDraftTimersRef = useRef<Record<string, number | undefined>>({});
+  const todoMenuAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const todoMenuPanelRef = useRef<HTMLDivElement | null>(null);
   const [managedTodoDrafts, setManagedTodoDrafts] = useState<Record<ActiveTodoStatus, string>>({
     today: '',
     tomorrow: '',
@@ -9103,68 +9124,218 @@ function App() {
     return 'someday';
   };
 
-  const addManagedTodoQuick = (text: string, dueDate?: string, folderId?: string) => {
-    const trimmedText = text.trim();
+  const clearTodoAutoDraftTimer = (draftKey: string) => {
+    const timerId = todoAutoDraftTimersRef.current[draftKey];
 
-    if (!trimmedText) {
-      return false;
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete todoAutoDraftTimersRef.current[draftKey];
+    }
+  };
+
+  const removeTodoAutoDraft = (draftKey: string) => {
+    const draftId = todoAutoDraftIdsRef.current[draftKey];
+
+    clearTodoAutoDraftTimer(draftKey);
+    delete todoAutoDraftIdsRef.current[draftKey];
+    delete todoAutoDraftTextsRef.current[draftKey];
+
+    if (draftId) {
+      setManagedTodos((currentTodos) => currentTodos.filter((todo) => todo.id !== draftId));
+    }
+  };
+
+  const flushTodoAutoDraft = (draftKey: string) => {
+    const draftId = todoAutoDraftIdsRef.current[draftKey];
+
+    clearTodoAutoDraftTimer(draftKey);
+
+    if (!draftId) {
+      return;
+    }
+
+    const nextText = todoAutoDraftTextsRef.current[draftKey] ?? '';
+
+    if (!nextText.trim()) {
+      removeTodoAutoDraft(draftKey);
+      return;
     }
 
     const timestamp = new Date().toISOString();
-    setManagedTodos((currentTodos) => [
-      ...currentTodos,
-      createManagedTodoItem(trimmedText, getTodoStatusForDueDate(dueDate), {
-        dueDate,
-        folderId,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }),
-    ]);
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        todo.id === draftId
+          ? {
+              ...todo,
+              text: nextText,
+              updatedAt: timestamp,
+            }
+          : todo,
+      ),
+    );
+  };
+
+  const flushAllTodoAutoDrafts = () => {
+    Object.keys(todoAutoDraftIdsRef.current).forEach((draftKey) => flushTodoAutoDraft(draftKey));
+  };
+
+  const commitAndResetTodoAutoDraftInputs = () => {
+    flushAllTodoAutoDrafts();
+    todoAutoDraftIdsRef.current = {};
+    todoAutoDraftTextsRef.current = {};
+    setNewTodoText('');
+    setNewTodoTodayText('');
+    setNewTodoDateText('');
+    setNewTodoFolderText('');
+  };
+
+  const positionTodoFloatingMenu = (id: string, panelElement?: HTMLDivElement | null) => {
+    const anchorElement = todoMenuAnchorRefs.current[id];
+    const menuElement = panelElement ?? todoMenuPanelRef.current;
+
+    if (!anchorElement || !menuElement) {
+      return;
+    }
+
+    const margin = 8;
+    const anchorRect = anchorElement.getBoundingClientRect();
+    const menuRect = menuElement.getBoundingClientRect();
+    const navRect = document.querySelector('.bottom-tab-nav')?.getBoundingClientRect();
+    const bottomLimit = navRect ? navRect.top - margin : window.innerHeight - margin;
+    const availableHeight = Math.max(160, bottomLimit - margin);
+    const menuWidth = Math.min(menuRect.width || 230, window.innerWidth - margin * 2);
+    const menuHeight = Math.min(menuRect.height || availableHeight, availableHeight);
+    const hasBottomSpace = anchorRect.bottom + 6 + menuHeight <= bottomLimit;
+    const preferredTop = hasBottomSpace ? anchorRect.bottom + 6 : anchorRect.top - menuHeight - 6;
+    const preferredLeft = anchorRect.right - menuWidth;
+    const top = Math.min(Math.max(preferredTop, margin), Math.max(margin, bottomLimit - menuHeight));
+    const left = Math.min(
+      Math.max(preferredLeft, margin),
+      Math.max(margin, window.innerWidth - menuWidth - margin),
+    );
+
+    const nextPosition = {
+      id,
+      top,
+      left,
+      maxHeight: Math.max(120, bottomLimit - top - margin),
+    };
+
+    setTodoFloatingMenuPosition((currentPosition) =>
+      currentPosition &&
+      currentPosition.id === nextPosition.id &&
+      Math.abs(currentPosition.top - nextPosition.top) < 1 &&
+      Math.abs(currentPosition.left - nextPosition.left) < 1 &&
+      Math.abs(currentPosition.maxHeight - nextPosition.maxHeight) < 1
+        ? currentPosition
+        : nextPosition,
+    );
+  };
+
+  const updateTodoAutoDraft = (
+    draftKey: string,
+    text: string,
+    meta: TodoAutoDraftMeta = {},
+    options: { immediate?: boolean } = {},
+  ) => {
+    todoAutoDraftTextsRef.current[draftKey] = text;
+
+    if (!text.trim()) {
+      removeTodoAutoDraft(draftKey);
+      return false;
+    }
+
+    let draftId = todoAutoDraftIdsRef.current[draftKey];
+
+    if (!draftId) {
+      const timestamp = new Date().toISOString();
+      draftId = createManagedTodoId();
+      todoAutoDraftIdsRef.current[draftKey] = draftId;
+
+      setManagedTodos((currentTodos) => [
+        ...currentTodos,
+        createManagedTodoItem(text, getTodoStatusForDueDate(meta.dueDate), {
+          id: draftId,
+          dueDate: meta.dueDate,
+          folderId: meta.folderId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }),
+      ]);
+
+      if (meta.folderId) {
+        setTodoFolders((currentFolders) =>
+          currentFolders.map((folder) =>
+            folder.id === meta.folderId ? { ...folder, updatedAt: timestamp } : folder,
+          ),
+        );
+      }
+
+      return true;
+    }
+
+    clearTodoAutoDraftTimer(draftKey);
+
+    if (options.immediate) {
+      flushTodoAutoDraft(draftKey);
+      return true;
+    }
+
+    todoAutoDraftTimersRef.current[draftKey] = window.setTimeout(
+      () => flushTodoAutoDraft(draftKey),
+      TODO_AUTO_SAVE_DEBOUNCE_MS,
+    );
 
     return true;
   };
 
-  const submitNewTodo = () => {
-    if (!addManagedTodoQuick(newTodoText)) {
+  const finishTodoAutoDraftInput = (
+    draftKey: string,
+    text: string,
+    setText: (value: string) => void,
+    inputRef: { current: HTMLTextAreaElement | null },
+    meta: TodoAutoDraftMeta = {},
+  ) => {
+    if (!updateTodoAutoDraft(draftKey, text, meta, { immediate: true })) {
       return;
     }
 
-    setNewTodoText('');
+    flushTodoAutoDraft(draftKey);
+    delete todoAutoDraftIdsRef.current[draftKey];
+    delete todoAutoDraftTextsRef.current[draftKey];
+    setText('');
     window.setTimeout(() => {
-      adjustTextareaHeight(newTodoInputRef.current);
-      newTodoInputRef.current?.focus({ preventScroll: true });
+      adjustTextareaHeight(inputRef.current);
+      inputRef.current?.focus({ preventScroll: true });
     }, 0);
+  };
+
+  const submitNewTodo = () => {
+    finishTodoAutoDraftInput('todo:list', newTodoText, setNewTodoText, newTodoInputRef);
+  };
+
+  const submitNewTodoForToday = () => {
+    finishTodoAutoDraftInput('todo:today', newTodoTodayText, setNewTodoTodayText, newTodoTodayInputRef, {
+      dueDate: todayKey,
+    });
   };
 
   const submitNewTodoForDate = (date: Date) => {
     const dateKey = getDateKey(date);
 
-    if (!addManagedTodoQuick(newTodoDateText, dateKey)) {
-      return;
-    }
-
-    setNewTodoDateText('');
-    window.setTimeout(() => {
-      adjustTextareaHeight(newTodoDateInputRef.current);
-      newTodoDateInputRef.current?.focus({ preventScroll: true });
-    }, 0);
+    finishTodoAutoDraftInput(`todo:date:${dateKey}`, newTodoDateText, setNewTodoDateText, newTodoDateInputRef, {
+      dueDate: dateKey,
+    });
   };
 
   const submitNewTodoForFolder = (folderId: string) => {
-    if (!addManagedTodoQuick(newTodoFolderText, undefined, folderId)) {
-      return;
-    }
-
-    setNewTodoFolderText('');
-    setTodoFolders((currentFolders) =>
-      currentFolders.map((folder) =>
-        folder.id === folderId ? { ...folder, updatedAt: new Date().toISOString() } : folder,
-      ),
+    finishTodoAutoDraftInput(
+      `todo:folder:${folderId}`,
+      newTodoFolderText,
+      setNewTodoFolderText,
+      newTodoFolderInputRef,
+      { folderId },
     );
-    window.setTimeout(() => {
-      adjustTextareaHeight(newTodoFolderInputRef.current);
-      newTodoFolderInputRef.current?.focus({ preventScroll: true });
-    }, 0);
   };
 
   const handleTodoCaptureKeyDown = (
@@ -9450,16 +9621,40 @@ function App() {
     setSelectedTodoIds({});
     setActiveTodoMenuId(null);
     setActiveTodoFolderMenuId(null);
+    commitAndResetTodoAutoDraftInputs();
   }, [page, todoView, selectedTodoFolderId, selectedTodoDate]);
 
   useEffect(() => {
+    const flushDrafts = () => flushAllTodoAutoDrafts();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushDrafts();
+      }
+    };
+
+    window.addEventListener('pagehide', flushDrafts);
+    window.addEventListener('beforeunload', flushDrafts);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      flushDrafts();
+      window.removeEventListener('pagehide', flushDrafts);
+      window.removeEventListener('beforeunload', flushDrafts);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      Object.keys(todoAutoDraftTimersRef.current).forEach(clearTodoAutoDraftTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeTodoMenuId && !activeTodoFolderMenuId) {
+      setTodoFloatingMenuPosition(null);
       return undefined;
     }
 
     const closeTodoMenus = () => {
       setActiveTodoMenuId(null);
       setActiveTodoFolderMenuId(null);
+      setTodoFloatingMenuPosition(null);
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -9496,6 +9691,21 @@ function App() {
       window.removeEventListener('scroll', closeTodoMenus, true);
     };
   }, [activeTodoFolderMenuId, activeTodoMenuId, managedTodos, todoDueDateDrafts]);
+
+  useEffect(() => {
+    if (!activeTodoMenuId) {
+      return undefined;
+    }
+
+    const repositionMenu = () => positionTodoFloatingMenu(activeTodoMenuId);
+
+    window.setTimeout(repositionMenu, 0);
+    window.addEventListener('resize', repositionMenu);
+
+    return () => {
+      window.removeEventListener('resize', repositionMenu);
+    };
+  }, [activeTodoMenuId, todoDueDateDrafts]);
 
   const createTodoFolder = (name: string) => {
     const trimmedName = name.trim();
@@ -13487,8 +13697,8 @@ function App() {
                                 )}
                                 {firstSchedule && (
                                   <span className="schedule-list-day-preview">
-                                    {`${formatScheduleTimeLabel(firstSchedule.time)} `}
-                                    {firstSchedule.text.trim() || '（内容未入力）'}
+                                    <span>{firstSchedule.text.trim() || '（内容未入力）'}</span>
+                                    {firstSchedule.time.trim() && <time>{firstSchedule.time}</time>}
                                   </span>
                                 )}
                               </button>
@@ -13825,6 +14035,7 @@ function App() {
               shouldShowManagedTodoInWorkingList(todo),
             )
             .sort((first, second) => (second.createdAt ?? '').localeCompare(first.createdAt ?? ''));
+          const todayTodos = activeTodos.filter((todo) => todo.dueDate === todayKey);
           const formatTodoDueDate = (dateKey: string) => {
             const date = getDateFromKey(dateKey);
 
@@ -13835,24 +14046,41 @@ function App() {
               ? backupDateTimeFormatter.format(new Date(completedAt))
               : '';
           const selectedTodoCount = getSelectedTodoIdList().length;
-	          const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => (
-	            <div className="todo-actions-menu" data-open={activeTodoMenuId === todo.id ? 'true' : 'false'}>
-	              <button
-	                aria-expanded={activeTodoMenuId === todo.id}
-	                aria-label={`${todo.text}の操作`}
-	                onClick={() => {
-	                  setActiveTodoFolderMenuId(null);
-	                  setActiveTodoMenuId((currentId) => currentId === todo.id ? null : todo.id);
-	                }}
-	                type="button"
-	              >
-                …
-              </button>
-	              {activeTodoMenuId === todo.id && (
-	                <div className="todo-actions-panel">
+          const renderTodoActions = (todo: ManagedTodoItem, options: { completed?: boolean } = {}) => {
+            const isOpen = activeTodoMenuId === todo.id;
+            const menuPosition =
+              todoFloatingMenuPosition?.id === todo.id ? todoFloatingMenuPosition : null;
+            const menuPanel = (
+              <div
+                className="todo-actions-menu todo-actions-menu-portal"
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <div
+                  className="todo-actions-panel"
+                  data-floating="true"
+                  ref={(element) => {
+                    todoMenuPanelRef.current = element;
+                    if (element) {
+                      positionTodoFloatingMenu(todo.id, element);
+                    }
+                  }}
+                  style={{
+                    left: menuPosition ? `${menuPosition.left}px` : '8px',
+                    maxHeight: menuPosition ? `${menuPosition.maxHeight}px` : 'calc(100vh - 120px)',
+                    top: menuPosition ? `${menuPosition.top}px` : '8px',
+                    visibility: menuPosition ? 'visible' : 'hidden',
+                  }}
+                >
 	                  {!options.completed && (
 	                    <>
-	                      <button onClick={() => focusManagedTodo(todo.id)} type="button">
+	                      <button
+                          onClick={() => {
+                            focusManagedTodo(todo.id);
+                            setActiveTodoMenuId(null);
+                          }}
+                          type="button"
+                        >
 	                        編集
 	                      </button>
 	                      <button
@@ -13925,6 +14153,7 @@ function App() {
 	                                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
 	                                    event.preventDefault();
 	                                    commitTodoDueDateDraft(todo, { allowTodayFallback: true });
+                                      setActiveTodoMenuId(null);
 	                                  }
 	                                }}
 	                                placeholder={todayDayPlaceholder}
@@ -13953,6 +14182,7 @@ function App() {
                           onChange={(event) => {
                             if (event.target.value === '__new__') {
                               promptCreateTodoFolderForTodo(todo.id);
+                              setActiveTodoMenuId(null);
                               return;
                             }
 
@@ -13981,7 +14211,13 @@ function App() {
 	                          フォルダから外す
 	                        </button>
 	                      )}
-                      <button onClick={() => copyManagedTodoText(todo)} type="button">
+                      <button
+                        onClick={() => {
+                          copyManagedTodoText(todo);
+                          setActiveTodoMenuId(null);
+                        }}
+                        type="button"
+                      >
                         コピー
                       </button>
                     </>
@@ -14001,15 +14237,48 @@ function App() {
                       未完了に戻す
                     </button>
 	                  )}
-	                  <button onClick={() => confirmDeleteManagedTodo(todo)} type="button">
+	                  <button
+                      onClick={() => {
+                        confirmDeleteManagedTodo(todo);
+                        setActiveTodoMenuId(null);
+                      }}
+                      type="button"
+                    >
 	                    削除
 	                  </button>
 	                </div>
-	              )}
-	            </div>
-	          );
+              </div>
+            );
+
+            return (
+              <div
+                className="todo-actions-menu"
+                data-open={isOpen ? 'true' : 'false'}
+                ref={(element) => {
+                  todoMenuAnchorRefs.current[todo.id] = element;
+                }}
+              >
+                <button
+                  aria-expanded={isOpen}
+                  aria-label={`${todo.text}の操作`}
+                  onClick={() => {
+                    setActiveTodoFolderMenuId(null);
+                    setTodoFloatingMenuPosition(null);
+                    setActiveTodoMenuId((currentId) => (currentId === todo.id ? null : todo.id));
+                  }}
+                  type="button"
+                >
+                  …
+                </button>
+                {isOpen && createPortal(menuPanel, document.body)}
+              </div>
+            );
+          };
 	          const renderTodoRow = (todo: ManagedTodoItem, index: number) => {
 	            const isSelected = Boolean(selectedTodoIds[todo.id]);
+              const folderName = todo.folderId
+                ? todoFolders.find((folder) => folder.id === todo.folderId)?.name
+                : undefined;
 
 	            return (
 	            <article
@@ -14066,7 +14335,8 @@ function App() {
 	                  rows={1}
 	                  value={todo.text}
                 />
-                {todo.dueDate && <time>{formatTodoDueDate(todo.dueDate)}</time>}
+                {todo.dueDate && todoView !== 'today' && <time>{formatTodoDueDate(todo.dueDate)}</time>}
+                {folderName && <small>📁 {folderName}</small>}
                 {todo.completed && formatTodoCompletedAt(todo.completedAt) && (
 	                  <time>完了：{formatTodoCompletedAt(todo.completedAt)}</time>
 	                )}
@@ -14268,6 +14538,7 @@ function App() {
 	              <div className="todo-status-tabs todo-primary-tabs" aria-label="やること表示切り替え">
 	                {([
 	                  ['todo', '一覧'],
+                  ['today', '今日'],
                   ['date', '日付'],
                   ['folders', 'フォルダ'],
                   ['completed', '完了済み'],
@@ -14323,9 +14594,11 @@ function App() {
                   <section className="todo-capture-card" aria-label="やることを追加">
                     <textarea
                       aria-label="新しいやること"
+                      onBlur={() => flushTodoAutoDraft('todo:list')}
                       onChange={(event) => {
                         adjustTextareaHeight(event.currentTarget);
                         setNewTodoText(event.target.value);
+                        updateTodoAutoDraft('todo:list', event.target.value);
                       }}
                       onKeyDown={(event) => handleTodoCaptureKeyDown(event, submitNewTodo)}
                       enterKeyHint="done"
@@ -14346,6 +14619,41 @@ function App() {
                       activeTodos.map(renderTodoRow)
                     ) : (
                       <p className="todo-completed-empty">思いついたことを上に追加できます。</p>
+                    )}
+                  </section>
+                </>
+              )}
+
+              {todoView === 'today' && (
+                <>
+                  <section className="todo-capture-card" aria-label="今日やることを追加">
+                    <textarea
+                      aria-label="今日のやること"
+                      onBlur={() => flushTodoAutoDraft('todo:today')}
+                      onChange={(event) => {
+                        adjustTextareaHeight(event.currentTarget);
+                        setNewTodoTodayText(event.target.value);
+                        updateTodoAutoDraft('todo:today', event.target.value, { dueDate: todayKey });
+                      }}
+                      onKeyDown={(event) => handleTodoCaptureKeyDown(event, submitNewTodoForToday)}
+                      enterKeyHint="done"
+                      placeholder="今日やることを入力する"
+                      ref={(element) => {
+                        newTodoTodayInputRef.current = element;
+                        if (element) {
+                          adjustTextareaHeight(element);
+                        }
+                      }}
+                      rows={1}
+                      value={newTodoTodayText}
+                    />
+                  </section>
+                  <section className="todo-capture-list" aria-label="今日の未完了のやること">
+                    {renderTodoCaptureListHeader(todayTodos)}
+                    {todayTodos.length > 0 ? (
+                      todayTodos.map(renderTodoRow)
+                    ) : (
+                      <p className="todo-completed-empty">今日のやることはまだありません</p>
                     )}
                   </section>
                 </>
@@ -14453,9 +14761,13 @@ function App() {
                       <section className="todo-capture-card" aria-label={`${selectedFolder.name}へ追加`}>
                         <textarea
                           aria-label={`${selectedFolder.name}へ追加するやること`}
+                          onBlur={() => flushTodoAutoDraft(`todo:folder:${selectedFolder.id}`)}
                           onChange={(event) => {
                             adjustTextareaHeight(event.currentTarget);
                             setNewTodoFolderText(event.target.value);
+                            updateTodoAutoDraft(`todo:folder:${selectedFolder.id}`, event.target.value, {
+                              folderId: selectedFolder.id,
+                            });
                           }}
                           onKeyDown={(event) =>
                             handleTodoCaptureKeyDown(event, () => submitNewTodoForFolder(selectedFolder.id))
@@ -14596,9 +14908,13 @@ function App() {
                       <section className="todo-capture-card" aria-label={`${dateTitle}へ追加`}>
                         <textarea
                           aria-label={`${dateTitle}へ追加するやること`}
+                          onBlur={() => flushTodoAutoDraft(`todo:date:${dateKey}`)}
                           onChange={(event) => {
                             adjustTextareaHeight(event.currentTarget);
                             setNewTodoDateText(event.target.value);
+                            updateTodoAutoDraft(`todo:date:${dateKey}`, event.target.value, {
+                              dueDate: dateKey,
+                            });
                           }}
                           onKeyDown={(event) =>
                             handleTodoCaptureKeyDown(event, () => submitNewTodoForDate(selectedTodoDate))

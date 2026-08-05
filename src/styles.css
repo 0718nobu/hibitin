@@ -5551,12 +5551,18 @@ h1 {
 }
 
 .todo-primary-tabs {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  position: sticky;
+  top: max(8px, env(safe-area-inset-top));
+  z-index: 20;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: rgb(255 255 249 / 96%);
+  box-shadow: 0 8px 18px rgb(53 93 48 / 9%), 0 1px 0 rgb(198 222 197 / 58%);
+  backdrop-filter: blur(10px);
 }
 
 .todo-primary-tabs button {
-  min-height: 44px;
-  font-size: 0.84rem;
+  min-height: 40px;
+  font-size: 0.76rem;
 }
 
 .todo-status-tabs button {
@@ -7046,6 +7052,7 @@ h1 {
 .todo-capture-card,
 .todo-capture-list,
 .todo-date-page {
+  scroll-margin-block-start: 86px;
   display: grid;
   gap: 10px;
   border: 1px solid rgb(205 226 190 / 72%);
@@ -7087,6 +7094,13 @@ h1 {
 .todo-capture-card textarea::placeholder,
 .todo-capture-main textarea::placeholder {
   color: #9aa68f;
+}
+
+.todo-capture-main small {
+  display: inline-block;
+  color: #6c826d;
+  font-size: 0.72rem;
+  font-weight: 820;
 }
 
 .todo-capture-actions {
@@ -7275,6 +7289,21 @@ h1 {
   padding: 8px;
   background: #ffffff;
   box-shadow: 0 14px 30px rgb(43 78 50 / 18%);
+}
+
+.todo-actions-menu-portal {
+  position: fixed;
+  z-index: 20000;
+}
+
+.todo-actions-panel[data-floating='true'] {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 20000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .todo-actions-panel button,
@@ -8027,11 +8056,31 @@ h1 {
 }
 
 .schedule-list-day-preview {
+  display: grid;
+  gap: 1px;
   min-width: 0;
   color: #40564a;
-  font-size: 0.58rem;
-  font-weight: 800;
-  line-height: 1.25;
+  font-size: 0.6rem;
+  font-weight: 880;
+  line-height: 1.18;
+  overflow: hidden;
+}
+
+.schedule-list-day-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.schedule-list-day-preview time {
+  min-width: 0;
+  color: #748174;
+  font-size: 0.52rem;
+  font-weight: 760;
+  line-height: 1.05;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
