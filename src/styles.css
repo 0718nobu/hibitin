@@ -2398,6 +2398,110 @@ h1 {
   cursor: default;
 }
 
+.monthly-stamp-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgb(218 181 82 / 44%);
+  border-radius: 8px;
+  background: rgb(255 252 234 / 74%);
+}
+
+.monthly-stamp-summary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.monthly-stamp-summary-heading h3 {
+  margin: 0;
+  color: #785400;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.monthly-stamp-summary-heading span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgb(255 232 169 / 78%);
+  color: #805900;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.monthly-stamp-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.monthly-stamp-card {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  border: 1px solid rgb(198 165 80 / 32%);
+  border-radius: 8px;
+  padding: 8px 6px;
+  background: rgb(255 255 255 / 72%);
+  color: #263b34;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 64%);
+}
+
+.monthly-stamp-card[data-stamp-level='first'] {
+  background: linear-gradient(180deg, #fff8d8, #fffdf0);
+}
+
+.monthly-stamp-card[data-stamp-level='start'] {
+  background: linear-gradient(180deg, #eef8ff, #fbfdff);
+}
+
+.monthly-stamp-card[data-stamp-level='good'] {
+  background: linear-gradient(180deg, #e7fbff, #fbffff);
+}
+
+.monthly-stamp-card[data-stamp-level='great'] {
+  background: linear-gradient(180deg, #ffeaf4, #fffafd);
+}
+
+.monthly-stamp-card[data-stamp-level='excellent'] {
+  background: linear-gradient(180deg, #fff1b8, #fffbee);
+}
+
+.monthly-stamp-card[data-stamp-level='perfect'] {
+  background: linear-gradient(180deg, #e5fff0, #f8fffb);
+  border-color: rgb(28 169 106 / 32%);
+}
+
+.monthly-stamp-card[data-empty='true'] {
+  opacity: 0.48;
+  filter: saturate(0.45);
+}
+
+.monthly-stamp-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.monthly-stamp-name {
+  overflow: hidden;
+  color: #53665d;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monthly-stamp-card strong {
+  color: #17382f;
+  font-size: 0.9rem;
+  line-height: 1.1;
+}
+
 .completion-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -6403,6 +6507,25 @@ h1 {
   background: #f4fbef;
 }
 
+.quick-memo-menu label {
+  display: grid;
+  gap: 5px;
+  color: #6c7a66;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.quick-memo-menu select {
+  min-height: 34px;
+  border: 1px solid rgb(203 220 198 / 84%);
+  border-radius: 8px;
+  background: rgb(250 255 247 / 94%);
+  color: #263d30;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+}
+
 .quick-memo-move-panel {
   display: grid;
   width: min(72vw, 260px);
@@ -6514,6 +6637,26 @@ h1 {
   gap: 12px;
 }
 
+.memo-folder-detail-page > .memo-folder-detail-header {
+  order: 0;
+}
+
+.memo-folder-detail-page > .quick-memo-list-section[aria-label='子フォルダ'] {
+  order: 1;
+}
+
+.memo-folder-detail-page > .quick-memo-list-section[aria-label='フォルダ内メモ一覧'] {
+  order: 2;
+}
+
+.memo-folder-detail-page > .memo-folder-create {
+  order: 3;
+}
+
+.memo-folder-detail-page > .quick-memo-composer {
+  order: 4;
+}
+
 .memo-folder-create {
   display: grid;
   gap: 10px;
@@ -6543,6 +6686,12 @@ h1 {
   color: #6f7c6b;
   font-size: 0.8rem;
   line-height: 1.45;
+}
+
+.memo-folder-breadcrumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .memo-folder-create-row {
@@ -7937,8 +8086,11 @@ h1 {
 }
 
 .schedule-list-calendar {
+  --schedule-calendar-cell-height: 74px;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: auto;
+  grid-auto-rows: var(--schedule-calendar-cell-height);
   gap: 5px;
 }
 
@@ -7950,12 +8102,16 @@ h1 {
 }
 
 .schedule-list-day-empty {
-  min-height: 54px;
+  height: var(--schedule-calendar-cell-height);
+  min-height: var(--schedule-calendar-cell-height);
+  max-height: var(--schedule-calendar-cell-height);
 }
 
 .schedule-list-day-button {
   display: grid;
-  min-height: 58px;
+  height: var(--schedule-calendar-cell-height);
+  min-height: var(--schedule-calendar-cell-height);
+  max-height: var(--schedule-calendar-cell-height);
   align-content: start;
   gap: 2px;
   border: 1px solid rgb(208 226 202 / 76%);
@@ -7966,6 +8122,7 @@ h1 {
   cursor: pointer;
   font: inherit;
   text-align: left;
+  overflow: hidden;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -8059,6 +8216,7 @@ h1 {
   display: grid;
   gap: 1px;
   min-width: 0;
+  max-height: 24px;
   color: #40564a;
   font-size: 0.6rem;
   font-weight: 880;
@@ -8070,9 +8228,7 @@ h1 {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: nowrap;
 }
 
 .schedule-list-day-preview time {
@@ -8084,6 +8240,25 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .schedule-list-calendar {
+    --schedule-calendar-cell-height: 70px;
+    gap: 4px;
+  }
+
+  .schedule-list-day-button {
+    padding: 4px;
+  }
+
+  .schedule-list-day-preview {
+    max-height: 16px;
+  }
+
+  .schedule-list-day-preview time {
+    display: none;
+  }
 }
 
 .schedule-list-input-row {
@@ -8278,7 +8453,7 @@ h1 {
 }
 
 .schedule-editor-panel {
-  max-height: min(90vh, 780px);
+  max-height: min(88dvh, 780px);
 }
 
 .schedule-date-field {
@@ -8490,6 +8665,12 @@ h1 {
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
   background: rgb(22 41 31 / 42%);
   backdrop-filter: blur(5px);
+}
+
+.schedule-editor-backdrop {
+  align-items: start;
+  padding-top: max(9dvh, calc(18px + env(safe-area-inset-top)));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
 
 .record-editor-panel {
