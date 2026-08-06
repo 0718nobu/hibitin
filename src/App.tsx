@@ -508,6 +508,21 @@ type DailyNudgeRecord = {
 
 type DailyNudgeRecords = Record<string, DailyNudgeRecord>;
 
+type ChoiceQuestOption = {
+  id: string;
+  label: string;
+  icon: string;
+};
+
+type ChoiceQuestRecord = {
+  selectedOptionId?: string;
+  completed: boolean;
+  selectedAt?: string;
+  completedAt?: string;
+};
+
+type ChoiceQuestRecords = Record<string, ChoiceQuestRecord>;
+
 type NoteEditorTarget = {
   dateKey: string;
   itemId: string;
@@ -620,6 +635,8 @@ const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const CORE_ROUTINE_PLACEMENTS_STORAGE_KEY = 'hibitin:coreRoutinePlacements:v1';
 const DAILY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:dailyQuestMasterCache:v1';
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
+const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
+const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
@@ -1039,7 +1056,7 @@ const dailyEventExamples = [
   { id: 'message', text: '返そうと思っていた連絡を返した。', category: 'dailyLife', source: 'system', kind: 'event' },
 ];
 
-const defaultDailyNudgeCompletionMessage = '日替わりクエスト完了。今日も一歩。';
+const defaultDailyNudgeCompletionMessage = 'ログインクエスト完了。今日も一歩。';
 const dailyNudgeCelebrationMessages = [
   '今日の勝ち！まず一歩、いただきました。',
   'いいスタート。動いた時点でもう前進。',
@@ -1105,6 +1122,46 @@ const retiredDailyNudgeCandidateIds = new Set([
   'daily-nudge-kind',
   'daily-nudge-tiny-start',
 ]);
+
+const defaultNightlyNudgeCompletionMessage = 'おやすみクエスト完了。今日もここまで。';
+const nightlyNudgeCelebrationMessages = [
+  '今日もここまで。お疲れさま。',
+  '一日をやさしく閉じられたね。',
+  '今日の終わりに、小さな安心を置けた。',
+  'よくここまで来た。今日はもう十分。',
+  'おやすみ前の一区切り、完了。',
+  '明日の自分へ、やさしいバトン。',
+  '今日もちゃんと終われた。',
+  '静かに一日をしまえたね。',
+  'お疲れさま。ここからは休む時間。',
+  '今日をやさしく閉じました。',
+];
+const defaultNightlyNudgeCandidates: DailyNudgeCandidate[] = [
+  ['nightly-nudge-good-work', '今日もお疲れって言ってみよう', '今日もお疲れさま。ちゃんと届いた。', 'ねぎらい'],
+  ['nightly-nudge-thanks-feet', 'ありがとうと言いながら足を撫でよう', '足にもありがとう。今日も支えてくれた。', '休息'],
+  ['nightly-nudge-shoulder', '肩を軽く回そう', '肩まわし完了。少し力が抜けた。', 'からだ'],
+  ['nightly-nudge-breath-three', '深呼吸を3回しよう', '深呼吸3回。夜の空気に戻れた。', '休息'],
+  ['nightly-nudge-fun-one', '今日楽しかったことを一つ思い出そう', '楽しかったことをひとつ回収できた。', '記憶'],
+  ['nightly-nudge-kind-self', '今日もよく頑張ったねと言ってあげよう', '自分へのねぎらい完了。よく頑張った。', 'ねぎらい'],
+  ['nightly-nudge-window', '窓の外を眺めてみよう', '外を少し眺めた。夜に目が慣れた。', '休息'],
+  ['nightly-nudge-happy-one', '今日一番嬉しかったことを思い出そう', '嬉しかったことをひとつ持って眠れる。', '記憶'],
+  ['nightly-nudge-eyes', '目を閉じて30秒休もう', '30秒休憩完了。もう休んでいい。', '休息'],
+  ['nightly-nudge-bed', '布団へ入ってみよう', '布団へ到着。今日の冒険はここまで。', 'おやすみ'],
+].map(([id, text, completionMessage, category], index) => ({
+  id,
+  text,
+  completionMessage,
+  category,
+  enabled: true,
+  order: (index + 1) * 10,
+  createdAt: '2026-08-07T00:00:00.000Z',
+}));
+
+const choiceQuestOptions: ChoiceQuestOption[] = [
+  { id: 'walk', label: '散歩', icon: '🚶' },
+  { id: 'stretch', label: 'ストレッチ', icon: '🤸' },
+  { id: 'meditation', label: '瞑想', icon: '🧘' },
+];
 
 const weekdayOptions: { key: WeekdayKey; label: string }[] = [
   { key: 'monday', label: '月' },
@@ -1643,8 +1700,11 @@ const loadDailyQuestMasterCache = () => {
 
 const loadDailyNudgeCandidates = () => loadDailyQuestMasterCache();
 
-const loadDailyNudgeRecords = (): DailyNudgeRecords => {
-  const savedRecords = localStorage.getItem(DAILY_NUDGE_RECORDS_STORAGE_KEY);
+const loadNudgeRecords = (
+  storageKey: string,
+  fallbackCompletionMessage = defaultDailyNudgeCompletionMessage,
+): DailyNudgeRecords => {
+  const savedRecords = localStorage.getItem(storageKey);
 
   if (!savedRecords) {
     return {};
@@ -1672,7 +1732,7 @@ const loadDailyNudgeRecords = (): DailyNudgeRecords => {
           {
             candidateId: record.candidateId ?? '',
             text: record.text ?? '',
-            completionMessage: record.completionMessage ?? defaultDailyNudgeCompletionMessage,
+            completionMessage: record.completionMessage ?? fallbackCompletionMessage,
             celebrationMessage: typeof record.celebrationMessage === 'string'
               ? record.celebrationMessage
               : undefined,
@@ -1683,6 +1743,44 @@ const loadDailyNudgeRecords = (): DailyNudgeRecords => {
           },
         ]),
     ) as DailyNudgeRecords;
+  } catch {
+    return {};
+  }
+};
+
+const loadDailyNudgeRecords = () => loadNudgeRecords(DAILY_NUDGE_RECORDS_STORAGE_KEY);
+
+const loadNightlyNudgeRecords = () =>
+  loadNudgeRecords(NIGHTLY_NUDGE_RECORDS_STORAGE_KEY, defaultNightlyNudgeCompletionMessage);
+
+const loadChoiceQuestRecords = (): ChoiceQuestRecords => {
+  const savedRecords = localStorage.getItem(CHOICE_QUEST_RECORDS_STORAGE_KEY);
+
+  if (!savedRecords) {
+    return {};
+  }
+
+  try {
+    const parsedRecords = JSON.parse(savedRecords) as Record<string, Partial<ChoiceQuestRecord>>;
+
+    if (!parsedRecords || typeof parsedRecords !== 'object' || Array.isArray(parsedRecords)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedRecords)
+        .filter(([dateKey, record]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && record)
+        .map(([dateKey, record]) => [
+          dateKey,
+          {
+            selectedOptionId:
+              typeof record.selectedOptionId === 'string' ? record.selectedOptionId : undefined,
+            completed: Boolean(record.completed),
+            selectedAt: typeof record.selectedAt === 'string' ? record.selectedAt : undefined,
+            completedAt: typeof record.completedAt === 'string' ? record.completedAt : undefined,
+          },
+        ]),
+    ) as ChoiceQuestRecords;
   } catch {
     return {};
   }
@@ -4292,13 +4390,18 @@ const addFixedRecordQuestStats = (
   stats: ReturnType<typeof calculateCompletionStats>,
   completion: Record<CoreRoutineId, boolean>,
   canComplete: boolean,
+  extraFixedQuestCompletion: { completedCount: number; totalCount: number } = {
+    completedCount: 0,
+    totalCount: 0,
+  },
 ) => {
   const fixedRecordQuestCount = coreRoutineDefinitions.length;
   const completedFixedRecordQuestCount = canComplete
     ? coreRoutineDefinitions.filter((definition) => completion[definition.id]).length
     : 0;
-  const totalCount = stats.totalCount + fixedRecordQuestCount;
-  const completedCount = stats.completedCount + completedFixedRecordQuestCount;
+  const totalCount = stats.totalCount + fixedRecordQuestCount + extraFixedQuestCompletion.totalCount;
+  const completedCount =
+    stats.completedCount + completedFixedRecordQuestCount + extraFixedQuestCompletion.completedCount;
 
   return {
     completedCount,
@@ -4627,6 +4730,8 @@ const getMasteryAdminRuleText = () => [
 
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
 const getDailyNudgePointAchievementKey = (dateKey: string) => `daily-nudge:${dateKey}`;
+const getNightlyNudgePointAchievementKey = (dateKey: string) => `nightly-nudge:${dateKey}`;
+const getChoiceQuestPointAchievementKey = (dateKey: string) => `choice-quest:${dateKey}`;
 const getCoreRoutinePointAchievementKey = (dateKey: string, kind: CoreRoutineKind) =>
   `core-${kind === 'memo' ? 'memo' : 'events'}:${dateKey}`;
 
@@ -4984,6 +5089,12 @@ function App() {
   const [dailyNudgeRecords, setDailyNudgeRecords] = useState<DailyNudgeRecords>(() =>
     loadDailyNudgeRecords(),
   );
+  const [nightlyNudgeRecords, setNightlyNudgeRecords] = useState<DailyNudgeRecords>(() =>
+    loadNightlyNudgeRecords(),
+  );
+  const [choiceQuestRecords, setChoiceQuestRecords] = useState<ChoiceQuestRecords>(() =>
+    loadChoiceQuestRecords(),
+  );
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
   const [playerBadges, setPlayerBadges] = useState<PlayerBadgeState>(() => loadPlayerBadgeState());
@@ -4998,7 +5109,8 @@ function App() {
   const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const dailyAnyMemoLabel = 'なんでもメモ';
-  const dailyNudgeDisplayLabel = isToday ? '本日の日替わりクエスト' : '昨日の日替わりクエスト';
+  const dailyNudgeDisplayLabel = isToday ? '今日のログインクエスト' : '昨日のログインクエスト';
+  const nightlyNudgeDisplayLabel = isToday ? '今日のおやすみクエスト' : '昨日のおやすみクエスト';
   const coreRoutineDateLabel = isToday ? '今日' : '昨日';
   const selectedDateEarnedPointsLabel = isToday ? '本日の獲得' : '昨日の獲得';
   const playerDisplayName = playerProfile.displayName.trim() || 'ゲストさん';
@@ -5015,6 +5127,7 @@ function App() {
   const [pointToast, setPointToast] = useState<PointToast | null>(null);
   const [pointToastQueue, setPointToastQueue] = useState<PointToast[]>([]);
   const [dailyNudgePointFlash, setDailyNudgePointFlash] = useState<PointToast | null>(null);
+  const [nightlyNudgePointFlash, setNightlyNudgePointFlash] = useState<PointToast | null>(null);
   const [exchangeToast, setExchangeToast] = useState<ExchangeToast | null>(null);
   const [questEmotes, setQuestEmotes] = useState<Record<string, QuestEmote>>({});
   const [isRankPanelOpen, setIsRankPanelOpen] = useState(false);
@@ -5281,10 +5394,20 @@ function App() {
   const freeQuestCount = countFreeQuestItems(displaySections);
   const selectedCoreRoutineCompletion = getCoreRoutineCompletion(dailyMemo, dailyEvent);
   const selectedCoreRoutineCanComplete = selectedDateKey <= todayKey;
+  const selectedNightlyNudgeRecord = nightlyNudgeRecords[selectedDateKey] ?? null;
+  const selectedChoiceQuestRecord = choiceQuestRecords[selectedDateKey] ?? null;
   const selectedDateStats = addFixedRecordQuestStats(
     calculateCompletionStats(displaySections, checkedItems),
     selectedCoreRoutineCompletion,
     selectedCoreRoutineCanComplete,
+    {
+      completedCount:
+        selectedCoreRoutineCanComplete
+          ? (selectedNightlyNudgeRecord?.completed ? 1 : 0) +
+            (selectedChoiceQuestRecord?.completed ? 1 : 0)
+          : 0,
+      totalCount: selectedCoreRoutineCanComplete ? 2 : 0,
+    },
   );
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
   const selectedDailyNudgeRecord = dailyNudgeRecords[selectedDateKey] ?? null;
@@ -5299,6 +5422,11 @@ function App() {
   );
   const selectedDailyNudgeAward =
     playerEconomy.pointAwards[getDailyNudgePointAchievementKey(selectedDateKey)];
+  const selectedNightlyNudgeAward =
+    playerEconomy.pointAwards[getNightlyNudgePointAchievementKey(selectedDateKey)];
+  const selectedChoiceQuestOption = choiceQuestOptions.find(
+    (option) => option.id === selectedChoiceQuestRecord?.selectedOptionId,
+  ) ?? null;
   const selectedDateEarnedPoints = useMemo(
     () => calculateActiveEarnedPointsForDate(playerEconomy.pointAwards, selectedDateKey),
     [playerEconomy.pointAwards, selectedDateKey],
@@ -5354,6 +5482,14 @@ function App() {
     calculateCompletionStats(historyDisplaySections, historyCheckedItems),
     historyCoreRoutineCompletion,
     historyCoreRoutineCanComplete,
+    {
+      completedCount:
+        historyCoreRoutineCanComplete
+          ? (nightlyNudgeRecords[historySelectedDateKey]?.completed ? 1 : 0) +
+            (choiceQuestRecords[historySelectedDateKey]?.completed ? 1 : 0)
+          : 0,
+      totalCount: historyCoreRoutineCanComplete ? 2 : 0,
+    },
   );
   const historyDateRank = getCompletionRank(historyDateStats.rate);
   const masteryStats = useMemo(() => calculateMasteryStats(
@@ -5736,6 +5872,13 @@ function App() {
         calculateCompletionStats(daySections, loadCheckedItems(date)),
         getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date)),
         dateKey <= todayKey,
+        {
+          completedCount: dateKey <= todayKey
+            ? (nightlyNudgeRecords[dateKey]?.completed ? 1 : 0) +
+              (choiceQuestRecords[dateKey]?.completed ? 1 : 0)
+            : 0,
+          totalCount: dateKey <= todayKey ? 2 : 0,
+        },
       );
       const rank = getCompletionRank(stats.rate);
       const calendarRank = getVisualProgressRank(
@@ -5766,9 +5909,11 @@ function App() {
     })
   ), [
     calendarMonth,
+    choiceQuestRecords,
     dateOverrides,
     dateSnapshots,
     dailyNudgeRecords,
+    nightlyNudgeRecords,
     checkedItems,
     historyCheckedItems,
     historySelectedDateKey,
@@ -5912,6 +6057,14 @@ function App() {
   }, [dailyNudgeRecords]);
 
   useEffect(() => {
+    localStorage.setItem(NIGHTLY_NUDGE_RECORDS_STORAGE_KEY, JSON.stringify(nightlyNudgeRecords));
+  }, [nightlyNudgeRecords]);
+
+  useEffect(() => {
+    localStorage.setItem(CHOICE_QUEST_RECORDS_STORAGE_KEY, JSON.stringify(choiceQuestRecords));
+  }, [choiceQuestRecords]);
+
+  useEffect(() => {
     setDailyNudgeRecords((currentRecords) => {
       if (currentRecords[selectedDateKey]) {
         return currentRecords;
@@ -5933,6 +6086,29 @@ function App() {
       };
     });
   }, [dailyNudgeCandidates, selectedDateKey]);
+
+  useEffect(() => {
+    setNightlyNudgeRecords((currentRecords) => {
+      if (currentRecords[selectedDateKey]) {
+        return currentRecords;
+      }
+
+      const candidate = selectDailyNudgeCandidate(
+        selectedDateKey,
+        defaultNightlyNudgeCandidates,
+        currentRecords,
+      );
+
+      if (!candidate) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [selectedDateKey]: createDailyNudgeRecord(candidate),
+      };
+    });
+  }, [selectedDateKey]);
 
   useEffect(() => {
     localStorage.setItem(GAME_MODE_STORAGE_KEY, JSON.stringify(gameMode));
@@ -6132,6 +6308,16 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [dailyNudgePointFlash]);
+
+  useEffect(() => {
+    if (!nightlyNudgePointFlash) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setNightlyNudgePointFlash(null), 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [nightlyNudgePointFlash]);
 
   useEffect(() => {
     if (!exchangeToast) {
@@ -6668,7 +6854,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '本日の日替わりクエスト',
+          itemLabel: '今日のログインクエスト',
           sectionId: 'daily-nudge',
           points,
           basePoints,
@@ -6681,7 +6867,7 @@ function App() {
           achievementKey,
           dateKey,
           itemId: 'daily-nudge',
-          itemLabel: '本日の日替わりクエスト',
+          itemLabel: '今日のログインクエスト',
           sectionId: 'daily-nudge',
           type: 'earn',
           points,
@@ -6695,7 +6881,7 @@ function App() {
           const pointFlash = {
             id: nextLedgerEntry.id,
             points,
-            itemLabel: '本日の日替わりクエスト',
+            itemLabel: '今日のログインクエスト',
           };
 
           enqueuePointToast(pointFlash);
@@ -6782,6 +6968,269 @@ function App() {
           completed: nextCompleted,
           celebrationMessage,
           completedAt: nextCompleted ? new Date().toISOString() : undefined,
+        },
+      };
+    });
+  };
+
+  const applyPointChangeForNightlyNudge = (
+    dateKey: string,
+    nextCompleted: boolean,
+    record: DailyNudgeRecord,
+  ) => {
+    const achievementKey = getNightlyNudgePointAchievementKey(dateKey);
+    const now = new Date().toISOString();
+    const pointSetting = gameBalance.pointSettings.dailyNudge;
+
+    setPlayerEconomy((currentEconomy) => {
+      const existingAward = currentEconomy.pointAwards[achievementKey];
+
+      if (nextCompleted) {
+        if (existingAward?.active) {
+          return currentEconomy;
+        }
+
+        if (!pointSetting.enabled && !existingAward) {
+          return currentEconomy;
+        }
+
+        const points = existingAward?.points ??
+          roundPoints(pointSetting.basePoints * playerRankProgress.multiplier, gameBalance.pointSettings.rounding);
+        const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
+        const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+        const nextAward: PointAwardRecord = {
+          achievementKey,
+          dateKey,
+          itemId: 'nightly-nudge',
+          itemLabel: '今日のおやすみクエスト',
+          sectionId: 'nightly-nudge',
+          points,
+          basePoints,
+          multiplier,
+          active: true,
+          awardedAt: existingAward?.awardedAt ?? now,
+        };
+        const nextLedgerEntry: PointLedgerEntry = {
+          id: `${achievementKey}:earn:${now}`,
+          achievementKey,
+          dateKey,
+          itemId: 'nightly-nudge',
+          itemLabel: '今日のおやすみクエスト',
+          sectionId: 'nightly-nudge',
+          type: 'earn',
+          points,
+          basePoints,
+          multiplier,
+          createdAt: now,
+          reason: record.text,
+        };
+
+        if (points > 0 && pointSetting.enabled) {
+          const pointFlash = {
+            id: nextLedgerEntry.id,
+            points,
+            itemLabel: '今日のおやすみクエスト',
+          };
+
+          enqueuePointToast(pointFlash);
+          setNightlyNudgePointFlash(pointFlash);
+        }
+
+        return {
+          ...currentEconomy,
+          currentPoints: currentEconomy.currentPoints + points,
+          lifetimeEarnedPoints: existingAward
+            ? currentEconomy.lifetimeEarnedPoints
+            : currentEconomy.lifetimeEarnedPoints + points,
+          pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+          pointAwards: {
+            ...currentEconomy.pointAwards,
+            [achievementKey]: nextAward,
+          },
+        };
+      }
+
+      if (!existingAward?.active) {
+        return currentEconomy;
+      }
+
+      const reversalEntry: PointLedgerEntry = {
+        id: `${achievementKey}:reversal:${now}`,
+        achievementKey,
+        dateKey,
+        itemId: existingAward.itemId,
+        itemLabel: existingAward.itemLabel,
+        sectionId: existingAward.sectionId,
+        type: 'reversal',
+        points: -existingAward.points,
+        basePoints: existingAward.basePoints,
+        multiplier: existingAward.multiplier,
+        createdAt: now,
+        reason: record.text,
+      };
+
+      setNightlyNudgePointFlash(null);
+
+      return {
+        ...currentEconomy,
+        currentPoints: Math.max(0, currentEconomy.currentPoints - existingAward.points),
+        pointLedger: [...currentEconomy.pointLedger, reversalEntry],
+        pointAwards: {
+          ...currentEconomy.pointAwards,
+          [achievementKey]: {
+            ...existingAward,
+            active: false,
+            reversedAt: now,
+          },
+        },
+      };
+    });
+  };
+
+  const toggleNightlyNudgeCompletion = (dateKey: string) => {
+    const selectedRecord = nightlyNudgeRecords[dateKey];
+
+    if (!selectedRecord) {
+      return;
+    }
+
+    const nextCompleted = !selectedRecord.completed;
+
+    applyPointChangeForNightlyNudge(dateKey, nextCompleted, selectedRecord);
+
+    setNightlyNudgeRecords((currentRecords) => {
+      const currentRecord = currentRecords[dateKey];
+
+      if (!currentRecord) {
+        return currentRecords;
+      }
+
+      const celebrationMessage =
+        currentRecord.celebrationMessage ??
+        nightlyNudgeCelebrationMessages[
+          getStableStringHash(`${dateKey}:${currentRecord.candidateId}:nightly`) %
+            nightlyNudgeCelebrationMessages.length
+        ];
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          ...currentRecord,
+          completed: nextCompleted,
+          celebrationMessage,
+          completedAt: nextCompleted ? new Date().toISOString() : undefined,
+        },
+      };
+    });
+  };
+
+  const selectChoiceQuestOption = (dateKey: string, optionId: string) => {
+    setChoiceQuestRecords((currentRecords) => {
+      const currentRecord = currentRecords[dateKey];
+
+      if (currentRecord?.completed) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          ...currentRecord,
+          completed: false,
+          selectedOptionId: optionId,
+          selectedAt: new Date().toISOString(),
+        },
+      };
+    });
+  };
+
+  const completeChoiceQuest = (dateKey: string) => {
+    const currentRecord = choiceQuestRecords[dateKey];
+    const selectedOption = choiceQuestOptions.find(
+      (option) => option.id === currentRecord?.selectedOptionId,
+    );
+
+    if (!currentRecord || currentRecord.completed || !selectedOption) {
+      return;
+    }
+
+    const achievementKey = getChoiceQuestPointAchievementKey(dateKey);
+    const now = new Date().toISOString();
+    const pointTargetKind: PointTargetKind = 'normal';
+    const pointSetting = gameBalance.pointSettings[pointTargetKind];
+
+    setPlayerEconomy((currentEconomy) => {
+      const existingAward = currentEconomy.pointAwards[achievementKey];
+
+      if (existingAward?.active || !pointSetting.enabled) {
+        return currentEconomy;
+      }
+
+      const points = existingAward?.points ??
+        calculateQuestPoints(gameBalance, playerRankProgress.multiplier, pointTargetKind);
+      const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
+      const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+      const itemLabel = `選択クエスト：${selectedOption.label}`;
+      const nextAward: PointAwardRecord = {
+        achievementKey,
+        dateKey,
+        itemId: 'choice-quest',
+        itemLabel,
+        sectionId: 'choice-quest',
+        points,
+        basePoints,
+        multiplier,
+        active: true,
+        awardedAt: existingAward?.awardedAt ?? now,
+      };
+      const nextLedgerEntry: PointLedgerEntry = {
+        id: `${achievementKey}:earn:${now}`,
+        achievementKey,
+        dateKey,
+        itemId: 'choice-quest',
+        itemLabel,
+        sectionId: 'choice-quest',
+        type: 'earn',
+        points,
+        basePoints,
+        multiplier,
+        createdAt: now,
+        reason: selectedOption.label,
+      };
+
+      enqueuePointToast({
+        id: nextLedgerEntry.id,
+        points,
+        itemLabel,
+      });
+
+      return {
+        ...currentEconomy,
+        currentPoints: currentEconomy.currentPoints + points,
+        lifetimeEarnedPoints: existingAward
+          ? currentEconomy.lifetimeEarnedPoints
+          : currentEconomy.lifetimeEarnedPoints + points,
+        pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+        pointAwards: {
+          ...currentEconomy.pointAwards,
+          [achievementKey]: nextAward,
+        },
+      };
+    });
+
+    setChoiceQuestRecords((currentRecords) => {
+      const latestRecord = currentRecords[dateKey];
+
+      if (!latestRecord || latestRecord.completed || latestRecord.selectedOptionId !== selectedOption.id) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          ...latestRecord,
+          completed: true,
+          completedAt: now,
         },
       };
     });
@@ -6949,7 +7398,7 @@ function App() {
         setDailyNudgeCandidates(activeCandidates);
         localStorage.setItem(DAILY_QUEST_MASTER_CACHE_STORAGE_KEY, JSON.stringify(activeCandidates));
         setDailyQuestMasterStatus('success');
-        setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを取得しました。');
+        setDailyQuestMasterMessage('全プレイヤー共通のログインクエストを取得しました。');
         return;
       }
 
@@ -7057,7 +7506,7 @@ function App() {
           .sort((first, second) => first.order - second.order),
       );
       await refreshDailyQuestMaster({ includeInactive: true });
-      setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを更新しました。');
+      setDailyQuestMasterMessage('全プレイヤー共通のログインクエストを更新しました。');
     } catch (error) {
       console.warn('Daily quest master save failed:', error);
       setDailyQuestMasterMessage('更新に失敗しました。変更内容を確認してください。');
@@ -7162,7 +7611,7 @@ function App() {
     }
 
     const shouldDelete = window.confirm(
-      `「${candidate.text}」を共通候補から削除しますか？過去の日付に保存済みの日替わりクエストは残ります。`,
+      `「${candidate.text}」を共通候補から削除しますか？過去の日付に保存済みのログインクエストは残ります。`,
     );
 
     if (!shouldDelete) {
@@ -7183,7 +7632,7 @@ function App() {
       }
 
       await refreshDailyQuestMaster({ includeInactive: true });
-      setDailyQuestMasterMessage('全プレイヤー共通の日替わりクエストを更新しました。');
+      setDailyQuestMasterMessage('全プレイヤー共通のログインクエストを更新しました。');
     } catch (error) {
       console.warn('Daily quest master delete failed:', error);
       setDailyQuestMasterMessage('削除に失敗しました。');
@@ -10819,6 +11268,20 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openFixedQuestDestination = (fixedKind?: RoutineItem['fixedKind']) => {
+    if (fixedKind === 'scheduleCheck') {
+      changePage('schedule');
+      return true;
+    }
+
+    if (fixedKind === 'todoCheck') {
+      changePage('todos');
+      return true;
+    }
+
+    return false;
+  };
+
   const returnFromLibraryDetail = (options: { animated?: boolean } = {}) => {
     if (isAnyMemoFolderDetailView) {
       setSelectedAnyMemoFolderId(null);
@@ -12482,12 +12945,12 @@ function App() {
               </button>
             </div>
             <div className="supabase-connection-status" data-status={dailyQuestMasterStatus}>
-              <span>日替わりクエスト共通マスター</span>
+              <span>ログインクエスト共通マスター</span>
               <strong>{dailyQuestMasterStatusLabels[dailyQuestMasterStatus]}</strong>
             </div>
             <div className="settings-header compact-settings-header">
               <div>
-                <h3>日替わりクエスト管理</h3>
+                <h3>ログインクエスト管理</h3>
                 <p>
                   ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
                 </p>
@@ -12649,7 +13112,7 @@ function App() {
                     ['normal', 'フリークエスト'],
                     ['sleep', '就寝'],
                     ['advanced', 'アドバンスト'],
-                    ['dailyNudge', '本日の日替わりクエスト'],
+                    ['dailyNudge', '今日のログインクエスト'],
                     ['coreMemo', '今日のひとことを残す'],
                     ['coreEvents', '今日のできごとを残す'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
@@ -12738,8 +13201,8 @@ function App() {
                       <li>累計星によるランク計算</li>
                       <li>ランクによるPTボーナス倍率</li>
                       <li>PTおよびランクの表示</li>
-                      <li>本日の日替わりクエスト完了によるPT獲得</li>
-                      <li>本日の日替わりクエスト連続記録</li>
+                      <li>今日のログインクエスト完了によるPT獲得</li>
+                      <li>今日のログインクエスト連続記録</li>
                       <li>記憶系固定クエスト完了によるPT獲得</li>
                       <li>記憶系固定クエスト本文削除によるPT取消</li>
                       <li>かばん内のショップ</li>
@@ -13056,61 +13519,6 @@ function App() {
               )}
             </section>
           )}
-          {page === 'today' && (
-            <section
-              className="daily-nudge-card daily-nudge-inline"
-              data-celebrating={
-                dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
-              }
-              data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
-              aria-label={dailyNudgeDisplayLabel}
-            >
-              <div className="daily-nudge-heading">
-                <span aria-hidden="true">👉</span>
-                <div>
-                  <h2>{dailyNudgeDisplayLabel}</h2>
-                  {selectedDailyNudgeRecord && (
-                    <p>{selectedDailyNudgeRecord.category}</p>
-                  )}
-                </div>
-                <p className="daily-nudge-streak">
-                  {selectedDailyNudgeStreak > 0
-                    ? `🔥 ${selectedDailyNudgeStreak}日連続`
-                    : '今日からスタート'}
-                </p>
-              </div>
-              {selectedDailyNudgeRecord ? (
-                <>
-                  <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
-                  <div className="daily-nudge-actions">
-                    {selectedDailyNudgeRecord.completed ? (
-                      <span className="daily-nudge-win-label">今日の勝ち！</span>
-                    ) : (
-                      <button
-                        onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
-                        type="button"
-                      >
-                        OK
-                      </button>
-                    )}
-                    {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
-                      <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
-                        +{dailyNudgePointFlash.points}PT
-                      </span>
-                    )}
-                    {selectedDailyNudgeRecord.completed && (
-                      <p className="daily-nudge-celebration">
-                        {selectedDailyNudgeRecord.celebrationMessage ??
-                          selectedDailyNudgeRecord.completionMessage}
-                      </p>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <p className="daily-nudge-empty">日替わりクエストは準備中です</p>
-              )}
-            </section>
-          )}
           {(isSettingsView || isEditMode) && (
             <div className="routine-context" data-quiet={page === 'today' ? 'true' : 'false'}>
               <p>
@@ -13190,6 +13598,167 @@ function App() {
                   )}
                 </div>
               </div>
+              {page === 'today' && section.id === 'morning' && (
+                <section
+                  className="daily-nudge-card daily-nudge-inline"
+                  data-celebrating={
+                    dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
+                  }
+                  data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
+                  aria-label={dailyNudgeDisplayLabel}
+                >
+                  <div className="daily-nudge-heading">
+                    <span aria-hidden="true">👉</span>
+                    <div>
+                      <h2>{dailyNudgeDisplayLabel}</h2>
+                      {selectedDailyNudgeRecord && (
+                        <p>{selectedDailyNudgeRecord.category}</p>
+                      )}
+                    </div>
+                    <p className="daily-nudge-streak">
+                      {selectedDailyNudgeStreak > 0
+                        ? `🔥 ${selectedDailyNudgeStreak}日連続`
+                        : '今日からスタート'}
+                    </p>
+                  </div>
+                  {selectedDailyNudgeRecord ? (
+                    <>
+                      <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
+                      <div className="daily-nudge-actions">
+                        {selectedDailyNudgeRecord.completed ? (
+                          <span className="daily-nudge-win-label">今日の勝ち！</span>
+                        ) : (
+                          <button
+                            onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                            type="button"
+                          >
+                            OK
+                          </button>
+                        )}
+                        {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
+                          <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
+                            +{dailyNudgePointFlash.points}PT
+                          </span>
+                        )}
+                        {selectedDailyNudgeRecord.completed && (
+                          <p className="daily-nudge-celebration">
+                            {selectedDailyNudgeRecord.celebrationMessage ??
+                              selectedDailyNudgeRecord.completionMessage}
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="daily-nudge-empty">ログインクエストは準備中です</p>
+                  )}
+                </section>
+              )}
+              {page === 'today' && section.id === 'morning' && (
+                <section
+                  className="choice-quest-card"
+                  data-completed={selectedChoiceQuestRecord?.completed ? 'true' : 'false'}
+                  aria-label="選択クエスト"
+                >
+                  <div className="choice-quest-heading">
+                    <div>
+                      <h3>選択クエスト</h3>
+                      <p>
+                        {selectedChoiceQuestRecord?.completed && selectedChoiceQuestOption
+                          ? `${selectedChoiceQuestOption.label}を選びました`
+                          : '今日の気分でひとつ選ぼう'}
+                      </p>
+                    </div>
+                    {selectedChoiceQuestRecord?.completed && (
+                      <span className="choice-quest-complete-badge">達成</span>
+                    )}
+                  </div>
+                  <div className="choice-quest-options" aria-label="選択クエスト候補">
+                    {choiceQuestOptions.map((option) => {
+                      const isSelected = selectedChoiceQuestRecord?.selectedOptionId === option.id;
+
+                      return (
+                        <button
+                          aria-pressed={isSelected}
+                          data-selected={isSelected ? 'true' : 'false'}
+                          disabled={Boolean(selectedChoiceQuestRecord?.completed)}
+                          key={option.id}
+                          onClick={() => selectChoiceQuestOption(selectedDateKey, option.id)}
+                          type="button"
+                        >
+                          <span aria-hidden="true">{option.icon}</span>
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="choice-quest-actions">
+                    {selectedChoiceQuestRecord?.completed ? (
+                      <p>
+                        ✅ 今日の選択：{selectedChoiceQuestOption?.label ?? '選択済み'}
+                      </p>
+                    ) : (
+                      <button
+                        disabled={!selectedChoiceQuestRecord?.selectedOptionId}
+                        onClick={() => completeChoiceQuest(selectedDateKey)}
+                        type="button"
+                      >
+                        OK
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
+              {page === 'today' && section.id === 'night' && (
+                <section
+                  className="daily-nudge-card daily-nudge-inline"
+                  data-celebrating={
+                    nightlyNudgePointFlash && selectedNightlyNudgeAward?.active ? 'true' : 'false'
+                  }
+                  data-completed={selectedNightlyNudgeRecord?.completed ? 'true' : 'false'}
+                  aria-label={nightlyNudgeDisplayLabel}
+                >
+                  <div className="daily-nudge-heading">
+                    <span aria-hidden="true">🌙</span>
+                    <div>
+                      <h2>{nightlyNudgeDisplayLabel}</h2>
+                      {selectedNightlyNudgeRecord && (
+                        <p>{selectedNightlyNudgeRecord.category}</p>
+                      )}
+                    </div>
+                    <p className="daily-nudge-streak">一日をやさしく締める</p>
+                  </div>
+                  {selectedNightlyNudgeRecord ? (
+                    <>
+                      <p className="daily-nudge-text">{selectedNightlyNudgeRecord.text}</p>
+                      <div className="daily-nudge-actions">
+                        {selectedNightlyNudgeRecord.completed ? (
+                          <span className="daily-nudge-win-label">今日もお疲れさま</span>
+                        ) : (
+                          <button
+                            onClick={() => toggleNightlyNudgeCompletion(selectedDateKey)}
+                            type="button"
+                          >
+                            OK
+                          </button>
+                        )}
+                        {nightlyNudgePointFlash && selectedNightlyNudgeAward?.active && (
+                          <span className="daily-nudge-point-pop" key={nightlyNudgePointFlash.id}>
+                            +{nightlyNudgePointFlash.points}PT
+                          </span>
+                        )}
+                        {selectedNightlyNudgeRecord.completed && (
+                          <p className="daily-nudge-celebration">
+                            {selectedNightlyNudgeRecord.celebrationMessage ??
+                              selectedNightlyNudgeRecord.completionMessage}
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="daily-nudge-empty">おやすみクエストは準備中です</p>
+                  )}
+                </section>
+              )}
               <div className="routine-items">
                 {getMixedRoutineEntries(section, {
                   includeCoreRoutines: page === 'today' && !isBonusSection,
@@ -13432,7 +14001,13 @@ function App() {
                           checked={isCheckMode && Boolean(checkedItems[item.id])}
                           disabled={!isCheckMode}
                           id={inputId}
-                          onChange={() => toggleItem(item.id)}
+                          onChange={() => {
+                            if (openFixedQuestDestination(item.fixedKind)) {
+                              return;
+                            }
+
+                            toggleItem(item.id);
+                          }}
                           type="checkbox"
                         />
                       </label>
@@ -16414,6 +16989,28 @@ function App() {
                       </p>
                     </>
                   )}
+                </section>
+                <section className="history-choice-quest-card" aria-label="選択クエストの記録">
+                  {(() => {
+                    const choiceRecord = choiceQuestRecords[historySelectedDateKey];
+                    const choiceOption = choiceQuestOptions.find(
+                      (option) => option.id === choiceRecord?.selectedOptionId,
+                    );
+
+                    return (
+                      <>
+                        <h3>選択クエスト</h3>
+                        <p>
+                          {choiceOption
+                            ? `${choiceOption.icon} ${choiceOption.label}`
+                            : '未選択'}
+                        </p>
+                        <span data-completed={choiceRecord?.completed ? 'true' : 'false'}>
+                          {choiceRecord?.completed ? '達成' : '未達成'}
+                        </span>
+                      </>
+                    );
+                  })()}
                 </section>
                 <section className="daily-memo history-record-card" aria-label="その日の記録">
                   <div className="daily-record-field daily-record-field-one-line">

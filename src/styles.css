@@ -9025,6 +9025,165 @@ h1 {
   animation: daily-nudge-message-in 700ms ease-out both;
 }
 
+.choice-quest-card {
+  display: grid;
+  gap: 9px;
+  margin: 8px 0 6px;
+  border: 1px solid rgb(134 195 157 / 42%);
+  border-radius: 10px;
+  padding: 10px;
+  background:
+    linear-gradient(180deg, rgb(248 255 249 / 90%), rgb(255 253 238 / 88%)),
+    #fbfff8;
+  box-shadow:
+    0 8px 18px rgb(18 24 20 / 6%),
+    inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+.choice-quest-card[data-completed='true'] {
+  border-color: rgb(36 166 105 / 36%);
+  background: linear-gradient(180deg, rgb(235 255 243 / 94%), rgb(252 255 241 / 90%));
+}
+
+.choice-quest-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.choice-quest-heading h3,
+.choice-quest-heading p,
+.choice-quest-actions p,
+.history-choice-quest-card h3,
+.history-choice-quest-card p {
+  margin: 0;
+}
+
+.choice-quest-heading h3 {
+  color: #155b3c;
+  font-size: 0.9rem;
+  font-weight: 1000;
+  line-height: 1.2;
+}
+
+.choice-quest-heading p {
+  margin-top: 2px;
+  color: #65756b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.choice-quest-complete-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #22a96e;
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 1000;
+}
+
+.choice-quest-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.choice-quest-options button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgb(80 154 112 / 28%);
+  border-radius: 999px;
+  padding: 0 8px;
+  background: rgb(255 255 255 / 76%);
+  color: #254438;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.choice-quest-options button[data-selected='true'] {
+  border-color: rgb(24 139 86 / 52%);
+  background: linear-gradient(180deg, #e4ffef, #f8fff8);
+  color: #12613f;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 70%);
+}
+
+.choice-quest-options button:disabled {
+  cursor: default;
+}
+
+.choice-quest-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.choice-quest-actions button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 13px;
+  background: linear-gradient(180deg, #22b877, #15915e);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 1000;
+  box-shadow: 0 8px 16px rgb(21 145 94 / 18%);
+}
+
+.choice-quest-actions button:disabled {
+  background: #e5ece5;
+  color: #9aa79f;
+  cursor: default;
+  box-shadow: none;
+}
+
+.choice-quest-actions p {
+  color: #16734c;
+  font-size: 0.82rem;
+  font-weight: 1000;
+}
+
+.history-choice-quest-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  border: 1px solid rgb(134 195 157 / 40%);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgb(248 255 249 / 86%);
+}
+
+.history-choice-quest-card h3 {
+  grid-column: 1 / -1;
+  color: #155b3c;
+  font-size: 0.86rem;
+  font-weight: 1000;
+}
+
+.history-choice-quest-card p {
+  color: #26362f;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.history-choice-quest-card span {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #eef3ee;
+  color: #65756b;
+  font-size: 0.72rem;
+  font-weight: 1000;
+}
+
+.history-choice-quest-card span[data-completed='true'] {
+  background: #dff9eb;
+  color: #16734c;
+}
+
 @keyframes daily-nudge-win {
   0% {
     box-shadow: none;
