@@ -222,7 +222,7 @@ type RoutineItem = {
   timerSeconds?: number;
 };
 
-type FixedQuestKind = 'wake' | 'sleep' | 'scheduleCheck' | 'todoCheck';
+type FixedQuestKind = 'wake' | 'sleep' | 'scheduleCheck' | 'todoCheck' | `choiceQuest:${string}`;
 
 type RoutineSection = {
   id: string;
@@ -514,6 +514,14 @@ type ChoiceQuestOption = {
   icon: string;
 };
 
+type ChoiceQuestDefinition = {
+  id: string;
+  title: string;
+  icon: string;
+  options: ChoiceQuestOption[];
+  unlockRank?: string | null;
+};
+
 type ChoiceQuestRecord = {
   selectedOptionId?: string;
   completed: boolean;
@@ -521,7 +529,9 @@ type ChoiceQuestRecord = {
   completedAt?: string;
 };
 
-type ChoiceQuestRecords = Record<string, ChoiceQuestRecord>;
+type ChoiceQuestDateRecords = Record<string, ChoiceQuestRecord>;
+
+type ChoiceQuestRecords = Record<string, ChoiceQuestDateRecords>;
 
 type NoteEditorTarget = {
   dateKey: string;
@@ -970,6 +980,14 @@ const fixedRoutineIds = new Set([
   'night-sleep',
 ]);
 
+const isChoiceQuestFixedKind = (
+  fixedKind?: FixedQuestKind,
+): fixedKind is `choiceQuest:${string}` =>
+  typeof fixedKind === 'string' && fixedKind.startsWith('choiceQuest:');
+
+const isFixedRoutineItem = (item: RoutineItem) =>
+  fixedRoutineIds.has(item.id) || isChoiceQuestFixedKind(item.fixedKind);
+
 const sectionIconLabels: Record<string, string> = {
   morning: '🌅',
   noon: '☀️',
@@ -1137,16 +1155,111 @@ const nightlyNudgeCelebrationMessages = [
   '今日をやさしく閉じました。',
 ];
 const defaultNightlyNudgeCandidates: DailyNudgeCandidate[] = [
-  ['nightly-nudge-good-work', '今日もお疲れって言ってみよう', '今日もお疲れさま。ちゃんと届いた。', 'ねぎらい'],
-  ['nightly-nudge-thanks-feet', 'ありがとうと言いながら足を撫でよう', '足にもありがとう。今日も支えてくれた。', '休息'],
-  ['nightly-nudge-shoulder', '肩を軽く回そう', '肩まわし完了。少し力が抜けた。', 'からだ'],
-  ['nightly-nudge-breath-three', '深呼吸を3回しよう', '深呼吸3回。夜の空気に戻れた。', '休息'],
-  ['nightly-nudge-fun-one', '今日楽しかったことを一つ思い出そう', '楽しかったことをひとつ回収できた。', '記憶'],
-  ['nightly-nudge-kind-self', '今日もよく頑張ったねと言ってあげよう', '自分へのねぎらい完了。よく頑張った。', 'ねぎらい'],
-  ['nightly-nudge-window', '窓の外を眺めてみよう', '外を少し眺めた。夜に目が慣れた。', '休息'],
-  ['nightly-nudge-happy-one', '今日一番嬉しかったことを思い出そう', '嬉しかったことをひとつ持って眠れる。', '記憶'],
-  ['nightly-nudge-eyes', '目を閉じて30秒休もう', '30秒休憩完了。もう休んでいい。', '休息'],
-  ['nightly-nudge-bed', '布団へ入ってみよう', '布団へ到着。今日の冒険はここまで。', 'おやすみ'],
+  ['nightly-nudge-feet-thanks', '足をさすりながら「今日も運んでくれてありがとう。」と感謝してあげよう。', '足にありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-shoulder-goodwork', '肩に手を置きながら「今日もお疲れさま。」と労ってあげよう。', '肩の力を少しほどけた。今日もお疲れさま。', '労い'],
+  ['nightly-nudge-chest-enough', '胸に手を当てながら「今日も十分だったよ。」と認めてあげよう。', '今日の自分を認められた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-mirror-best', '鏡の自分を見ながら「お前って最高。」と褒めてあげよう。', '自分にいい言葉を渡せた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-eyes-rest', '目を閉じながら「今日はもう休もう。」と休ませてあげよう。', '休む許可を出せた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-breathe-safe', '深呼吸しながら「もう大丈夫。」と安心させてあげよう。', '自分を安心させられた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-bed-kind', '布団に入りながら「ここまで来てくれてありがとう。」とねぎらってあげよう。', '今日の終わりにねぎらえた。今日もお疲れさま。', 'ねぎらい'],
+  ['nightly-nudge-today-self', '今日の自分を思い浮かべながら「なんだかんだ乗り切ったね。」と受け入れてあげよう。', '今日の自分を受け入れた。今日もお疲れさま。', '受容'],
+  ['nightly-nudge-hands-wrap', '手を包みながら「よく頑張ったね。」といたわってあげよう。', '手の中で自分をいたわれた。今日もお疲れさま。', 'いたわり'],
+  ['nightly-nudge-smile-day', '笑顔を作りながら「今日も悪くなかったね。」と笑ってあげよう。', '今日へ小さく笑えた。今日もお疲れさま。', '笑顔'],
+  ['nightly-nudge-feet-sorry', '足首をゆっくり回しながら「いっぱい使ってごめんね。」と許してあげよう。', '体にやさしく謝れた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-neck-loosen', '首をなでながら「重たいもの持ってくれてありがとう。」と感謝してあげよう。', '首を少し休ませられた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-belly-warm', 'お腹に手を置きながら「今日も生きてくれてありがとう。」と大切にしてあげよう。', '体を大切にできた。今日もお疲れさま。', '大切'],
+  ['nightly-nudge-back-kind', '背中を軽くさすりながら「今日も背負ってくれてありがとう。」と労ってあげよう。', '背中を労えた。今日もお疲れさま。', '労い'],
+  ['nightly-nudge-forehead-soft', '額に手を当てながら「考えすぎても大丈夫だったよ。」と安心させてあげよう。', '頭を少し安心させた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-pillow-done', '枕に頭を置きながら「今日の役目はここまで。」と休ませてあげよう。', '休む区切りを作れた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-light-off', '部屋の明かりを落としながら「今日はもう閉店です。」と優しくしてあげよう。', '一日をやさしく閉じた。今日もお疲れさま。', '優しさ'],
+  ['nightly-nudge-blanket-hug', '布団をかけながら「今日は守られていいよ。」と抱きしめてあげよう。', '自分を守る夜にできた。今日もお疲れさま。', '抱擁'],
+  ['nightly-nudge-hand-heart', '片手を胸に置きながら「ちゃんと前に進んでるよ。」と励ましてあげよう。', '静かな励ましを渡せた。今日もお疲れさま。', '励まし'],
+  ['nightly-nudge-day-thanks', '今日という一日を思い浮かべながら「今日も付き合ってくれてありがとう。」と感謝してあげよう。', '今日へありがとうを置けた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-cheeks-soft', '頬を軽く包みながら「今日も自分らしかったね。」と認めてあげよう。', '自分らしさを認めた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-arms-cross', '腕をゆるく組みながら「ここにいてくれてありがとう。」と抱きしめてあげよう。', '自分を少し抱きしめた。今日もお疲れさま。', '抱擁'],
+  ['nightly-nudge-toes-thanks', 'つま先を動かしながら「小さくても進んだね。」と褒めてあげよう。', '小さな前進を褒めた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-knees-care', 'ひざをなでながら「今日も支えてくれてありがとう。」といたわってあげよう。', 'ひざをいたわれた。今日もお疲れさま。', 'いたわり'],
+  ['nightly-nudge-palms-rest', '手のひらを見ながら「今日はもう何もしなくていいよ。」と休ませてあげよう。', '手を休ませる気持ちになれた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-window-soft', '窓の外を眺めながら「また明日も大丈夫。」と安心させてあげよう。', '明日への安心を少し置けた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-water-reward', '水をひと口飲みながら「今日のご褒美だよ。」とご褒美をあげよう。', '小さなご褒美を渡せた。今日もお疲れさま。', 'ご褒美'],
+  ['nightly-nudge-lips-smile', '口角を少し上げながら「なんとかやれたね。」と笑ってあげよう。', '自分に小さく笑えた。今日もお疲れさま。', '笑顔'],
+  ['nightly-nudge-breath-proud', '息を長く吐きながら「今日もえらかったよ。」と褒めてあげよう。', '今日の自分を褒めた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-chest-forgive', '胸に手を当てながら「うまくできない日もあっていいよ。」と許してあげよう。', '自分を少し許せた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-eyes-kind', 'まぶたを閉じながら「たくさん見てくれてありがとう。」と感謝してあげよう。', '目にありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-ears-quiet', '耳の近くを軽くなでながら「静かに休んでいいよ。」と安心させてあげよう。', '静かな休みを作れた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-hair-soft', '髪を軽くなでながら「今日もよくここまで来たね。」とねぎらってあげよう。', '自分をねぎらえた。今日もお疲れさま。', 'ねぎらい'],
+  ['nightly-nudge-room-look', '部屋を一度見回しながら「ここまでで十分。」と認めてあげよう。', '十分の線を引けた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-clothes-loosen', '服の力を抜きながら「もう楽にしていいよ。」と優しくしてあげよう。', '体を楽にできた。今日もお疲れさま。', '優しさ'],
+  ['nightly-nudge-socks-off', '靴下を脱ぎながら「今日の足、よくやったね。」と褒めてあげよう。', '足を褒められた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-bed-sit', 'ベッドに座りながら「今日も帰ってこられたね。」と安心させてあげよう。', '帰ってきた安心を感じた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-one-good', '今日のよかったことを一つ思い出しながら「喜んでいいよ。」と喜んであげよう。', '小さなよかったを喜べた。今日もお疲れさま。', '喜び'],
+  ['nightly-nudge-one-hard', '今日しんどかった場面を思い浮かべながら「それでも来たね。」と認めてあげよう。', 'しんどさごと認めた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-mistake-forgive', '今日の失敗を一つ思い出しながら「もう責めなくていいよ。」と許してあげよう。', '責める手を少しゆるめた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-blanket-thanks', '布団を整えながら「休む場所があるね。」と安心させてあげよう。', '休む場所を確かめた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-hands-clap-soft', '手をそっと合わせながら「今日もありがとう。」と感謝してあげよう。', '今日へ感謝を置けた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-shoulders-drop', '肩を落としながら「もう背負わなくていいよ。」と休ませてあげよう。', '肩の荷を少し降ろせた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-jaw-loose', 'あごの力を抜きながら「こわばっても大丈夫だったよ。」と受け入れてあげよう。', 'こわばりごと受け入れた。今日もお疲れさま。', '受容'],
+  ['nightly-nudge-breathe-slow', 'ゆっくり息を吸いながら「今は安全だよ。」と安心させてあげよう。', '今の安全を確かめた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-breathe-out', 'ゆっくり息を吐きながら「今日の分は置いていいよ。」と休ませてあげよう。', '今日の重さを少し置けた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-mirror-gentle', '鏡の自分を見ながら「味方でいるよ。」と励ましてあげよう。', '自分の味方でいられた。今日もお疲れさま。', '励まし'],
+  ['nightly-nudge-hand-cheek', '手のひらを頬に当てながら「大切な自分だよ。」と大切にしてあげよう。', '自分を大切に扱えた。今日もお疲れさま。', '大切'],
+  ['nightly-nudge-stomach-kind', 'お腹をさすりながら「今日も働いてくれてありがとう。」と感謝してあげよう。', 'お腹にありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-legs-stretch', '脚を伸ばしながら「今日もよく支えたね。」と労ってあげよう。', '脚を労えた。今日もお疲れさま。', '労い'],
+  ['nightly-nudge-fingers-count', '指を一本ずつゆるめながら「もう力を抜いていいよ。」と休ませてあげよう。', '指先まで休ませた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-voice-soft', '小さな声で「今日もよくやったね。」と褒めてあげよう。', '声にして褒められた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-silent-nod', '静かにうなずきながら「それでよかったよ。」と認めてあげよう。', '今日の選択を認めた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-palm-heart', '手のひらを胸に重ねながら「ちゃんとここにいるね。」と安心させてあげよう。', 'ここにいる安心を感じた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-day-close', '今日の終わりを思い浮かべながら「いい一日だったね。」と喜んであげよう。', '一日をやさしく喜べた。今日もお疲れさま。', '喜び'],
+  ['nightly-nudge-hard-day', '疲れた体を感じながら「疲れるまで生きたね。」とねぎらってあげよう。', '疲れごとねぎらえた。今日もお疲れさま。', 'ねぎらい'],
+  ['nightly-nudge-no-score', '目を閉じながら「今日は採点しなくていいよ。」と許してあげよう。', '評価しない夜にできた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-soft-hug', '腕で体を包みながら「ここまで来た自分を抱きしめよう。」と抱きしめてあげよう。', '自分を抱きしめられた。今日もお疲れさま。', '抱擁'],
+  ['nightly-nudge-pillow-thanks', '枕に頬をつけながら「休ませてくれてありがとう。」と感謝してあげよう。', '休む準備ができた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-smile-self', '自分に向けて少し笑いながら「今日の自分、好きだよ。」と優しくしてあげよう。', '自分にやさしく笑えた。今日もお疲れさま。', '優しさ'],
+  ['nightly-nudge-door-close', 'ドアを閉めながら「今日の外側はここまで。」と安心させてあげよう。', '夜の境目を作れた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-phone-down', 'スマホを置きながら「もう離れていいよ。」と休ませてあげよう。', '手放す時間を作れた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-blanket-reward', '布団を少し整えながら「これは今日のご褒美。」とご褒美をあげよう。', '休むご褒美を渡せた。今日もお疲れさま。', 'ご褒美'],
+  ['nightly-nudge-eyebrows-soft', '眉間の力を抜きながら「難しい顔もおしまい。」と笑ってあげよう。', '顔の力をゆるめた。今日もお疲れさま。', '笑顔'],
+  ['nightly-nudge-body-thanks', '体全体を感じながら「今日も動いてくれてありがとう。」と感謝してあげよう。', '体全体にありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-heart-kind', '胸のあたりをゆっくり撫でながら「今日もいてくれてありがとう。」と大切にしてあげよう。', '自分を大切にできた。今日もお疲れさま。', '大切'],
+  ['nightly-nudge-small-win', '今日できた小さなことを思い出しながら「それ、よかったよ。」と褒めてあげよう。', '小さなできたを褒めた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-sad-ok', '今日のしょんぼりを思い浮かべながら「そういう日もあるよ。」と受け入れてあげよう。', 'しょんぼりも受け入れた。今日もお疲れさま。', '受容'],
+  ['nightly-nudge-angry-ok', '今日のもやもやを思い浮かべながら「感じてもよかったよ。」と許してあげよう。', 'もやもやを許せた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-lonely-care', '手をぎゅっと握りながら「ひとりにしないよ。」と安心させてあげよう。', '自分をひとりにしなかった。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-tired-care', '疲れた場所に手を当てながら「ここ、よく使ったね。」といたわってあげよう。', '疲れた場所をいたわれた。今日もお疲れさま。', 'いたわり'],
+  ['nightly-nudge-night-air', '夜の空気を吸いながら「ここから休む時間だよ。」と休ませてあげよう。', '休む時間に入れた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-today-friend', '今日の自分に向けて「味方でいてくれてありがとう。」と感謝してあげよう。', '自分への感謝ができた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-quiet-proud', '静かに目を閉じながら「今日も誇っていいよ。」と認めてあげよう。', '誇っていい夜にできた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-bed-smile', '布団の中で少し笑いながら「今日もかわいげあったね。」と笑ってあげよう。', '自分へやさしく笑えた。今日もお疲れさま。', '笑顔'],
+  ['nightly-nudge-shoulder-hug', '自分の肩を抱きながら「よく耐えたね。」と抱きしめてあげよう。', '自分を抱きしめて労えた。今日もお疲れさま。', '抱擁'],
+  ['nightly-nudge-memory-good', '今日うれしかった瞬間を思い出しながら「よかったね。」と喜んであげよう。', 'うれしさを喜べた。今日もお疲れさま。', '喜び'],
+  ['nightly-nudge-memory-normal', '普通に過ぎた時間を思い出しながら「普通もありがたいね。」と感謝してあげよう。', '普通の一日にも感謝できた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-body-ok', '体をゆるめながら「そのままで大丈夫。」と安心させてあげよう。', 'そのままを安心させた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-sleep-permit', '目を閉じながら「眠っていいよ。」と許してあげよう。', '眠る許可を出せた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-tomorrow-soft', '布団をかけながら「明日のことは明日に渡そう。」と休ませてあげよう。', '明日を明日に渡せた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-face-care', '顔を軽くなでながら「今日も表情を作ってくれてありがとう。」と感謝してあげよう。', '顔にもありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-voice-kind', '小さく息を吐きながら「今日の自分、悪くなかったよ。」と認めてあげよう。', '今日の自分を認められた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-self-reward', '好きな姿勢を取りながら「これが今日のご褒美だよ。」とご褒美をあげよう。', '体にご褒美を渡せた。今日もお疲れさま。', 'ご褒美'],
+  ['nightly-nudge-breath-hug', '深呼吸しながら「自分を大事にするよ。」と大切にしてあげよう。', '自分を大事にする夜にできた。今日もお疲れさま。', '大切'],
+  ['nightly-nudge-bed-forgive', '布団に沈みながら「今日の全部を責めなくていいよ。」と許してあげよう。', '今日を責めずに閉じられた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-palm-encourage', '手を包みながら「また休めば戻ってくるよ。」と励ましてあげよう。', 'やわらかい励ましを渡せた。今日もお疲れさま。', '励まし'],
+  ['nightly-nudge-heart-welcome', '胸に手を当てながら「どんな自分でも帰っておいで。」と受け入れてあげよう。', '自分の帰る場所を作れた。今日もお疲れさま。', '受容'],
+  ['nightly-nudge-knees-hug', 'ひざを抱えながら「小さく丸まってもいいよ。」と安心させてあげよう。', '丸まって休む許可を出せた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-ankle-soft', '足首をさすりながら「今日も最後までありがとう。」と感謝してあげよう。', '足首まで労えた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-room-thanks', '寝る場所を見ながら「今日の自分を迎えてくれてありがとう。」と喜んであげよう。', '休む場所に戻れたことを喜べた。今日もお疲れさま。', '喜び'],
+  ['nightly-nudge-soft-word', '自分に向けて「今日も大事な一日だったよ。」と認めてあげよう。', '今日を大事に閉じられた。今日もお疲れさま。', '承認'],
+  ['nightly-nudge-wrist-care', '手首をゆっくり回しながら「細かいことまでありがとう。」といたわってあげよう。', '手首をいたわれた。今日もお疲れさま。', 'いたわり'],
+  ['nightly-nudge-eyes-smile', '目元をゆるめながら「やさしい顔に戻っていいよ。」と優しくしてあげよう。', '顔をやさしく戻せた。今日もお疲れさま。', '優しさ'],
+  ['nightly-nudge-today-wrap', '今日の一日を包むように思い浮かべながら「今日もここまで。」とねぎらってあげよう。', '一日を包んでねぎらえた。今日もお疲れさま。', 'ねぎらい'],
+  ['nightly-nudge-heart-thanks', '胸に手を置きながら「生きてくれてありがとう。」と感謝してあげよう。', '自分に深くありがとうを渡せた。今日もお疲れさま。', '感謝'],
+  ['nightly-nudge-soft-yes', '小さくうなずきながら「うん、今日もよくやった。」と褒めてあげよう。', '今日を褒めて終われた。今日もお疲れさま。', '褒め'],
+  ['nightly-nudge-rest-now', '布団に手を置きながら「今から休ませてあげるね。」と休ませてあげよう。', '休ませる準備ができた。今日もお疲れさま。', '休息'],
+  ['nightly-nudge-gentle-name', '自分の名前を小さく呼びながら「今日もお疲れさま。」と労ってあげよう。', '名前ごと労えた。今日もお疲れさま。', '労い'],
+  ['nightly-nudge-today-ok', '今日の自分を思い浮かべながら「それでも大丈夫だったよ。」と安心させてあげよう。', '今日を安心で閉じた。今日もお疲れさま。', '安心'],
+  ['nightly-nudge-last-smile', '寝る前に少し笑いながら「また明日ね。」と優しくしてあげよう。', '明日へやさしく渡せた。今日もお疲れさま。', '優しさ'],
+  ['nightly-nudge-body-hug', '腕で体を包みながら「今日の体、ありがとう。」と抱きしめてあげよう。', '体を抱きしめられた。今日もお疲れさま。', '抱擁'],
+  ['nightly-nudge-day-forgive', '今日の一日を思い浮かべながら「足りないところがあってもいいよ。」と許してあげよう。', '足りなさごと許せた。今日もお疲れさま。', '許し'],
+  ['nightly-nudge-self-cheer', '胸を軽く叩きながら「ちゃんとここまで来たよ。」と励ましてあげよう。', '自分を静かに励ませた。今日もお疲れさま。', '励まし'],
+  ['nightly-nudge-soft-finish', '目を閉じながら「今日もいい締めくくりにしよう。」と大切にしてあげよう。', '今日を大切に締められた。今日もお疲れさま。', '大切'],
 ].map(([id, text, completionMessage, category], index) => ({
   id,
   text,
@@ -1157,9 +1270,30 @@ const defaultNightlyNudgeCandidates: DailyNudgeCandidate[] = [
   createdAt: '2026-08-07T00:00:00.000Z',
 }));
 
-const choiceQuestOptions: ChoiceQuestOption[] = [
-  { id: 'walk', label: '散歩', icon: '🚶' },
-  { id: 'stretch', label: 'ストレッチ', icon: '🤸' },
+const choiceQuestDefinitions: ChoiceQuestDefinition[] = [
+  {
+    id: 'movementChoice',
+    title: '選択クエスト',
+    icon: '🚶',
+    unlockRank: 'READY',
+    options: [
+      { id: 'walk', label: '散歩', icon: '🚶' },
+      { id: 'running', label: 'ランニング', icon: '🏃' },
+    ],
+  },
+  {
+    id: 'bodyChoice',
+    title: '選択クエスト',
+    icon: '💪',
+    unlockRank: null,
+    options: [
+      { id: 'workout', label: '筋トレ', icon: '💪' },
+      { id: 'stretch', label: 'ストレッチ', icon: '🤸' },
+    ],
+  },
+];
+
+const legacyChoiceQuestOptions: ChoiceQuestOption[] = [
   { id: 'meditation', label: '瞑想', icon: '🧘' },
 ];
 
@@ -1750,8 +1884,17 @@ const loadNudgeRecords = (
 
 const loadDailyNudgeRecords = () => loadNudgeRecords(DAILY_NUDGE_RECORDS_STORAGE_KEY);
 
-const loadNightlyNudgeRecords = () =>
-  loadNudgeRecords(NIGHTLY_NUDGE_RECORDS_STORAGE_KEY, defaultNightlyNudgeCompletionMessage);
+const loadNightlyNudgeRecords = () => {
+  const activeNightlyCandidateIds = new Set(
+    defaultNightlyNudgeCandidates.map((candidate) => candidate.id),
+  );
+
+  return Object.fromEntries(
+    Object.entries(
+      loadNudgeRecords(NIGHTLY_NUDGE_RECORDS_STORAGE_KEY, defaultNightlyNudgeCompletionMessage),
+    ).filter(([, record]) => activeNightlyCandidateIds.has(record.candidateId)),
+  ) as DailyNudgeRecords;
+};
 
 const loadChoiceQuestRecords = (): ChoiceQuestRecords => {
   const savedRecords = localStorage.getItem(CHOICE_QUEST_RECORDS_STORAGE_KEY);
@@ -1761,25 +1904,56 @@ const loadChoiceQuestRecords = (): ChoiceQuestRecords => {
   }
 
   try {
-    const parsedRecords = JSON.parse(savedRecords) as Record<string, Partial<ChoiceQuestRecord>>;
+    const parsedRecords = JSON.parse(savedRecords) as Record<
+      string,
+      Partial<ChoiceQuestRecord> | Record<string, Partial<ChoiceQuestRecord>>
+    >;
 
     if (!parsedRecords || typeof parsedRecords !== 'object' || Array.isArray(parsedRecords)) {
       return {};
     }
 
+    const normalizeChoiceRecord = (record: Partial<ChoiceQuestRecord>): ChoiceQuestRecord => ({
+      selectedOptionId:
+        typeof record.selectedOptionId === 'string' ? record.selectedOptionId : undefined,
+      completed: Boolean(record.completed),
+      selectedAt: typeof record.selectedAt === 'string' ? record.selectedAt : undefined,
+      completedAt: typeof record.completedAt === 'string' ? record.completedAt : undefined,
+    });
+
     return Object.fromEntries(
       Object.entries(parsedRecords)
         .filter(([dateKey, record]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && record)
-        .map(([dateKey, record]) => [
-          dateKey,
-          {
-            selectedOptionId:
-              typeof record.selectedOptionId === 'string' ? record.selectedOptionId : undefined,
-            completed: Boolean(record.completed),
-            selectedAt: typeof record.selectedAt === 'string' ? record.selectedAt : undefined,
-            completedAt: typeof record.completedAt === 'string' ? record.completedAt : undefined,
-          },
-        ]),
+        .map(([dateKey, record]) => {
+          if ('completed' in record || 'selectedOptionId' in record) {
+            const normalizedRecord = normalizeChoiceRecord(record as Partial<ChoiceQuestRecord>);
+            const migratedQuestId = normalizedRecord.selectedOptionId === 'walk'
+              ? 'movementChoice'
+              : 'bodyChoice';
+
+            return [
+              dateKey,
+              {
+                [migratedQuestId]: normalizedRecord,
+              },
+            ];
+          }
+
+          const dateRecords = Object.fromEntries(
+            Object.entries(record as Record<string, Partial<ChoiceQuestRecord>>)
+              .filter(([questId, choiceRecord]) =>
+                choiceQuestDefinitions.some((definition) => definition.id === questId) &&
+                choiceRecord &&
+                typeof choiceRecord === 'object'
+              )
+              .map(([questId, choiceRecord]) => [
+                questId,
+                normalizeChoiceRecord(choiceRecord),
+              ]),
+          );
+
+          return [dateKey, dateRecords];
+        }),
     ) as ChoiceQuestRecords;
   } catch {
     return {};
@@ -4731,7 +4905,8 @@ const getMasteryAdminRuleText = () => [
 const getPointAchievementKey = (dateKey: string, itemId: string) => `${dateKey}:${itemId}`;
 const getDailyNudgePointAchievementKey = (dateKey: string) => `daily-nudge:${dateKey}`;
 const getNightlyNudgePointAchievementKey = (dateKey: string) => `nightly-nudge:${dateKey}`;
-const getChoiceQuestPointAchievementKey = (dateKey: string) => `choice-quest:${dateKey}`;
+const getChoiceQuestPointAchievementKey = (dateKey: string, questId: string) =>
+  `choice-quest:${questId}:${dateKey}`;
 const getCoreRoutinePointAchievementKey = (dateKey: string, kind: CoreRoutineKind) =>
   `core-${kind === 'memo' ? 'memo' : 'events'}:${dateKey}`;
 
@@ -4780,7 +4955,11 @@ const getPointTargetKind = (
     return 'sleep';
   }
 
-  if (item.fixedKind === 'scheduleCheck' || item.fixedKind === 'todoCheck') {
+  if (
+    item.fixedKind === 'scheduleCheck' ||
+    item.fixedKind === 'todoCheck' ||
+    isChoiceQuestFixedKind(item.fixedKind)
+  ) {
     return 'normal';
   }
 
@@ -5395,7 +5574,11 @@ function App() {
   const selectedCoreRoutineCompletion = getCoreRoutineCompletion(dailyMemo, dailyEvent);
   const selectedCoreRoutineCanComplete = selectedDateKey <= todayKey;
   const selectedNightlyNudgeRecord = nightlyNudgeRecords[selectedDateKey] ?? null;
-  const selectedChoiceQuestRecord = choiceQuestRecords[selectedDateKey] ?? null;
+  const selectedChoiceQuestRecords = choiceQuestRecords[selectedDateKey] ?? {};
+  const visibleChoiceQuestDefinitions = choiceQuestDefinitions;
+  const selectedChoiceQuestCompletedCount = visibleChoiceQuestDefinitions.filter(
+    (definition) => selectedChoiceQuestRecords[definition.id]?.completed,
+  ).length;
   const selectedDateStats = addFixedRecordQuestStats(
     calculateCompletionStats(displaySections, checkedItems),
     selectedCoreRoutineCompletion,
@@ -5404,9 +5587,9 @@ function App() {
       completedCount:
         selectedCoreRoutineCanComplete
           ? (selectedNightlyNudgeRecord?.completed ? 1 : 0) +
-            (selectedChoiceQuestRecord?.completed ? 1 : 0)
+            selectedChoiceQuestCompletedCount
           : 0,
-      totalCount: selectedCoreRoutineCanComplete ? 2 : 0,
+      totalCount: selectedCoreRoutineCanComplete ? 1 + visibleChoiceQuestDefinitions.length : 0,
     },
   );
   const selectedDateRank = getCompletionRank(selectedDateStats.rate);
@@ -5424,9 +5607,6 @@ function App() {
     playerEconomy.pointAwards[getDailyNudgePointAchievementKey(selectedDateKey)];
   const selectedNightlyNudgeAward =
     playerEconomy.pointAwards[getNightlyNudgePointAchievementKey(selectedDateKey)];
-  const selectedChoiceQuestOption = choiceQuestOptions.find(
-    (option) => option.id === selectedChoiceQuestRecord?.selectedOptionId,
-  ) ?? null;
   const selectedDateEarnedPoints = useMemo(
     () => calculateActiveEarnedPointsForDate(playerEconomy.pointAwards, selectedDateKey),
     [playerEconomy.pointAwards, selectedDateKey],
@@ -5486,9 +5666,11 @@ function App() {
       completedCount:
         historyCoreRoutineCanComplete
           ? (nightlyNudgeRecords[historySelectedDateKey]?.completed ? 1 : 0) +
-            (choiceQuestRecords[historySelectedDateKey]?.completed ? 1 : 0)
+            choiceQuestDefinitions.filter(
+              (definition) => choiceQuestRecords[historySelectedDateKey]?.[definition.id]?.completed,
+            ).length
           : 0,
-      totalCount: historyCoreRoutineCanComplete ? 2 : 0,
+      totalCount: historyCoreRoutineCanComplete ? 1 + choiceQuestDefinitions.length : 0,
     },
   );
   const historyDateRank = getCompletionRank(historyDateStats.rate);
@@ -5875,9 +6057,11 @@ function App() {
         {
           completedCount: dateKey <= todayKey
             ? (nightlyNudgeRecords[dateKey]?.completed ? 1 : 0) +
-              (choiceQuestRecords[dateKey]?.completed ? 1 : 0)
+              choiceQuestDefinitions.filter(
+                (definition) => choiceQuestRecords[dateKey]?.[definition.id]?.completed,
+              ).length
             : 0,
-          totalCount: dateKey <= todayKey ? 2 : 0,
+          totalCount: dateKey <= todayKey ? 1 + choiceQuestDefinitions.length : 0,
         },
       );
       const rank = getCompletionRank(stats.rate);
@@ -7124,37 +7308,22 @@ function App() {
     });
   };
 
-  const selectChoiceQuestOption = (dateKey: string, optionId: string) => {
-    setChoiceQuestRecords((currentRecords) => {
-      const currentRecord = currentRecords[dateKey];
-
-      if (currentRecord?.completed) {
-        return currentRecords;
-      }
-
-      return {
-        ...currentRecords,
-        [dateKey]: {
-          ...currentRecord,
-          completed: false,
-          selectedOptionId: optionId,
-          selectedAt: new Date().toISOString(),
-        },
-      };
-    });
-  };
-
-  const completeChoiceQuest = (dateKey: string) => {
-    const currentRecord = choiceQuestRecords[dateKey];
-    const selectedOption = choiceQuestOptions.find(
-      (option) => option.id === currentRecord?.selectedOptionId,
+  const completeChoiceQuest = (dateKey: string, questId: string, optionId?: string) => {
+    const questDefinition = choiceQuestDefinitions.find((definition) => definition.id === questId);
+    const currentRecord = choiceQuestRecords[dateKey]?.[questId];
+    const selectedOptionId = optionId ?? currentRecord?.selectedOptionId;
+    const selectedOption = [
+      ...(questDefinition?.options ?? []),
+      ...legacyChoiceQuestOptions,
+    ].find(
+      (option) => option.id === selectedOptionId,
     );
 
-    if (!currentRecord || currentRecord.completed || !selectedOption) {
+    if (!questDefinition || currentRecord?.completed || !selectedOption) {
       return;
     }
 
-    const achievementKey = getChoiceQuestPointAchievementKey(dateKey);
+    const achievementKey = getChoiceQuestPointAchievementKey(dateKey, questId);
     const now = new Date().toISOString();
     const pointTargetKind: PointTargetKind = 'normal';
     const pointSetting = gameBalance.pointSettings[pointTargetKind];
@@ -7174,9 +7343,9 @@ function App() {
       const nextAward: PointAwardRecord = {
         achievementKey,
         dateKey,
-        itemId: 'choice-quest',
+        itemId: questId,
         itemLabel,
-        sectionId: 'choice-quest',
+        sectionId: questId,
         points,
         basePoints,
         multiplier,
@@ -7187,9 +7356,9 @@ function App() {
         id: `${achievementKey}:earn:${now}`,
         achievementKey,
         dateKey,
-        itemId: 'choice-quest',
+        itemId: questId,
         itemLabel,
-        sectionId: 'choice-quest',
+        sectionId: questId,
         type: 'earn',
         points,
         basePoints,
@@ -7219,18 +7388,24 @@ function App() {
     });
 
     setChoiceQuestRecords((currentRecords) => {
-      const latestRecord = currentRecords[dateKey];
+      const latestDateRecords = currentRecords[dateKey] ?? {};
+      const latestRecord = latestDateRecords[questId];
 
-      if (!latestRecord || latestRecord.completed || latestRecord.selectedOptionId !== selectedOption.id) {
+      if (latestRecord?.completed) {
         return currentRecords;
       }
 
       return {
         ...currentRecords,
         [dateKey]: {
-          ...latestRecord,
-          completed: true,
-          completedAt: now,
+          ...latestDateRecords,
+          [questId]: {
+            ...latestRecord,
+            selectedOptionId: selectedOption.id,
+            completed: true,
+            selectedAt: latestRecord?.selectedAt ?? now,
+            completedAt: now,
+          },
         },
       };
     });
@@ -11925,6 +12100,44 @@ function App() {
           coreRoutine: definition,
         }))
       : [];
+  const getChoiceQuestRoutineEntries = (sectionId: string): RoutineRenderEntry[] => {
+    if (page !== 'today' || sectionId !== 'morning') {
+      return [];
+    }
+
+    return visibleChoiceQuestDefinitions.flatMap((definition, index) => {
+      const record = selectedChoiceQuestRecords[definition.id];
+
+      if (!record?.completed || !record.selectedOptionId) {
+        return [];
+      }
+
+      const option = [
+        ...definition.options,
+        ...legacyChoiceQuestOptions,
+      ].find((candidate) => candidate.id === record.selectedOptionId);
+
+      if (!option) {
+        return [];
+      }
+
+      const item: RoutineItem = {
+        id: `choice-quest-${definition.id}`,
+        label: `${option.icon} ${option.label}`,
+        order: -30 + index,
+        source: 'default',
+        createdAt: record.completedAt ?? record.selectedAt ?? new Date().toISOString(),
+        fixedKind: `choiceQuest:${definition.id}`,
+      };
+
+      return [{
+        kind: 'routine' as const,
+        key: item.id,
+        order: item.order,
+        item,
+      }];
+    });
+  };
   const getMixedRoutineEntries = (
     section: RoutineSection,
     options: { includeCoreRoutines: boolean },
@@ -11936,6 +12149,7 @@ function App() {
       item,
     })),
     ...(options.includeCoreRoutines ? getSectionCoreRoutineEntries(section.id) : []),
+    ...(options.includeCoreRoutines ? getChoiceQuestRoutineEntries(section.id) : []),
   ].sort((first, second) => first.order - second.order);
   const getCoreRoutineIdFromEntryKey = (entryKey: string): CoreRoutineId | null => {
     const coreRoutineId = entryKey.replace(/^core:/, '') as CoreRoutineId;
@@ -13654,59 +13868,60 @@ function App() {
                 </section>
               )}
               {page === 'today' && section.id === 'morning' && (
-                <section
-                  className="choice-quest-card"
-                  data-completed={selectedChoiceQuestRecord?.completed ? 'true' : 'false'}
-                  aria-label="選択クエスト"
-                >
-                  <div className="choice-quest-heading">
-                    <div>
-                      <h3>選択クエスト</h3>
-                      <p>
-                        {selectedChoiceQuestRecord?.completed && selectedChoiceQuestOption
-                          ? `${selectedChoiceQuestOption.label}を選びました`
-                          : '今日の気分でひとつ選ぼう'}
-                      </p>
-                    </div>
-                    {selectedChoiceQuestRecord?.completed && (
-                      <span className="choice-quest-complete-badge">達成</span>
-                    )}
-                  </div>
-                  <div className="choice-quest-options" aria-label="選択クエスト候補">
-                    {choiceQuestOptions.map((option) => {
-                      const isSelected = selectedChoiceQuestRecord?.selectedOptionId === option.id;
+                <>
+                  {visibleChoiceQuestDefinitions.map((choiceQuestDefinition) => {
+                    const selectedChoiceQuestRecord =
+                      selectedChoiceQuestRecords[choiceQuestDefinition.id] ?? null;
 
-                      return (
-                        <button
-                          aria-pressed={isSelected}
-                          data-selected={isSelected ? 'true' : 'false'}
-                          disabled={Boolean(selectedChoiceQuestRecord?.completed)}
-                          key={option.id}
-                          onClick={() => selectChoiceQuestOption(selectedDateKey, option.id)}
-                          type="button"
-                        >
-                          <span aria-hidden="true">{option.icon}</span>
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="choice-quest-actions">
-                    {selectedChoiceQuestRecord?.completed ? (
-                      <p>
-                        ✅ 今日の選択：{selectedChoiceQuestOption?.label ?? '選択済み'}
-                      </p>
-                    ) : (
-                      <button
-                        disabled={!selectedChoiceQuestRecord?.selectedOptionId}
-                        onClick={() => completeChoiceQuest(selectedDateKey)}
-                        type="button"
+                    if (selectedChoiceQuestRecord?.completed) {
+                      return null;
+                    }
+
+                    return (
+                      <section
+                        className="choice-quest-card"
+                        data-completed="false"
+                        aria-label={`${choiceQuestDefinition.title} ${choiceQuestDefinition.id}`}
+                        key={choiceQuestDefinition.id}
                       >
-                        OK
-                      </button>
-                    )}
-                  </div>
-                </section>
+                        <div className="choice-quest-heading">
+                          <div>
+                            <h3>
+                              <span aria-hidden="true">{choiceQuestDefinition.icon}</span>
+                              {choiceQuestDefinition.title}
+                            </h3>
+                            <p>今日の気分でひとつ選ぼう</p>
+                          </div>
+                        </div>
+                        <div className="choice-quest-options" aria-label="選択クエスト候補">
+                          {choiceQuestDefinition.options.map((option) => {
+                            const isSelected =
+                              selectedChoiceQuestRecord?.selectedOptionId === option.id;
+
+                            return (
+                              <button
+                                aria-pressed={isSelected}
+                                data-selected={isSelected ? 'true' : 'false'}
+                                key={option.id}
+                                onClick={() =>
+                                  completeChoiceQuest(
+                                    selectedDateKey,
+                                    choiceQuestDefinition.id,
+                                    option.id,
+                                  )
+                                }
+                                type="button"
+                              >
+                                <span aria-hidden="true">{option.icon}</span>
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </>
               )}
               {page === 'today' && section.id === 'night' && (
                 <section
@@ -13907,8 +14122,11 @@ function App() {
                   const item = entry.item;
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
-                  const isFixedItem = fixedRoutineIds.has(item.id);
+                  const isFixedItem = isFixedRoutineItem(item);
+                  const isChoiceQuestItem = isChoiceQuestFixedKind(item.fixedKind);
                   const isTimedFixedItem = item.fixedKind === 'wake' || item.fixedKind === 'sleep';
+                  const isRoutineItemChecked =
+                    isCheckMode && (isChoiceQuestItem || Boolean(checkedItems[item.id]));
                   const canDragQuest =
                     canEditRoutines &&
                     isCoreRoutineSectionId(section.id) &&
@@ -13924,7 +14142,7 @@ function App() {
                     <div
                       className="routine-item"
                       data-fixed={isFixedItem ? 'true' : 'false'}
-                      data-checked={isCheckMode && checkedItems[item.id] ? 'true' : 'false'}
+                      data-checked={isRoutineItemChecked ? 'true' : 'false'}
                       data-dragging={draggedItemId === item.id ? 'true' : 'false'}
                       data-routine-kind={canDragQuest ? 'quest' : undefined}
                       data-routine-id={item.id}
@@ -13998,10 +14216,14 @@ function App() {
                       )}
                       <label className="routine-check" htmlFor={inputId}>
                         <input
-                          checked={isCheckMode && Boolean(checkedItems[item.id])}
+                          checked={isRoutineItemChecked}
                           disabled={!isCheckMode}
                           id={inputId}
                           onChange={() => {
+                            if (isChoiceQuestItem) {
+                              return;
+                            }
+
                             if (openFixedQuestDestination(item.fixedKind)) {
                               return;
                             }
@@ -16991,26 +17213,29 @@ function App() {
                   )}
                 </section>
                 <section className="history-choice-quest-card" aria-label="選択クエストの記録">
-                  {(() => {
-                    const choiceRecord = choiceQuestRecords[historySelectedDateKey];
-                    const choiceOption = choiceQuestOptions.find(
-                      (option) => option.id === choiceRecord?.selectedOptionId,
-                    );
+                  <h3>選択クエスト</h3>
+                  <div className="history-choice-quest-list">
+                    {choiceQuestDefinitions.map((choiceQuestDefinition) => {
+                      const choiceRecord =
+                        choiceQuestRecords[historySelectedDateKey]?.[choiceQuestDefinition.id];
+                      const choiceOption = [
+                        ...choiceQuestDefinition.options,
+                        ...legacyChoiceQuestOptions,
+                      ].find((option) => option.id === choiceRecord?.selectedOptionId);
 
-                    return (
-                      <>
-                        <h3>選択クエスト</h3>
-                        <p>
-                          {choiceOption
-                            ? `${choiceOption.icon} ${choiceOption.label}`
-                            : '未選択'}
-                        </p>
-                        <span data-completed={choiceRecord?.completed ? 'true' : 'false'}>
-                          {choiceRecord?.completed ? '達成' : '未達成'}
-                        </span>
-                      </>
-                    );
-                  })()}
+                      return (
+                        <div className="history-choice-quest-row" key={choiceQuestDefinition.id}>
+                          <p>
+                            {choiceQuestDefinition.icon} {choiceQuestDefinition.title}
+                            {choiceOption ? `：${choiceOption.label}` : '：未選択'}
+                          </p>
+                          <span data-completed={choiceRecord?.completed ? 'true' : 'false'}>
+                            {choiceRecord?.completed ? '達成' : '未達成'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </section>
                 <section className="daily-memo history-record-card" aria-label="その日の記録">
                   <div className="daily-record-field daily-record-field-one-line">

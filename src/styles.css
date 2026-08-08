@@ -9086,7 +9086,7 @@ h1 {
 
 .choice-quest-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 6px;
 }
 
@@ -9162,6 +9162,19 @@ h1 {
   color: #155b3c;
   font-size: 0.86rem;
   font-weight: 1000;
+}
+
+.history-choice-quest-list {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.history-choice-quest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .history-choice-quest-card p {
