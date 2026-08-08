@@ -644,6 +644,7 @@ const TIMER_STATE_STORAGE_KEY = 'hibitin:timerState:v1';
 const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const CORE_ROUTINE_PLACEMENTS_STORAGE_KEY = 'hibitin:coreRoutinePlacements:v1';
 const DAILY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:dailyQuestMasterCache:v1';
+const NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:nightlyQuestMasterCache:v1';
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
 const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
@@ -984,6 +985,9 @@ const isChoiceQuestFixedKind = (
   fixedKind?: FixedQuestKind,
 ): fixedKind is `choiceQuest:${string}` =>
   typeof fixedKind === 'string' && fixedKind.startsWith('choiceQuest:');
+
+const getChoiceQuestIdFromFixedKind = (fixedKind?: FixedQuestKind) =>
+  isChoiceQuestFixedKind(fixedKind) ? fixedKind.replace(/^choiceQuest:/, '') : null;
 
 const isFixedRoutineItem = (item: RoutineItem) =>
   fixedRoutineIds.has(item.id) || isChoiceQuestFixedKind(item.fixedKind);
@@ -1789,11 +1793,12 @@ const normalizeDailyNudgeCandidate = (
 const mapDailyQuestMasterRowToCandidate = (
   row: DailyQuestMasterRow,
   index: number,
+  fallbackCompletionMessage = defaultDailyNudgeCompletionMessage,
 ): DailyNudgeCandidate => ({
   id: row.slug,
   masterId: row.id,
   text: row.prompt,
-  completionMessage: row.completion_message?.trim() || defaultDailyNudgeCompletionMessage,
+  completionMessage: row.completion_message?.trim() || fallbackCompletionMessage,
   category: row.category?.trim() || 'その他',
   enabled: row.is_active ?? true,
   order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : (index + 1) * 10,
@@ -1801,18 +1806,22 @@ const mapDailyQuestMasterRowToCandidate = (
   updatedAt: row.updated_at ?? undefined,
 });
 
-const loadDailyQuestMasterCache = () => {
-  const savedCandidates = localStorage.getItem(DAILY_QUEST_MASTER_CACHE_STORAGE_KEY);
+const loadQuestMasterCache = (
+  storageKey: string,
+  defaultCandidates: DailyNudgeCandidate[],
+  options: { retiredCandidateIds?: Set<string> } = {},
+) => {
+  const savedCandidates = localStorage.getItem(storageKey);
 
   if (!savedCandidates) {
-    return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+    return defaultCandidates.map((candidate) => ({ ...candidate }));
   }
 
   try {
     const parsedCandidates = JSON.parse(savedCandidates) as unknown;
 
     if (!Array.isArray(parsedCandidates)) {
-      return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+      return defaultCandidates.map((candidate) => ({ ...candidate }));
     }
 
     const normalizedCandidates = parsedCandidates
@@ -1821,18 +1830,28 @@ const loadDailyQuestMasterCache = () => {
       )
       .filter((candidate): candidate is DailyNudgeCandidate => candidate !== null)
       .filter((candidate) => candidate.enabled)
-      .filter((candidate) => !retiredDailyNudgeCandidateIds.has(candidate.id))
+      .filter((candidate) => !options.retiredCandidateIds?.has(candidate.id))
       .sort((first, second) => first.order - second.order);
 
     return normalizedCandidates.length > 0
       ? normalizedCandidates
-      : defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+      : defaultCandidates.map((candidate) => ({ ...candidate }));
   } catch {
-    return defaultDailyNudgeCandidates.map((candidate) => ({ ...candidate }));
+    return defaultCandidates.map((candidate) => ({ ...candidate }));
   }
 };
 
+const loadDailyQuestMasterCache = () =>
+  loadQuestMasterCache(DAILY_QUEST_MASTER_CACHE_STORAGE_KEY, defaultDailyNudgeCandidates, {
+    retiredCandidateIds: retiredDailyNudgeCandidateIds,
+  });
+
+const loadNightlyQuestMasterCache = () =>
+  loadQuestMasterCache(NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY, defaultNightlyNudgeCandidates);
+
 const loadDailyNudgeCandidates = () => loadDailyQuestMasterCache();
+
+const loadNightlyNudgeCandidates = () => loadNightlyQuestMasterCache();
 
 const loadNudgeRecords = (
   storageKey: string,
@@ -1886,7 +1905,7 @@ const loadDailyNudgeRecords = () => loadNudgeRecords(DAILY_NUDGE_RECORDS_STORAGE
 
 const loadNightlyNudgeRecords = () => {
   const activeNightlyCandidateIds = new Set(
-    defaultNightlyNudgeCandidates.map((candidate) => candidate.id),
+    loadNightlyQuestMasterCache().map((candidate) => candidate.id),
   );
 
   return Object.fromEntries(
@@ -5258,11 +5277,19 @@ function App() {
   const [dailyNudgeCandidates, setDailyNudgeCandidates] = useState<DailyNudgeCandidate[]>(() =>
     loadDailyNudgeCandidates(),
   );
+  const [nightlyNudgeCandidates, setNightlyNudgeCandidates] = useState<DailyNudgeCandidate[]>(() =>
+    loadNightlyNudgeCandidates(),
+  );
   const [dailyQuestAdminCandidates, setDailyQuestAdminCandidates] = useState<DailyNudgeCandidate[]>([]);
+  const [nightlyQuestAdminCandidates, setNightlyQuestAdminCandidates] = useState<DailyNudgeCandidate[]>([]);
   const [dailyQuestMasterStatus, setDailyQuestMasterStatus] =
     useState<DailyQuestMasterStatus>('idle');
+  const [nightlyQuestMasterStatus, setNightlyQuestMasterStatus] =
+    useState<DailyQuestMasterStatus>('idle');
   const [dailyQuestMasterMessage, setDailyQuestMasterMessage] = useState('');
+  const [nightlyQuestMasterMessage, setNightlyQuestMasterMessage] = useState('');
   const [isDailyQuestMasterBusy, setIsDailyQuestMasterBusy] = useState(false);
+  const [isNightlyQuestMasterBusy, setIsNightlyQuestMasterBusy] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isAdminChecking, setIsAdminChecking] = useState(false);
   const [dailyNudgeRecords, setDailyNudgeRecords] = useState<DailyNudgeRecords>(() =>
@@ -6237,6 +6264,13 @@ function App() {
   }, [dailyNudgeCandidates]);
 
   useEffect(() => {
+    localStorage.setItem(
+      NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY,
+      JSON.stringify(nightlyNudgeCandidates),
+    );
+  }, [nightlyNudgeCandidates]);
+
+  useEffect(() => {
     localStorage.setItem(DAILY_NUDGE_RECORDS_STORAGE_KEY, JSON.stringify(dailyNudgeRecords));
   }, [dailyNudgeRecords]);
 
@@ -6279,7 +6313,7 @@ function App() {
 
       const candidate = selectDailyNudgeCandidate(
         selectedDateKey,
-        defaultNightlyNudgeCandidates,
+        nightlyNudgeCandidates,
         currentRecords,
       );
 
@@ -6292,7 +6326,7 @@ function App() {
         [selectedDateKey]: createDailyNudgeRecord(candidate),
       };
     });
-  }, [selectedDateKey]);
+  }, [nightlyNudgeCandidates, selectedDateKey]);
 
   useEffect(() => {
     localStorage.setItem(GAME_MODE_STORAGE_KEY, JSON.stringify(gameMode));
@@ -7308,21 +7342,53 @@ function App() {
     });
   };
 
-  const completeChoiceQuest = (dateKey: string, questId: string, optionId?: string) => {
+  const chooseChoiceQuestOption = (dateKey: string, questId: string, optionId: string) => {
     const questDefinition = choiceQuestDefinitions.find((definition) => definition.id === questId);
-    const currentRecord = choiceQuestRecords[dateKey]?.[questId];
-    const selectedOptionId = optionId ?? currentRecord?.selectedOptionId;
-    const selectedOption = [
-      ...(questDefinition?.options ?? []),
-      ...legacyChoiceQuestOptions,
-    ].find(
-      (option) => option.id === selectedOptionId,
-    );
+    const selectedOption = questDefinition?.options.find((option) => option.id === optionId);
 
-    if (!questDefinition || currentRecord?.completed || !selectedOption) {
+    if (!questDefinition || !selectedOption) {
       return;
     }
 
+    const now = new Date().toISOString();
+
+    setChoiceQuestRecords((currentRecords) => {
+      const currentDateRecords = currentRecords[dateKey] ?? {};
+      const currentRecord = currentDateRecords[questId];
+
+      if (currentRecord?.selectedOptionId) {
+        return currentRecords;
+      }
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          ...currentDateRecords,
+          [questId]: {
+            ...currentRecord,
+            selectedOptionId: selectedOption.id,
+            completed: false,
+            selectedAt: now,
+            completedAt: undefined,
+          },
+        },
+      };
+    });
+  };
+
+  const toggleChoiceQuestCompletion = (dateKey: string, questId: string) => {
+    const currentRecord = choiceQuestRecords[dateKey]?.[questId];
+    const questDefinition = choiceQuestDefinitions.find((definition) => definition.id === questId);
+    const selectedOption = [
+      ...(questDefinition?.options ?? []),
+      ...legacyChoiceQuestOptions,
+    ].find((option) => option.id === currentRecord?.selectedOptionId);
+
+    if (!questDefinition || !currentRecord?.selectedOptionId || !selectedOption) {
+      return;
+    }
+
+    const nextCompleted = !currentRecord.completed;
     const achievementKey = getChoiceQuestPointAchievementKey(dateKey, questId);
     const now = new Date().toISOString();
     const pointTargetKind: PointTargetKind = 'normal';
@@ -7331,58 +7397,93 @@ function App() {
     setPlayerEconomy((currentEconomy) => {
       const existingAward = currentEconomy.pointAwards[achievementKey];
 
-      if (existingAward?.active || !pointSetting.enabled) {
+      if (nextCompleted) {
+        if (existingAward?.active || !pointSetting.enabled) {
+          return currentEconomy;
+        }
+
+        const points = existingAward?.points ??
+          calculateQuestPoints(gameBalance, playerRankProgress.multiplier, pointTargetKind);
+        const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
+        const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
+        const itemLabel = `選択クエスト：${selectedOption.label}`;
+        const nextAward: PointAwardRecord = {
+          achievementKey,
+          dateKey,
+          itemId: questId,
+          itemLabel,
+          sectionId: questId,
+          points,
+          basePoints,
+          multiplier,
+          active: true,
+          awardedAt: existingAward?.awardedAt ?? now,
+        };
+        const nextLedgerEntry: PointLedgerEntry = {
+          id: `${achievementKey}:earn:${now}`,
+          achievementKey,
+          dateKey,
+          itemId: questId,
+          itemLabel,
+          sectionId: questId,
+          type: 'earn',
+          points,
+          basePoints,
+          multiplier,
+          createdAt: now,
+          reason: selectedOption.label,
+        };
+
+        enqueuePointToast({
+          id: nextLedgerEntry.id,
+          points,
+          itemLabel,
+        });
+
+        return {
+          ...currentEconomy,
+          currentPoints: currentEconomy.currentPoints + points,
+          lifetimeEarnedPoints: existingAward
+            ? currentEconomy.lifetimeEarnedPoints
+            : currentEconomy.lifetimeEarnedPoints + points,
+          pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+          pointAwards: {
+            ...currentEconomy.pointAwards,
+            [achievementKey]: nextAward,
+          },
+        };
+      }
+
+      if (!existingAward?.active) {
         return currentEconomy;
       }
 
-      const points = existingAward?.points ??
-        calculateQuestPoints(gameBalance, playerRankProgress.multiplier, pointTargetKind);
-      const basePoints = existingAward?.basePoints ?? pointSetting.basePoints;
-      const multiplier = existingAward?.multiplier ?? playerRankProgress.multiplier;
-      const itemLabel = `選択クエスト：${selectedOption.label}`;
-      const nextAward: PointAwardRecord = {
+      const reversalEntry: PointLedgerEntry = {
+        id: `${achievementKey}:reversal:${now}`,
         achievementKey,
         dateKey,
-        itemId: questId,
-        itemLabel,
-        sectionId: questId,
-        points,
-        basePoints,
-        multiplier,
-        active: true,
-        awardedAt: existingAward?.awardedAt ?? now,
-      };
-      const nextLedgerEntry: PointLedgerEntry = {
-        id: `${achievementKey}:earn:${now}`,
-        achievementKey,
-        dateKey,
-        itemId: questId,
-        itemLabel,
-        sectionId: questId,
-        type: 'earn',
-        points,
-        basePoints,
-        multiplier,
+        itemId: existingAward.itemId,
+        itemLabel: existingAward.itemLabel,
+        sectionId: existingAward.sectionId,
+        type: 'reversal',
+        points: -existingAward.points,
+        basePoints: existingAward.basePoints,
+        multiplier: existingAward.multiplier,
         createdAt: now,
         reason: selectedOption.label,
       };
 
-      enqueuePointToast({
-        id: nextLedgerEntry.id,
-        points,
-        itemLabel,
-      });
-
       return {
         ...currentEconomy,
-        currentPoints: currentEconomy.currentPoints + points,
-        lifetimeEarnedPoints: existingAward
-          ? currentEconomy.lifetimeEarnedPoints
-          : currentEconomy.lifetimeEarnedPoints + points,
-        pointLedger: [...currentEconomy.pointLedger, nextLedgerEntry],
+        currentPoints: Math.max(0, currentEconomy.currentPoints - existingAward.points),
+        pointLedger: [...currentEconomy.pointLedger, reversalEntry],
         pointAwards: {
           ...currentEconomy.pointAwards,
-          [achievementKey]: nextAward,
+          [achievementKey]: {
+            ...existingAward,
+            active: false,
+            reversedAt: now,
+          },
         },
       };
     });
@@ -7391,7 +7492,7 @@ function App() {
       const latestDateRecords = currentRecords[dateKey] ?? {};
       const latestRecord = latestDateRecords[questId];
 
-      if (latestRecord?.completed) {
+      if (!latestRecord?.selectedOptionId) {
         return currentRecords;
       }
 
@@ -7401,10 +7502,8 @@ function App() {
           ...latestDateRecords,
           [questId]: {
             ...latestRecord,
-            selectedOptionId: selectedOption.id,
-            completed: true,
-            selectedAt: latestRecord?.selectedAt ?? now,
-            completedAt: now,
+            completed: nextCompleted,
+            completedAt: nextCompleted ? now : undefined,
           },
         },
       };
@@ -7560,7 +7659,7 @@ function App() {
       }
 
       const candidates = ((data ?? []) as DailyQuestMasterRow[])
-        .map(mapDailyQuestMasterRowToCandidate)
+        .map((row, index) => mapDailyQuestMasterRowToCandidate(row, index))
         .filter((candidate) => !retiredDailyNudgeCandidateIds.has(candidate.id))
         .sort((first, second) => first.order - second.order);
       const activeCandidates = candidates.filter((candidate) => candidate.enabled);
@@ -7590,10 +7689,74 @@ function App() {
     }
   };
 
+  const refreshNightlyQuestMaster = async (options: { includeInactive?: boolean } = {}) => {
+    if (!supabase) {
+      setNightlyQuestMasterStatus('cache');
+      setNightlyQuestMasterMessage('Supabase未設定のため、端末内キャッシュまたは予備候補を使用しています。');
+      return;
+    }
+
+    setNightlyQuestMasterStatus('loading');
+
+    try {
+      let query = supabase
+        .from('nightly_quest_master')
+        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .order('sort_order', { ascending: true });
+
+      if (!options.includeInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      const candidates = ((data ?? []) as DailyQuestMasterRow[])
+        .map((row, index) =>
+          mapDailyQuestMasterRowToCandidate(row, index, defaultNightlyNudgeCompletionMessage),
+        )
+        .sort((first, second) => first.order - second.order);
+      const activeCandidates = candidates.filter((candidate) => candidate.enabled);
+
+      if (options.includeInactive) {
+        setNightlyQuestAdminCandidates(candidates);
+      }
+
+      if (activeCandidates.length > 0) {
+        setNightlyNudgeCandidates(activeCandidates);
+        localStorage.setItem(NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY, JSON.stringify(activeCandidates));
+        setNightlyQuestMasterStatus('success');
+        setNightlyQuestMasterMessage('全プレイヤー共通のおやすみクエストを取得しました。');
+        return;
+      }
+
+      const cachedCandidates = loadNightlyQuestMasterCache();
+      if (options.includeInactive) {
+        setNightlyQuestAdminCandidates(cachedCandidates);
+      }
+      setNightlyNudgeCandidates(cachedCandidates);
+      setNightlyQuestMasterStatus('cache');
+      setNightlyQuestMasterMessage('共通候補が空のため、端末内キャッシュまたは予備候補を使用しています。');
+    } catch (error) {
+      console.warn('Nightly quest master fetch failed:', error);
+      const cachedCandidates = loadNightlyQuestMasterCache();
+      if (options.includeInactive) {
+        setNightlyQuestAdminCandidates(cachedCandidates);
+      }
+      setNightlyNudgeCandidates(cachedCandidates);
+      setNightlyQuestMasterStatus('cache');
+      setNightlyQuestMasterMessage('共通候補を取得できませんでした。端末内キャッシュまたは予備候補を使用しています。');
+    }
+  };
+
   const refreshAdminStatus = async (user: User | null) => {
     if (!supabase || !user) {
       setIsAdminUser(false);
       setDailyQuestAdminCandidates([]);
+      setNightlyQuestAdminCandidates([]);
       return;
     }
 
@@ -7615,13 +7778,16 @@ function App() {
 
       if (nextIsAdmin) {
         void refreshDailyQuestMaster({ includeInactive: true });
+        void refreshNightlyQuestMaster({ includeInactive: true });
       } else {
         setDailyQuestAdminCandidates([]);
+        setNightlyQuestAdminCandidates([]);
       }
     } catch (error) {
       console.warn('Admin status check failed:', error);
       setIsAdminUser(false);
       setDailyQuestAdminCandidates([]);
+      setNightlyQuestAdminCandidates([]);
     } finally {
       setIsAdminChecking(false);
     }
@@ -7813,6 +7979,209 @@ function App() {
       setDailyQuestMasterMessage('削除に失敗しました。');
     } finally {
       setIsDailyQuestMasterBusy(false);
+    }
+  };
+
+  const updateNightlyQuestAdminCandidate = (
+    candidateId: string,
+    field: keyof Pick<
+      DailyNudgeCandidate,
+      'text' | 'completionMessage' | 'category' | 'enabled'
+    >,
+    value: string | boolean,
+  ) => {
+    setNightlyQuestAdminCandidates((currentCandidates) =>
+      currentCandidates.map((candidate) =>
+        candidate.id === candidateId
+          ? { ...candidate, [field]: value }
+          : candidate,
+      ),
+    );
+  };
+
+  const getNightlyQuestMasterPayload = (candidate: DailyNudgeCandidate) => ({
+    slug: candidate.id,
+    prompt: candidate.text.trim() || '自分にやさしい一言をかけよう。',
+    completion_message:
+      candidate.completionMessage.trim() || defaultNightlyNudgeCompletionMessage,
+    category: candidate.category.trim() || 'その他',
+    is_active: candidate.enabled,
+    sort_order: candidate.order,
+  });
+
+  const saveNightlyQuestMasterCandidate = async (candidate: DailyNudgeCandidate) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setNightlyQuestMasterMessage('管理者ログインが必要です。');
+      return;
+    }
+
+    setIsNightlyQuestMasterBusy(true);
+    setNightlyQuestMasterMessage('');
+
+    try {
+      const { data, error } = await supabase
+        .from('nightly_quest_master')
+        .upsert(
+          {
+            ...getNightlyQuestMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          },
+          { onConflict: 'slug' },
+        )
+        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const savedCandidate = mapDailyQuestMasterRowToCandidate(
+        data as DailyQuestMasterRow,
+        0,
+        defaultNightlyNudgeCompletionMessage,
+      );
+
+      setNightlyQuestAdminCandidates((currentCandidates) =>
+        currentCandidates
+          .map((currentCandidate) =>
+            currentCandidate.id === candidate.id ? savedCandidate : currentCandidate,
+          )
+          .sort((first, second) => first.order - second.order),
+      );
+      await refreshNightlyQuestMaster({ includeInactive: true });
+      setNightlyQuestMasterMessage('全プレイヤー共通のおやすみクエストを更新しました。');
+    } catch (error) {
+      console.warn('Nightly quest master save failed:', error);
+      setNightlyQuestMasterMessage('更新に失敗しました。変更内容を確認してください。');
+    } finally {
+      setIsNightlyQuestMasterBusy(false);
+    }
+  };
+
+  const moveNightlyQuestAdminCandidate = async (candidateId: string, direction: -1 | 1) => {
+    if (!supabase || !authUser || !isAdminUser || isNightlyQuestMasterBusy) {
+      return;
+    }
+
+    const previousCandidates = nightlyQuestAdminCandidates;
+    const orderedCandidates = [...previousCandidates].sort(
+      (first, second) => first.order - second.order,
+    );
+    const currentIndex = orderedCandidates.findIndex((candidate) => candidate.id === candidateId);
+    const nextIndex = currentIndex + direction;
+
+    if (
+      currentIndex === -1 ||
+      nextIndex < 0 ||
+      nextIndex >= orderedCandidates.length
+    ) {
+      return;
+    }
+
+    const nextCandidates = [...orderedCandidates];
+    const [movedCandidate] = nextCandidates.splice(currentIndex, 1);
+
+    nextCandidates.splice(nextIndex, 0, movedCandidate);
+
+    const reorderedCandidates = nextCandidates.map((candidate, index) => ({
+      ...candidate,
+      order: (index + 1) * 10,
+    }));
+
+    setNightlyQuestAdminCandidates(reorderedCandidates);
+    setIsNightlyQuestMasterBusy(true);
+    setNightlyQuestMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('nightly_quest_master')
+        .upsert(
+          reorderedCandidates.map((candidate) => ({
+            ...getNightlyQuestMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          })),
+          { onConflict: 'slug' },
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshNightlyQuestMaster({ includeInactive: true });
+      setNightlyQuestMasterMessage('並び順を保存しました。');
+    } catch (error) {
+      console.warn('Nightly quest master reorder failed:', error);
+      setNightlyQuestAdminCandidates(previousCandidates);
+      setNightlyQuestMasterMessage('並び替えの保存に失敗しました。');
+    } finally {
+      setIsNightlyQuestMasterBusy(false);
+    }
+  };
+
+  const addNightlyQuestAdminCandidate = () => {
+    const newCandidateId = createRoutineId('nightly-quest');
+
+    setNightlyQuestAdminCandidates((currentCandidates) => [
+      ...currentCandidates,
+      {
+        id: newCandidateId,
+        text: '自分に「今日もお疲れさま。」と労ってあげよう。',
+        completionMessage: defaultNightlyNudgeCompletionMessage,
+        category: '労い',
+        enabled: true,
+        order:
+          currentCandidates.length === 0
+            ? 10
+            : Math.max(...currentCandidates.map((candidate) => candidate.order)) + 10,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  };
+
+  const deleteNightlyQuestAdminCandidate = async (candidateId: string) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setNightlyQuestMasterMessage('管理者ログインが必要です。');
+      return;
+    }
+
+    const candidate = nightlyQuestAdminCandidates.find(
+      (currentCandidate) => currentCandidate.id === candidateId,
+    );
+
+    if (!candidate) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `「${candidate.text}」を共通候補から削除しますか？過去の日付に保存済みのおやすみクエストは残ります。`,
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setIsNightlyQuestMasterBusy(true);
+    setNightlyQuestMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('nightly_quest_master')
+        .delete()
+        .eq('slug', candidate.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshNightlyQuestMaster({ includeInactive: true });
+      setNightlyQuestMasterMessage('全プレイヤー共通のおやすみクエストを更新しました。');
+    } catch (error) {
+      console.warn('Nightly quest master delete failed:', error);
+      setNightlyQuestMasterMessage('削除に失敗しました。');
+    } finally {
+      setIsNightlyQuestMasterBusy(false);
     }
   };
 
@@ -9149,6 +9518,7 @@ function App() {
 
   useEffect(() => {
     void refreshDailyQuestMaster();
+    void refreshNightlyQuestMaster();
   }, []);
 
   useEffect(() => {
@@ -12108,7 +12478,7 @@ function App() {
     return visibleChoiceQuestDefinitions.flatMap((definition, index) => {
       const record = selectedChoiceQuestRecords[definition.id];
 
-      if (!record?.completed || !record.selectedOptionId) {
+      if (!record?.selectedOptionId) {
         return [];
       }
 
@@ -12126,7 +12496,7 @@ function App() {
         label: `${option.icon} ${option.label}`,
         order: -30 + index,
         source: 'default',
-        createdAt: record.completedAt ?? record.selectedAt ?? new Date().toISOString(),
+        createdAt: record.selectedAt ?? record.completedAt ?? new Date().toISOString(),
         fixedKind: `choiceQuest:${definition.id}`,
       };
 
@@ -13151,8 +13521,11 @@ function App() {
                 <p>全プレイヤー共通のhibitin設定を管理します。</p>
               </div>
               <button
-                disabled={isDailyQuestMasterBusy}
-                onClick={() => void refreshDailyQuestMaster({ includeInactive: true })}
+                disabled={isDailyQuestMasterBusy || isNightlyQuestMasterBusy}
+                onClick={() => {
+                  void refreshDailyQuestMaster({ includeInactive: true });
+                  void refreshNightlyQuestMaster({ includeInactive: true });
+                }}
                 type="button"
               >
                 再取得
@@ -13278,6 +13651,127 @@ function App() {
             </button>
             {dailyQuestMasterMessage && (
               <p className="account-message">{dailyQuestMasterMessage}</p>
+            )}
+            <div className="supabase-connection-status" data-status={nightlyQuestMasterStatus}>
+              <span>おやすみクエスト共通マスター</span>
+              <strong>{dailyQuestMasterStatusLabels[nightlyQuestMasterStatus]}</strong>
+            </div>
+            <div className="settings-header compact-settings-header">
+              <div>
+                <h3>おやすみクエスト管理</h3>
+                <p>
+                  ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
+                </p>
+              </div>
+            </div>
+            <div className="daily-nudge-admin-list">
+              {[...nightlyQuestAdminCandidates]
+                .sort((first, second) => first.order - second.order)
+                .map((candidate, index, orderedCandidates) => (
+                  <article className="daily-nudge-admin-card" key={candidate.id}>
+                    <div className="daily-nudge-admin-card-header">
+                      <label>
+                        <input
+                          checked={candidate.enabled}
+                          disabled={isNightlyQuestMasterBusy}
+                          onChange={(event) => {
+                            updateNightlyQuestAdminCandidate(
+                              candidate.id,
+                              'enabled',
+                              event.target.checked,
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{candidate.enabled ? '有効' : '無効'}</span>
+                      </label>
+                      <div className="daily-nudge-admin-card-actions">
+                        <button
+                          disabled={isNightlyQuestMasterBusy || index === 0}
+                          onClick={() => void moveNightlyQuestAdminCandidate(candidate.id, -1)}
+                          type="button"
+                        >
+                          上へ
+                        </button>
+                        <button
+                          disabled={isNightlyQuestMasterBusy || index === orderedCandidates.length - 1}
+                          onClick={() => void moveNightlyQuestAdminCandidate(candidate.id, 1)}
+                          type="button"
+                        >
+                          下へ
+                        </button>
+                        <button
+                          disabled={isNightlyQuestMasterBusy}
+                          onClick={() => void deleteNightlyQuestAdminCandidate(candidate.id)}
+                          type="button"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                    <label>
+                      <span>提案文</span>
+                      <textarea
+                        disabled={isNightlyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateNightlyQuestAdminCandidate(candidate.id, 'text', event.target.value)
+                        }
+                        rows={2}
+                        value={candidate.text}
+                      />
+                    </label>
+                    <label>
+                      <span>完了メッセージ</span>
+                      <input
+                        disabled={isNightlyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateNightlyQuestAdminCandidate(
+                            candidate.id,
+                            'completionMessage',
+                            event.target.value,
+                          )
+                        }
+                        type="text"
+                        value={candidate.completionMessage}
+                      />
+                    </label>
+                    <label>
+                      <span>カテゴリ</span>
+                      <input
+                        disabled={isNightlyQuestMasterBusy}
+                        onChange={(event) =>
+                          updateNightlyQuestAdminCandidate(candidate.id, 'category', event.target.value)
+                        }
+                        type="text"
+                        value={candidate.category}
+                      />
+                    </label>
+                    <p className="daily-nudge-admin-id">
+                      slug: {candidate.id}
+                      {candidate.masterId ? ` / id: ${candidate.masterId}` : ' / 未保存'}
+                    </p>
+                    <div className="daily-nudge-admin-card-actions">
+                      <button
+                        disabled={isNightlyQuestMasterBusy}
+                        onClick={() => void saveNightlyQuestMasterCandidate(candidate)}
+                        type="button"
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </article>
+                ))}
+            </div>
+            <button
+              className="daily-nudge-add-button"
+              disabled={isNightlyQuestMasterBusy}
+              onClick={addNightlyQuestAdminCandidate}
+              type="button"
+            >
+              候補追加
+            </button>
+            {nightlyQuestMasterMessage && (
+              <p className="account-message">{nightlyQuestMasterMessage}</p>
             )}
           </section>
         )}
@@ -13873,7 +14367,7 @@ function App() {
                     const selectedChoiceQuestRecord =
                       selectedChoiceQuestRecords[choiceQuestDefinition.id] ?? null;
 
-                    if (selectedChoiceQuestRecord?.completed) {
+                    if (selectedChoiceQuestRecord?.selectedOptionId) {
                       return null;
                     }
 
@@ -13904,7 +14398,7 @@ function App() {
                                 data-selected={isSelected ? 'true' : 'false'}
                                 key={option.id}
                                 onClick={() =>
-                                  completeChoiceQuest(
+                                  chooseChoiceQuestOption(
                                     selectedDateKey,
                                     choiceQuestDefinition.id,
                                     option.id,
@@ -14123,10 +14617,18 @@ function App() {
                   const inputId = `routine-${item.id}`;
                   const isEditing = editingItemId === item.id;
                   const isFixedItem = isFixedRoutineItem(item);
-                  const isChoiceQuestItem = isChoiceQuestFixedKind(item.fixedKind);
+                  const choiceQuestId = getChoiceQuestIdFromFixedKind(item.fixedKind);
+                  const isChoiceQuestItem = Boolean(choiceQuestId);
+                  const choiceQuestRecord = choiceQuestId
+                    ? selectedChoiceQuestRecords[choiceQuestId]
+                    : null;
                   const isTimedFixedItem = item.fixedKind === 'wake' || item.fixedKind === 'sleep';
                   const isRoutineItemChecked =
-                    isCheckMode && (isChoiceQuestItem || Boolean(checkedItems[item.id]));
+                    isCheckMode && (
+                      isChoiceQuestItem
+                        ? Boolean(choiceQuestRecord?.completed)
+                        : Boolean(checkedItems[item.id])
+                    );
                   const canDragQuest =
                     canEditRoutines &&
                     isCoreRoutineSectionId(section.id) &&
@@ -14220,7 +14722,8 @@ function App() {
                           disabled={!isCheckMode}
                           id={inputId}
                           onChange={() => {
-                            if (isChoiceQuestItem) {
+                            if (choiceQuestId) {
+                              toggleChoiceQuestCompletion(selectedDateKey, choiceQuestId);
                               return;
                             }
 
