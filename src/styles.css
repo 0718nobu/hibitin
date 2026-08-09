@@ -9417,6 +9417,29 @@ h1 {
   gap: 3px;
 }
 
+.routine-section-lead-card {
+  margin-bottom: 12px;
+}
+
+.routine-subsection {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.routine-subsection-title {
+  margin: 8px 0 2px;
+  color: #285d46;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.choice-quest-subsection {
+  padding-top: 8px;
+  border-top: 1px dashed rgb(104 151 124 / 24%);
+}
+
 .routine-item {
   position: relative;
   display: flex;

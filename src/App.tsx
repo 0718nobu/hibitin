@@ -476,7 +476,6 @@ type DailyNudgeCandidate = {
   masterId?: string;
   text: string;
   completionMessage: string;
-  category: string;
   enabled: boolean;
   order: number;
   createdAt: string;
@@ -500,7 +499,6 @@ type DailyNudgeRecord = {
   text: string;
   completionMessage: string;
   celebrationMessage?: string;
-  category: string;
   completed: boolean;
   assignedAt: string;
   completedAt?: string;
@@ -993,10 +991,13 @@ const isFixedRoutineItem = (item: RoutineItem) =>
   fixedRoutineIds.has(item.id) || isChoiceQuestFixedKind(item.fixedKind);
 
 const sectionIconLabels: Record<string, string> = {
+  wake: '⏰',
   morning: '🌅',
+  choiceQuest: '🎲',
   noon: '☀️',
   evening: '🌇',
   night: '🌙',
+  sleep: '🛏',
   advanced: '⚙️',
 };
 
@@ -1127,11 +1128,10 @@ const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   ['daily-nudge-put-one-away', '目の前の物を一つ戻そう', '一つ戻した。周りが少し整った。', '行動開始'],
   ['daily-nudge-touch-tool', '使う物を一つ手に取ろう', '道具を持った。始める準備クリア。', '行動開始'],
   ['daily-nudge-floor', '足の裏を床に感じてみよう', '接地完了。ここからまた始められる。', '休息'],
-].map(([id, text, completionMessage, category], index) => ({
+].map(([id, text, completionMessage], index) => ({
   id,
   text,
   completionMessage,
-  category,
   enabled: true,
   order: (index + 1) * 10,
   createdAt: '2026-07-11T00:00:00.000Z',
@@ -1264,11 +1264,10 @@ const defaultNightlyNudgeCandidates: DailyNudgeCandidate[] = [
   ['nightly-nudge-day-forgive', '今日の一日を思い浮かべながら「足りないところがあってもいいよ。」と許してあげよう。', '足りなさごと許せた。今日もお疲れさま。', '許し'],
   ['nightly-nudge-self-cheer', '胸を軽く叩きながら「ちゃんとここまで来たよ。」と励ましてあげよう。', '自分を静かに励ませた。今日もお疲れさま。', '励まし'],
   ['nightly-nudge-soft-finish', '目を閉じながら「今日もいい締めくくりにしよう。」と大切にしてあげよう。', '今日を大切に締められた。今日もお疲れさま。', '大切'],
-].map(([id, text, completionMessage, category], index) => ({
+].map(([id, text, completionMessage], index) => ({
   id,
   text,
   completionMessage,
-  category,
   enabled: true,
   order: (index + 1) * 10,
   createdAt: '2026-08-07T00:00:00.000Z',
@@ -1776,9 +1775,6 @@ const normalizeDailyNudgeCandidate = (
       typeof candidate.completionMessage === 'string' && candidate.completionMessage.trim()
         ? candidate.completionMessage
         : defaultDailyNudgeCompletionMessage,
-    category: typeof candidate.category === 'string' && candidate.category.trim()
-      ? candidate.category
-      : 'その他',
     enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : true,
     order: Number.isFinite(Number(candidate.order))
       ? Number(candidate.order)
@@ -1799,7 +1795,6 @@ const mapDailyQuestMasterRowToCandidate = (
   masterId: row.id,
   text: row.prompt,
   completionMessage: row.completion_message?.trim() || fallbackCompletionMessage,
-  category: row.category?.trim() || 'その他',
   enabled: row.is_active ?? true,
   order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : (index + 1) * 10,
   createdAt: row.created_at ?? new Date().toISOString(),
@@ -1877,7 +1872,6 @@ const loadNudgeRecords = (
           typeof record.candidateId === 'string' &&
           typeof record.text === 'string' &&
           typeof record.completionMessage === 'string' &&
-          typeof record.category === 'string' &&
           typeof record.assignedAt === 'string'
         ))
         .map(([dateKey, record]) => [
@@ -1889,7 +1883,6 @@ const loadNudgeRecords = (
             celebrationMessage: typeof record.celebrationMessage === 'string'
               ? record.celebrationMessage
               : undefined,
-            category: record.category ?? 'その他',
             completed: Boolean(record.completed),
             assignedAt: record.assignedAt ?? new Date().toISOString(),
             completedAt: typeof record.completedAt === 'string' ? record.completedAt : undefined,
@@ -3083,7 +3076,6 @@ const createDailyNudgeRecord = (
   candidateId: candidate.id,
   text: candidate.text,
   completionMessage: candidate.completionMessage,
-  category: candidate.category,
   completed: false,
   assignedAt: new Date().toISOString(),
 });
@@ -4495,9 +4487,9 @@ const createFixedRoutineItem = (
         ? 'fixed-schedule-check'
         : 'fixed-todo-check',
   label: kind === 'wake'
-    ? '起床'
+    ? '行動開始'
     : kind === 'sleep'
-      ? '就寝'
+      ? 'ベッドイン'
       : kind === 'scheduleCheck'
         ? '📅 スケジュールをチェック'
         : '✅ やることを眺める',
@@ -4555,6 +4547,53 @@ const buildDisplaySections = (
       (first, second) =>
         sectionOrder.indexOf(first.id) - sectionOrder.indexOf(second.id),
     );
+};
+
+const buildTodayRoutineRenderSections = (sections: RoutineSection[]): RoutineSection[] => {
+  const wakeItem = sections
+    .flatMap((section) => section.items)
+    .find((item) => item.fixedKind === 'wake');
+  const sleepItem = sections
+    .flatMap((section) => section.items)
+    .find((item) => item.fixedKind === 'sleep');
+  const withoutWakeSleep = sections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => item.fixedKind !== 'wake' && item.fixedKind !== 'sleep'),
+  }));
+  const renderSections: RoutineSection[] = [];
+
+  withoutWakeSleep.forEach((section) => {
+    if (section.id === 'morning' && wakeItem) {
+      renderSections.push({
+        id: 'wake',
+        title: '起床',
+        order: section.order - 1,
+        items: [wakeItem],
+      });
+    }
+
+    renderSections.push(section);
+
+    if (section.id === 'morning') {
+      renderSections.push({
+        id: 'choiceQuest',
+        title: '選択クエスト',
+        order: section.order + 0.5,
+        items: [],
+      });
+    }
+
+    if (section.id === 'night' && sleepItem) {
+      renderSections.push({
+        id: 'sleep',
+        title: '就寝',
+        order: section.order + 0.5,
+        items: [sleepItem],
+      });
+    }
+  });
+
+  return renderSections;
 };
 
 const calculateCompletionStats = (
@@ -7696,7 +7735,7 @@ function App() {
     slug: candidate.id,
     prompt: candidate.text.trim() || '小さな一歩をひとつ選ぼう',
     completion_message: candidate.completionMessage.trim() || defaultDailyNudgeCompletionMessage,
-    category: candidate.category.trim() || 'その他',
+    category: null,
     is_active: candidate.enabled,
     sort_order: candidate.order,
   });
@@ -7865,7 +7904,7 @@ function App() {
     candidateId: string,
     field: keyof Pick<
       DailyNudgeCandidate,
-      'text' | 'completionMessage' | 'category' | 'enabled'
+      'text' | 'completionMessage' | 'enabled'
     >,
     value: string | boolean,
   ) => {
@@ -7994,7 +8033,6 @@ function App() {
         id: newCandidateId,
         text: '小さな一歩をひとつ選ぼう',
         completionMessage: defaultDailyNudgeCompletionMessage,
-        category: 'その他',
         enabled: true,
         order:
           currentCandidates.length === 0
@@ -8054,7 +8092,7 @@ function App() {
     candidateId: string,
     field: keyof Pick<
       DailyNudgeCandidate,
-      'text' | 'completionMessage' | 'category' | 'enabled'
+      'text' | 'completionMessage' | 'enabled'
     >,
     value: string | boolean,
   ) => {
@@ -8072,7 +8110,7 @@ function App() {
     prompt: candidate.text.trim() || '自分にやさしい一言をかけよう。',
     completion_message:
       candidate.completionMessage.trim() || defaultNightlyNudgeCompletionMessage,
-    category: candidate.category.trim() || 'その他',
+    category: null,
     is_active: candidate.enabled,
     sort_order: candidate.order,
   });
@@ -8197,7 +8235,6 @@ function App() {
         id: newCandidateId,
         text: '自分に「今日もお疲れさま。」と労ってあげよう。',
         completionMessage: defaultNightlyNudgeCompletionMessage,
-        category: '労い',
         enabled: true,
         order:
           currentCandidates.length === 0
@@ -12548,12 +12585,8 @@ function App() {
           coreRoutine: definition,
         }))
       : [];
-  const getChoiceQuestRoutineEntries = (sectionId: string): RoutineRenderEntry[] => {
-    if (page !== 'today' || sectionId !== 'morning') {
-      return [];
-    }
-
-    return visibleChoiceQuestDefinitions.flatMap((definition, index) => {
+  const getSelectedChoiceQuestRoutineEntries = (): RoutineRenderEntry[] =>
+    visibleChoiceQuestDefinitions.flatMap((definition, index) => {
       const record = selectedChoiceQuestRecords[definition.id];
 
       if (!record?.selectedOptionId) {
@@ -12585,7 +12618,6 @@ function App() {
         item,
       }];
     });
-  };
   const getMixedRoutineEntries = (
     section: RoutineSection,
     options: { includeCoreRoutines: boolean },
@@ -12597,7 +12629,6 @@ function App() {
       item,
     })),
     ...(options.includeCoreRoutines ? getSectionCoreRoutineEntries(section.id) : []),
-    ...(options.includeCoreRoutines ? getChoiceQuestRoutineEntries(section.id) : []),
   ].sort((first, second) => first.order - second.order);
   const getCoreRoutineIdFromEntryKey = (entryKey: string): CoreRoutineId | null => {
     const coreRoutineId = entryKey.replace(/^core:/, '') as CoreRoutineId;
@@ -12772,7 +12803,8 @@ function App() {
     return true;
   };
 
-  const routineRenderSections = displaySections;
+  const routineRenderSections =
+    page === 'today' ? buildTodayRoutineRenderSections(displaySections) : displaySections;
   const activeMenuViewOption = menuViewOptions.find((option) => option.key === menuView);
   const menuViewOptionMap = new Map(menuViewOptions.map((option) => [option.key, option]));
 
@@ -13692,17 +13724,6 @@ function App() {
                         value={candidate.completionMessage}
                       />
                     </label>
-                    <label>
-                      <span>カテゴリ</span>
-                      <input
-                        disabled={isDailyQuestMasterBusy}
-                        onChange={(event) =>
-                          updateDailyQuestAdminCandidate(candidate.id, 'category', event.target.value)
-                        }
-                        type="text"
-                        value={candidate.category}
-                      />
-                    </label>
                     <p className="daily-nudge-admin-id">
                       slug: {candidate.id}
                       {candidate.masterId ? ` / id: ${candidate.masterId}` : ' / 未保存'}
@@ -13811,17 +13832,6 @@ function App() {
                         }
                         type="text"
                         value={candidate.completionMessage}
-                      />
-                    </label>
-                    <label>
-                      <span>カテゴリ</span>
-                      <input
-                        disabled={isNightlyQuestMasterBusy}
-                        onChange={(event) =>
-                          updateNightlyQuestAdminCandidate(candidate.id, 'category', event.target.value)
-                        }
-                        type="text"
-                        value={candidate.category}
                       />
                     </label>
                     <p className="daily-nudge-admin-id">
@@ -14326,10 +14336,64 @@ function App() {
               <span>残り{remainingQuestSlots}枠</span>
             </div>
           )}
+          {page === 'today' && (
+            <section
+              className="daily-nudge-card daily-nudge-inline routine-section-lead-card"
+              data-celebrating={
+                dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
+              }
+              data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
+              aria-label={dailyNudgeDisplayLabel}
+            >
+              <div className="daily-nudge-heading">
+                <span aria-hidden="true">👉</span>
+                <div>
+                  <h2>{dailyNudgeDisplayLabel}</h2>
+                </div>
+                <p className="daily-nudge-streak">
+                  {selectedDailyNudgeStreak > 0
+                    ? `🔥 ${selectedDailyNudgeStreak}日連続`
+                    : '今日からスタート'}
+                </p>
+              </div>
+              {selectedDailyNudgeRecord ? (
+                <>
+                  <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
+                  <div className="daily-nudge-actions">
+                    {selectedDailyNudgeRecord.completed ? (
+                      <span className="daily-nudge-win-label">今日の勝ち！</span>
+                    ) : (
+                      <button
+                        onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                        type="button"
+                      >
+                        OK
+                      </button>
+                    )}
+                    {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
+                      <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
+                        +{dailyNudgePointFlash.points}PT
+                      </span>
+                    )}
+                    {selectedDailyNudgeRecord.completed && (
+                      <p className="daily-nudge-celebration">
+                        {selectedDailyNudgeRecord.celebrationMessage ??
+                          selectedDailyNudgeRecord.completionMessage}
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="daily-nudge-empty">ログインクエストは準備中です</p>
+              )}
+            </section>
+          )}
           {routineRenderSections.map((section) => {
             const isBonusSection = section.id === bonusSectionId;
+            const isPresentationSection =
+              section.id === 'wake' || section.id === 'choiceQuest' || section.id === 'sleep';
             const canEditSection =
-              canEditRoutines || (page === 'today' && isBonusSection);
+              !isPresentationSection && (canEditRoutines || (page === 'today' && isBonusSection));
             return (
             <section
               className="routine-section"
@@ -14384,117 +14448,6 @@ function App() {
                   )}
                 </div>
               </div>
-              {page === 'today' && section.id === 'morning' && (
-                <section
-                  className="daily-nudge-card daily-nudge-inline"
-                  data-celebrating={
-                    dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
-                  }
-                  data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
-                  aria-label={dailyNudgeDisplayLabel}
-                >
-                  <div className="daily-nudge-heading">
-                    <span aria-hidden="true">👉</span>
-                    <div>
-                      <h2>{dailyNudgeDisplayLabel}</h2>
-                      {selectedDailyNudgeRecord && (
-                        <p>{selectedDailyNudgeRecord.category}</p>
-                      )}
-                    </div>
-                    <p className="daily-nudge-streak">
-                      {selectedDailyNudgeStreak > 0
-                        ? `🔥 ${selectedDailyNudgeStreak}日連続`
-                        : '今日からスタート'}
-                    </p>
-                  </div>
-                  {selectedDailyNudgeRecord ? (
-                    <>
-                      <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
-                      <div className="daily-nudge-actions">
-                        {selectedDailyNudgeRecord.completed ? (
-                          <span className="daily-nudge-win-label">今日の勝ち！</span>
-                        ) : (
-                          <button
-                            onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
-                            type="button"
-                          >
-                            OK
-                          </button>
-                        )}
-                        {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
-                          <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
-                            +{dailyNudgePointFlash.points}PT
-                          </span>
-                        )}
-                        {selectedDailyNudgeRecord.completed && (
-                          <p className="daily-nudge-celebration">
-                            {selectedDailyNudgeRecord.celebrationMessage ??
-                              selectedDailyNudgeRecord.completionMessage}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="daily-nudge-empty">ログインクエストは準備中です</p>
-                  )}
-                </section>
-              )}
-              {page === 'today' && section.id === 'morning' && (
-                <>
-                  {visibleChoiceQuestDefinitions.map((choiceQuestDefinition) => {
-                    const selectedChoiceQuestRecord =
-                      selectedChoiceQuestRecords[choiceQuestDefinition.id] ?? null;
-
-                    if (selectedChoiceQuestRecord?.selectedOptionId) {
-                      return null;
-                    }
-
-                    return (
-                      <section
-                        className="choice-quest-card"
-                        data-completed="false"
-                        aria-label={`${choiceQuestDefinition.title} ${choiceQuestDefinition.id}`}
-                        key={choiceQuestDefinition.id}
-                      >
-                        <div className="choice-quest-heading">
-                          <div>
-                            <h3>
-                              <span aria-hidden="true">{choiceQuestDefinition.icon}</span>
-                              {choiceQuestDefinition.title}
-                            </h3>
-                            <p>今日の気分でひとつ選ぼう</p>
-                          </div>
-                        </div>
-                        <div className="choice-quest-options" aria-label="選択クエスト候補">
-                          {choiceQuestDefinition.options.map((option) => {
-                            const isSelected =
-                              selectedChoiceQuestRecord?.selectedOptionId === option.id;
-
-                            return (
-                              <button
-                                aria-pressed={isSelected}
-                                data-selected={isSelected ? 'true' : 'false'}
-                                key={option.id}
-                                onClick={() =>
-                                  chooseChoiceQuestOption(
-                                    selectedDateKey,
-                                    choiceQuestDefinition.id,
-                                    option.id,
-                                  )
-                                }
-                                type="button"
-                              >
-                                <span aria-hidden="true">{option.icon}</span>
-                              {option.label}
-                            </button>
-                          );
-                        })}
-                        </div>
-                      </section>
-                    );
-                  })}
-                </>
-              )}
               <div className="routine-items">
                 {getMixedRoutineEntries(section, {
                   includeCoreRoutines: page === 'today' && !isBonusSection,
@@ -14666,7 +14619,6 @@ function App() {
                     noteEditorTarget?.dateKey === selectedDateKey &&
                     noteEditorTarget.itemId === item.id;
                   const questEmote = questEmotes[getQuestEmoteKey(selectedDateKey, item.id)];
-
                   return (
                     <div
                       className="routine-item"
@@ -14784,17 +14736,6 @@ function App() {
                           />
                         ) : isFixedItem ? (
                           <span className="fixed-routine-name">
-                            <span>{item.label}</span>
-                            {renderQuestInfoButton({
-                              actionLabel: choiceQuestId ? '選択前に戻す' : undefined,
-                              id: `today-routine-${item.id}`,
-                              kind: 'fixed',
-                              kindLabel: item.fixedKind === 'sleep' ? null : undefined,
-                              onSupportClick: choiceQuestId
-                                ? () => resetChoiceQuestSelection(selectedDateKey, choiceQuestId)
-                                : undefined,
-                              supportLabel: getFixedQuestSupportLabel(item.fixedKind),
-                            })}
                             {isTimedFixedItem && canEditRoutines ? (
                               <input
                                 aria-label={`${item.label}の時刻`}
@@ -14806,6 +14747,17 @@ function App() {
                             ) : isTimedFixedItem ? (
                               <span className="fixed-time-display">{item.time}</span>
                             ) : null}
+                            <span>{item.label}</span>
+                            {renderQuestInfoButton({
+                              actionLabel: choiceQuestId ? '選択前に戻す' : undefined,
+                              id: `today-routine-${item.id}`,
+                              kind: 'fixed',
+                              kindLabel: item.fixedKind === 'sleep' ? null : undefined,
+                              onSupportClick: choiceQuestId
+                                ? () => resetChoiceQuestSelection(selectedDateKey, choiceQuestId)
+                                : undefined,
+                              supportLabel: getFixedQuestSupportLabel(item.fixedKind),
+                            })}
                           </span>
                         ) : (
                           <button
@@ -14947,7 +14899,109 @@ function App() {
                   </div>
                 )}
               </div>
-              {page === 'today' && section.id === 'night' && (
+              {page === 'today' && section.id === 'choiceQuest' && (
+                <div className="routine-subsection choice-quest-subsection">
+                  {visibleChoiceQuestDefinitions.map((choiceQuestDefinition) => {
+                    const selectedChoiceQuestRecord =
+                      selectedChoiceQuestRecords[choiceQuestDefinition.id] ?? null;
+
+                    if (selectedChoiceQuestRecord?.selectedOptionId) {
+                      return null;
+                    }
+
+                    return (
+                      <section
+                        className="choice-quest-card"
+                        data-completed="false"
+                        aria-label={`${choiceQuestDefinition.title} ${choiceQuestDefinition.id}`}
+                        key={choiceQuestDefinition.id}
+                      >
+                        <div className="choice-quest-options" aria-label="選択クエスト候補">
+                          {choiceQuestDefinition.options.map((option) => {
+                            const isSelected =
+                              selectedChoiceQuestRecord?.selectedOptionId === option.id;
+
+                            return (
+                              <button
+                                aria-pressed={isSelected}
+                                data-selected={isSelected ? 'true' : 'false'}
+                                key={option.id}
+                                onClick={() =>
+                                  chooseChoiceQuestOption(
+                                    selectedDateKey,
+                                    choiceQuestDefinition.id,
+                                    option.id,
+                                  )
+                                }
+                                type="button"
+                              >
+                                <span aria-hidden="true">{option.icon}</span>
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                  <div className="routine-items">
+                    {getSelectedChoiceQuestRoutineEntries().map((entry) => {
+                      if (entry.kind !== 'routine') {
+                        return null;
+                      }
+
+                      const item = entry.item;
+                      const choiceQuestId = getChoiceQuestIdFromFixedKind(item.fixedKind);
+                      const choiceQuestRecord = choiceQuestId
+                        ? selectedChoiceQuestRecords[choiceQuestId]
+                        : null;
+                      const inputId = `routine-${item.id}`;
+                      const isRoutineItemChecked =
+                        isCheckMode && Boolean(choiceQuestRecord?.completed);
+
+                      if (!choiceQuestId) {
+                        return null;
+                      }
+
+                      return (
+                        <div
+                          className="routine-item"
+                          data-fixed="true"
+                          data-checked={isRoutineItemChecked ? 'true' : 'false'}
+                          data-section-id={section.id}
+                          key={entry.key}
+                        >
+                          <label className="routine-check" htmlFor={inputId}>
+                            <input
+                              checked={isRoutineItemChecked}
+                              disabled={!isCheckMode}
+                              id={inputId}
+                              onChange={() =>
+                                toggleChoiceQuestCompletion(selectedDateKey, choiceQuestId)
+                              }
+                              type="checkbox"
+                            />
+                          </label>
+                          <div className="routine-name">
+                            <span className="fixed-routine-name">
+                              <span>{item.label}</span>
+                              {renderQuestInfoButton({
+                                actionLabel: '選択前に戻す',
+                                id: `today-routine-${item.id}`,
+                                kind: 'fixed',
+                                onSupportClick: () =>
+                                  resetChoiceQuestSelection(selectedDateKey, choiceQuestId),
+                                supportLabel: getFixedQuestSupportLabel(item.fixedKind),
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {page === 'today' && section.id === 'sleep' && (
                 <section
                   className="daily-nudge-card daily-nudge-inline"
                   data-celebrating={
