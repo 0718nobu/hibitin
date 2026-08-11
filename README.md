@@ -40,14 +40,22 @@ supabase/hibitin_backups.sql
 supabase/daily_quest_master.sql
 ```
 
+全ユーザー共通のおやすみクエスト候補マスターは以下を実行します。
+
+```text
+supabase/nightly_quest_master.sql
+```
+
 このSQLには以下が含まれます。
 
 - `admin_users`
 - `daily_quest_master`
+- `nightly_quest_master`
 - RLS
 - 管理者だけが追加・編集・削除できるpolicy
 - 一般ユーザーと未ログインユーザーが有効候補だけ読めるpolicy
 - 初期の日替わりクエスト候補
+- 初期のおやすみクエスト候補
 
 ## 管理者登録
 
