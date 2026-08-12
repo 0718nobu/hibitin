@@ -2517,8 +2517,8 @@ h1 {
 .calendar-day,
 .calendar-day-empty {
   aspect-ratio: auto;
-  height: 124px;
-  min-height: 124px;
+  height: 112px;
+  min-height: 112px;
   border-radius: 12px;
 }
 
@@ -2528,10 +2528,10 @@ h1 {
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
   align-content: stretch;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   border: 1px dashed #dfc67b;
-  padding: 9px 3px 20px;
+  padding: 8px 3px 16px;
   background: rgb(255 255 255 / 62%);
   color: #2d3c35;
   cursor: pointer;
@@ -2858,9 +2858,9 @@ h1 {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 62px;
+  min-height: 54px;
   place-items: center;
-  transform: translateY(-3px);
+  transform: translateY(-2px);
 }
 
 .calendar-day-number,
@@ -2888,8 +2888,8 @@ h1 {
 
 .calendar-day-rank {
   z-index: 2;
-  min-height: 28px;
-  font-size: 1.72rem;
+  min-height: 24px;
+  font-size: 1.56rem;
   line-height: 1;
   filter: drop-shadow(0 1px 0 rgb(255 255 255 / 70%));
 }
@@ -10974,7 +10974,8 @@ h1 {
   }
 
   .completion-calendar {
-    padding: 15px 7px 22px;
+    gap: 8px;
+    padding: 11px 6px 16px;
   }
 
   .history-empty-guide {
@@ -10984,37 +10985,39 @@ h1 {
   }
 
   .completion-calendar-grid {
-    gap: 6px 4px;
+    gap: 4px 3px;
   }
 
   .calendar-day,
   .calendar-day-empty {
-    height: 116px;
-    min-height: 116px;
+    height: 88px;
+    min-height: 88px;
+    border-radius: 10px;
   }
 
   .calendar-day {
-    gap: 7px;
-    grid-template-rows: 32px minmax(0, 1fr);
-    padding: 8px 2px 18px;
+    gap: 3px;
+    grid-template-rows: 24px minmax(0, 1fr);
+    padding: 6px 2px 10px;
   }
 
   .calendar-date-header {
-    min-height: 32px;
+    min-height: 24px;
+    gap: 1px;
   }
 
   .calendar-stamp-visual {
-    min-height: 58px;
-    transform: translateY(-3px);
+    min-height: 42px;
+    transform: translateY(-1px);
   }
 
   .calendar-stamp-slot {
-    width: 41px;
-    height: 41px;
+    width: 32px;
+    height: 32px;
   }
 
   .calendar-day-number {
-    font-size: 0.72rem;
+    font-size: 0.66rem;
   }
 
   .calendar-day[data-routine-kind='holiday']::before,
@@ -11023,7 +11026,7 @@ h1 {
     left: 4px;
     width: 14px;
     height: 14px;
-    font-size: 0.56rem;
+    font-size: 0.54rem;
   }
 
   .calendar-day-rank {
@@ -11033,10 +11036,10 @@ h1 {
     inline-size: 100%;
     min-width: 0;
     max-width: 100%;
-    min-height: 16px;
+    min-height: 14px;
     justify-self: stretch;
     overflow: hidden;
-    font-size: 1.48rem;
+    font-size: 1.18rem;
     text-align: center;
     text-overflow: clip;
     white-space: nowrap;
@@ -11047,6 +11050,9 @@ h1 {
     width: 100%;
     min-width: 0;
     max-width: 100%;
+    min-height: 10px;
+    font-size: 0.42rem;
+    line-height: 0.96;
     overflow: hidden;
     text-align: center;
     text-overflow: clip;
@@ -11054,11 +11060,11 @@ h1 {
   }
 
   .calendar-day[data-rate-level='excellent'] .calendar-day-rate {
-    font-size: 0.38rem;
+    font-size: 0.34rem;
   }
 
   .calendar-day[data-rate-level='perfect'] .calendar-day-rate {
-    font-size: 0.4rem;
+    font-size: 0.35rem;
   }
 
   .calendar-day[data-today='true']::after {
@@ -11165,44 +11171,45 @@ h1 {
 
   @media (max-width: 360px) {
     .completion-calendar {
-      padding: 15px 6px 20px;
+      padding: 10px 5px 14px;
     }
 
     .completion-calendar-grid {
-      gap: 5px 3px;
+      gap: 4px 2px;
     }
 
     .calendar-day,
     .calendar-day-empty {
-      height: 108px;
-      min-height: 108px;
+      height: 82px;
+      min-height: 82px;
     }
 
     .calendar-day {
-      padding: 7px 2px 16px;
-      grid-template-rows: 30px minmax(0, 1fr);
+      padding: 5px 2px 9px;
+      grid-template-rows: 22px minmax(0, 1fr);
     }
 
     .calendar-day-rate {
-      min-height: 16px;
-      font-size: 0.45rem;
-      line-height: 0.88;
+      min-height: 10px;
+      font-size: 0.39rem;
+      line-height: 0.92;
       overflow-wrap: anywhere;
       white-space: normal;
     }
 
     .calendar-day[data-rate-level='excellent'] .calendar-day-rate,
     .calendar-day[data-rate-level='perfect'] .calendar-day-rate {
-      font-size: 0.35rem;
+      font-size: 0.31rem;
     }
 
     .calendar-stamp-slot {
-      width: 37px;
-      height: 37px;
+      width: 29px;
+      height: 29px;
     }
 
     .calendar-day-rank {
-      font-size: 1.32rem;
+      min-height: 13px;
+      font-size: 1.06rem;
     }
   }
 
