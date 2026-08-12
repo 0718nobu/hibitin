@@ -6,6 +6,8 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+  type UIEvent as ReactUIEvent,
   type TouchEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -3198,14 +3200,501 @@ const createTodoFolderId = () =>
 const createDailyScheduleId = () =>
   `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const scheduleTimeOptions = Array.from({ length: 48 }, (_, index) => {
-  const hours = Math.floor(index / 2);
-  const minutes = index % 2 === 0 ? 0 : 30;
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-});
-
 const formatScheduleTimeLabel = (time: string) => (time.trim() ? time : '未定');
+
+const scheduleHourOptions = Array.from({ length: 24 }, (_, index) => index);
+const scheduleMinuteOptions = Array.from({ length: 60 }, (_, index) => index);
+const scheduleWheelItemHeight = 40;
+const scheduleDateWheelYearPastRange = 2;
+const scheduleDateWheelYearFutureRange = 5;
+
+const formatScheduleTimeValue = (hour: number, minute: number) =>
+  `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+
+const formatScheduleDateCompactLabel = (date: Date) =>
+  `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+const parseScheduleTimeValue = (time: string) => {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (
+    !Number.isInteger(hour) ||
+    hour < 0 ||
+    hour > 23 ||
+    !Number.isInteger(minute) ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  return { hour, minute };
+};
+
+const getNearestScheduleWheelTime = () => {
+  const now = new Date();
+  const minutes = now.getMinutes();
+  const roundedMinutes = Math.ceil(minutes / 30) * 30;
+  const next = new Date(now);
+
+  next.setSeconds(0, 0);
+
+  if (roundedMinutes >= 60) {
+    next.setHours(now.getHours() + 1, 0, 0, 0);
+  } else {
+    next.setMinutes(roundedMinutes);
+  }
+
+  return {
+    hour: next.getHours(),
+    minute: next.getMinutes(),
+  };
+};
+
+const getScheduleDateWheelYearOptions = (selectedYear: number) => {
+  const currentYear = new Date().getFullYear();
+  const startYear = Math.min(selectedYear, currentYear - scheduleDateWheelYearPastRange);
+  const endYear = Math.max(selectedYear, currentYear + scheduleDateWheelYearFutureRange);
+
+  return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+};
+
+const getDaysInYearMonth = (year: number, month: number) =>
+  new Date(year, month, 0).getDate();
+
+type ScheduleDateWheelPickerProps = {
+  value: Date;
+  onChange: (value: Date) => void;
+};
+
+function ScheduleDateWheelPicker({ value, onChange }: ScheduleDateWheelPickerProps) {
+  const yearColumnRef = useRef<HTMLDivElement | null>(null);
+  const monthColumnRef = useRef<HTMLDivElement | null>(null);
+  const dayColumnRef = useRef<HTMLDivElement | null>(null);
+  const ignoreScrollRef = useRef(false);
+  const scrollTimerRef = useRef<number | null>(null);
+  const selectedYear = value.getFullYear();
+  const selectedMonth = value.getMonth() + 1;
+  const selectedDay = value.getDate();
+  const yearOptions = useMemo(
+    () => getScheduleDateWheelYearOptions(selectedYear),
+    [selectedYear],
+  );
+  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => index + 1), []);
+  const dayOptions = useMemo(
+    () =>
+      Array.from(
+        { length: getDaysInYearMonth(selectedYear, selectedMonth) },
+        (_, index) => index + 1,
+      ),
+    [selectedMonth, selectedYear],
+  );
+  const selectedYearRef = useRef(selectedYear);
+  const selectedMonthRef = useRef(selectedMonth);
+  const selectedDayRef = useRef(selectedDay);
+
+  const scrollColumnToIndex = (
+    ref: RefObject<HTMLDivElement | null>,
+    valueIndex: number,
+    behavior: ScrollBehavior = 'auto',
+  ) => {
+    ref.current?.scrollTo({
+      top: valueIndex * scheduleWheelItemHeight,
+      behavior,
+    });
+  };
+
+  const commitDate = (year: number, month: number, day: number) => {
+    const safeDay = Math.min(day, getDaysInYearMonth(year, month));
+    selectedYearRef.current = year;
+    selectedMonthRef.current = month;
+    selectedDayRef.current = safeDay;
+    onChange(new Date(year, month - 1, safeDay));
+  };
+
+  useEffect(() => {
+    selectedYearRef.current = selectedYear;
+    selectedMonthRef.current = selectedMonth;
+    selectedDayRef.current = selectedDay;
+  }, [selectedDay, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    ignoreScrollRef.current = true;
+
+    window.requestAnimationFrame(() => {
+      scrollColumnToIndex(yearColumnRef, Math.max(0, yearOptions.indexOf(selectedYear)));
+      scrollColumnToIndex(monthColumnRef, selectedMonth - 1);
+      scrollColumnToIndex(dayColumnRef, selectedDay - 1);
+      window.setTimeout(() => {
+        ignoreScrollRef.current = false;
+      }, 120);
+    });
+  }, [selectedDay, selectedMonth, selectedYear, yearOptions]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+  }, []);
+
+  const handleWheelScroll = (
+    event: ReactUIEvent<HTMLDivElement>,
+    values: number[],
+    type: 'year' | 'month' | 'day',
+  ) => {
+    if (ignoreScrollRef.current) {
+      return;
+    }
+
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+
+    const target = event.currentTarget;
+
+    scrollTimerRef.current = window.setTimeout(() => {
+      const nextIndex = Math.max(
+        0,
+        Math.min(values.length - 1, Math.round(target.scrollTop / scheduleWheelItemHeight)),
+      );
+      const nextValue = values[nextIndex];
+
+      target.scrollTo({
+        top: nextIndex * scheduleWheelItemHeight,
+        behavior: 'smooth',
+      });
+
+      if (type === 'year') {
+        commitDate(nextValue, selectedMonthRef.current, selectedDayRef.current);
+      } else if (type === 'month') {
+        commitDate(selectedYearRef.current, nextValue, selectedDayRef.current);
+      } else {
+        commitDate(selectedYearRef.current, selectedMonthRef.current, nextValue);
+      }
+    }, 90);
+  };
+
+  const handleOptionClick = (type: 'year' | 'month' | 'day', nextValue: number) => {
+    if (type === 'year') {
+      scrollColumnToIndex(yearColumnRef, Math.max(0, yearOptions.indexOf(nextValue)), 'smooth');
+      commitDate(nextValue, selectedMonthRef.current, selectedDayRef.current);
+    } else if (type === 'month') {
+      scrollColumnToIndex(monthColumnRef, nextValue - 1, 'smooth');
+      commitDate(selectedYearRef.current, nextValue, selectedDayRef.current);
+    } else {
+      scrollColumnToIndex(dayColumnRef, nextValue - 1, 'smooth');
+      commitDate(selectedYearRef.current, selectedMonthRef.current, nextValue);
+    }
+  };
+
+  return (
+    <div className="schedule-date-wheel-picker" aria-label="予定の日付">
+      <div className="schedule-date-wheel-grid">
+        <div
+          className="schedule-time-wheel-column schedule-date-wheel-column"
+          onScroll={(event) => handleWheelScroll(event, yearOptions, 'year')}
+          ref={yearColumnRef}
+        >
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+          {yearOptions.map((year) => (
+            <button
+              aria-current={selectedYear === year ? 'true' : undefined}
+              className="schedule-time-wheel-option schedule-date-wheel-option"
+              key={year}
+              onClick={() => handleOptionClick('year', year)}
+              type="button"
+            >
+              {year}
+            </button>
+          ))}
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+        </div>
+        <div
+          className="schedule-time-wheel-column schedule-date-wheel-column"
+          onScroll={(event) => handleWheelScroll(event, monthOptions, 'month')}
+          ref={monthColumnRef}
+        >
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+          {monthOptions.map((month) => (
+            <button
+              aria-current={selectedMonth === month ? 'true' : undefined}
+              className="schedule-time-wheel-option schedule-date-wheel-option"
+              key={month}
+              onClick={() => handleOptionClick('month', month)}
+              type="button"
+            >
+              {month}
+            </button>
+          ))}
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+        </div>
+        <div
+          className="schedule-time-wheel-column schedule-date-wheel-column"
+          onScroll={(event) => handleWheelScroll(event, dayOptions, 'day')}
+          ref={dayColumnRef}
+        >
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+          {dayOptions.map((day) => (
+            <button
+              aria-current={selectedDay === day ? 'true' : undefined}
+              className="schedule-time-wheel-option schedule-date-wheel-option"
+              key={day}
+              onClick={() => handleOptionClick('day', day)}
+              type="button"
+            >
+              {day}
+            </button>
+          ))}
+          <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+        </div>
+      </div>
+      <div className="schedule-date-wheel-labels" aria-hidden="true">
+        <span>年</span>
+        <span>月</span>
+        <span>日</span>
+      </div>
+    </div>
+  );
+}
+
+type ScheduleTimeWheelPickerProps = {
+  ariaLabel: string;
+  value: string;
+  onChange: (value: string) => void;
+  onOpen?: () => void;
+};
+
+function ScheduleTimeWheelPicker({
+  ariaLabel,
+  value,
+  onChange,
+  onOpen,
+}: ScheduleTimeWheelPickerProps) {
+  const parsedValue = parseScheduleTimeValue(value);
+  const fallbackTimeRef = useRef(getNearestScheduleWheelTime());
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const hourColumnRef = useRef<HTMLDivElement | null>(null);
+  const minuteColumnRef = useRef<HTMLDivElement | null>(null);
+  const ignoreScrollRef = useRef(false);
+  const scrollTimerRef = useRef<number | null>(null);
+  const selectedHourRef = useRef(parsedValue?.hour ?? fallbackTimeRef.current.hour);
+  const selectedMinuteRef = useRef(parsedValue?.minute ?? fallbackTimeRef.current.minute);
+  const [isOpen, setIsOpen] = useState(false);
+  const [selectedHour, setSelectedHour] = useState(parsedValue?.hour ?? fallbackTimeRef.current.hour);
+  const [selectedMinute, setSelectedMinute] = useState(
+    parsedValue?.minute ?? fallbackTimeRef.current.minute,
+  );
+
+  const scrollColumnToValue = (
+    ref: RefObject<HTMLDivElement | null>,
+    valueIndex: number,
+    behavior: ScrollBehavior = 'auto',
+  ) => {
+    ref.current?.scrollTo({
+      top: valueIndex * scheduleWheelItemHeight,
+      behavior,
+    });
+  };
+
+  const commitTime = (hour: number, minute: number) => {
+    onChange(formatScheduleTimeValue(hour, minute));
+  };
+
+  useEffect(() => {
+    selectedHourRef.current = selectedHour;
+  }, [selectedHour]);
+
+  useEffect(() => {
+    selectedMinuteRef.current = selectedMinute;
+  }, [selectedMinute]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const nextTime = parseScheduleTimeValue(value) ?? getNearestScheduleWheelTime();
+    setSelectedHour(nextTime.hour);
+    setSelectedMinute(nextTime.minute);
+    ignoreScrollRef.current = true;
+
+    window.requestAnimationFrame(() => {
+      scrollColumnToValue(hourColumnRef, nextTime.hour);
+      scrollColumnToValue(minuteColumnRef, nextTime.minute);
+      window.setTimeout(() => {
+        ignoreScrollRef.current = false;
+      }, 120);
+    });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+  }, []);
+
+  const handleOpen = () => {
+    if (!isOpen) {
+      onOpen?.();
+    }
+
+    setIsOpen((current) => !current);
+  };
+
+  const handleWheelScroll = (
+    event: ReactUIEvent<HTMLDivElement>,
+    values: number[],
+    type: 'hour' | 'minute',
+  ) => {
+    if (ignoreScrollRef.current) {
+      return;
+    }
+
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+
+    const target = event.currentTarget;
+
+    scrollTimerRef.current = window.setTimeout(() => {
+      const nextIndex = Math.max(
+        0,
+        Math.min(values.length - 1, Math.round(target.scrollTop / scheduleWheelItemHeight)),
+      );
+      const nextValue = values[nextIndex];
+
+      target.scrollTo({
+        top: nextIndex * scheduleWheelItemHeight,
+        behavior: 'smooth',
+      });
+
+      if (type === 'hour') {
+        selectedHourRef.current = nextValue;
+        setSelectedHour(nextValue);
+        commitTime(nextValue, selectedMinuteRef.current);
+      } else {
+        selectedMinuteRef.current = nextValue;
+        setSelectedMinute(nextValue);
+        commitTime(selectedHourRef.current, nextValue);
+      }
+    }, 90);
+  };
+
+  const handleOptionClick = (type: 'hour' | 'minute', nextValue: number) => {
+    if (type === 'hour') {
+      selectedHourRef.current = nextValue;
+      setSelectedHour(nextValue);
+      scrollColumnToValue(hourColumnRef, nextValue, 'smooth');
+      commitTime(nextValue, selectedMinuteRef.current);
+      return;
+    }
+
+    selectedMinuteRef.current = nextValue;
+    setSelectedMinute(nextValue);
+    scrollColumnToValue(minuteColumnRef, nextValue, 'smooth');
+    commitTime(selectedHourRef.current, nextValue);
+  };
+
+  return (
+    <div className="schedule-time-wheel" data-open={isOpen ? 'true' : 'false'} ref={wrapperRef}>
+      <button
+        aria-expanded={isOpen}
+        aria-label={ariaLabel}
+        className="schedule-time-trigger"
+        onClick={handleOpen}
+        type="button"
+      >
+        {value.trim() ? value : '--:--'}
+      </button>
+      {isOpen && (
+        <div className="schedule-time-popover" role="dialog" aria-label="時刻を選択">
+          <div className="schedule-time-popover-header">
+            <span>時刻</span>
+            <button
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+              }}
+              type="button"
+            >
+              未定
+            </button>
+          </div>
+          <div className="schedule-time-wheels" aria-label="時刻ホイール">
+            <div
+              className="schedule-time-wheel-column"
+              onScroll={(event) => handleWheelScroll(event, scheduleHourOptions, 'hour')}
+              ref={hourColumnRef}
+            >
+              <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+              {scheduleHourOptions.map((hour) => (
+                <button
+                  aria-current={selectedHour === hour ? 'true' : undefined}
+                  className="schedule-time-wheel-option"
+                  key={hour}
+                  onClick={() => handleOptionClick('hour', hour)}
+                  type="button"
+                >
+                  {String(hour).padStart(2, '0')}
+                </button>
+              ))}
+              <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+            </div>
+            <span className="schedule-time-wheel-separator" aria-hidden="true">:</span>
+            <div
+              className="schedule-time-wheel-column"
+              onScroll={(event) => handleWheelScroll(event, scheduleMinuteOptions, 'minute')}
+              ref={minuteColumnRef}
+            >
+              <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+              {scheduleMinuteOptions.map((minute) => (
+                <button
+                  aria-current={selectedMinute === minute ? 'true' : undefined}
+                  className="schedule-time-wheel-option"
+                  key={minute}
+                  onClick={() => handleOptionClick('minute', minute)}
+                  type="button"
+                >
+                  {String(minute).padStart(2, '0')}
+                </button>
+              ))}
+              <div className="schedule-time-wheel-spacer" aria-hidden="true" />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const createDailyTodoItem = (
   text = '',
@@ -4693,6 +5182,15 @@ const monthlyStampSummaryDefinitions = [
 
 type MonthlyStampSummaryLevel = typeof monthlyStampSummaryDefinitions[number]['level'];
 
+const monthlyStampSummaryDisplayOrder: Record<MonthlyStampSummaryLevel, number> = {
+  perfect: 0,
+  excellent: 1,
+  great: 2,
+  good: 3,
+  start: 4,
+  first: 5,
+};
+
 const getTimerParts = (seconds: number) => {
   const safeSeconds = Math.max(0, Math.round(seconds));
   const hours = Math.floor(safeSeconds / 3600);
@@ -5227,6 +5725,8 @@ function App() {
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDetailDrafts, setScheduleDetailDrafts] = useState<Record<string, ScheduleDetailDraft>>({});
   const [activeScheduleMenuId, setActiveScheduleMenuId] = useState<string | null>(null);
+  const [isScheduleDetailDatePickerOpen, setIsScheduleDetailDatePickerOpen] = useState(false);
+  const [shouldCloseScheduleEditorAfterAdd, setShouldCloseScheduleEditorAfterAdd] = useState(false);
   const [todoView, setTodoView] = useState<TodoViewName>(INITIAL_TODO_VIEW);
   const [todoMonth, setTodoMonth] = useState(() => getMonthStart(today));
   const [selectedTodoDate, setSelectedTodoDate] = useState<Date | null>(null);
@@ -11658,6 +12158,35 @@ function App() {
     }));
   };
 
+  const moveScheduleDetailDraft = (previousDate: Date, nextDate: Date) => {
+    const previousDateKey = getDateKey(previousDate);
+    const nextDateKey = getDateKey(nextDate);
+
+    if (previousDateKey === nextDateKey) {
+      return;
+    }
+
+    setScheduleDetailDrafts((currentDrafts) => {
+      const previousDraft = currentDrafts[previousDateKey];
+
+      if (!previousDraft) {
+        return currentDrafts;
+      }
+
+      const nextDrafts = { ...currentDrafts };
+
+      delete nextDrafts[previousDateKey];
+      nextDrafts[nextDateKey] = {
+        ...(currentDrafts[nextDateKey] ?? getEmptyScheduleDetailDraft()),
+        ...previousDraft,
+        message: undefined,
+        error: undefined,
+      };
+
+      return nextDrafts;
+    });
+  };
+
   const commitScheduleDetailDraft = (date: Date) => {
     const dateKey = getDateKey(date);
     const draft = scheduleDetailDrafts[dateKey] ?? getEmptyScheduleDetailDraft();
@@ -11716,8 +12245,20 @@ function App() {
         message: '予定を追加しました',
       },
     }));
+
+    if (shouldCloseScheduleEditorAfterAdd) {
+      setSelectedScheduleDate(null);
+      setActiveScheduleMenuId(null);
+      setIsScheduleDetailDatePickerOpen(false);
+      setShouldCloseScheduleEditorAfterAdd(false);
+    }
+
     window.setTimeout(() => {
       scheduleDetailSavingKeysRef.current.delete(dateKey);
+      if (shouldCloseScheduleEditorAfterAdd) {
+        return;
+      }
+
       document
         .querySelector<HTMLInputElement>(`[data-schedule-detail-text="${dateKey}"]`)
         ?.focus({ preventScroll: true });
@@ -11759,10 +12300,24 @@ function App() {
     saveScheduleForDate(date, deleteDailyScheduleItem(currentSchedule, id));
   };
 
-  const openScheduleEditor = (date: Date) => {
+  const openScheduleEditor = (
+    date: Date,
+    options: { closeAfterAdd?: boolean; resetDraft?: boolean } = {},
+  ) => {
+    const dateKey = getDateKey(date);
+
     setScheduleMonth(getMonthStart(date));
     setScheduleYear(date.getFullYear());
     setSelectedScheduleDate(date);
+    setIsScheduleDetailDatePickerOpen(false);
+    setShouldCloseScheduleEditorAfterAdd(Boolean(options.closeAfterAdd));
+
+    if (options.resetDraft) {
+      setScheduleDetailDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [dateKey]: getEmptyScheduleDetailDraft(),
+      }));
+    }
   };
 
   const scrollToScheduleTodayCell = (behavior: ScrollBehavior = 'smooth') => {
@@ -11780,6 +12335,20 @@ function App() {
         window.scrollTo({ top: 0, behavior });
       });
     }, 0);
+  };
+
+  const showScheduleCalendarToday = (behavior: ScrollBehavior = 'smooth') => {
+    scheduleTodayScrollMonthRef.current = null;
+    scheduleListScrollYearRef.current = null;
+    setScheduleView('list');
+    setScheduleYear(today.getFullYear());
+    setScheduleMonth(getMonthStart(today));
+    setSelectedScheduleYearMonth(null);
+    setSelectedScheduleDate(null);
+    setActiveScheduleMenuId(null);
+    setIsScheduleDetailDatePickerOpen(false);
+    setShouldCloseScheduleEditorAfterAdd(false);
+    scrollToScheduleTodayCell(behavior);
   };
 
   const moveScheduleYear = (years: number) => {
@@ -11833,15 +12402,9 @@ function App() {
     }
 
     if (targetPage === 'schedule') {
-      scheduleTodayScrollMonthRef.current = null;
-      scheduleListScrollYearRef.current = null;
       scheduleAgendaScrollYearRef.current = null;
       setMenuView('list');
-      setScheduleMonth(getMonthStart(today));
-      setScheduleYear(today.getFullYear());
-      setSelectedScheduleYearMonth(null);
-      setScheduleView(INITIAL_SCHEDULE_VIEW);
-      scrollToScheduleTodayCell('smooth');
+      showScheduleCalendarToday('smooth');
       return;
     }
 
@@ -14336,58 +14899,6 @@ function App() {
               <span>残り{remainingQuestSlots}枠</span>
             </div>
           )}
-          {page === 'today' && (
-            <section
-              className="daily-nudge-card daily-nudge-inline routine-section-lead-card"
-              data-celebrating={
-                dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
-              }
-              data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
-              aria-label={dailyNudgeDisplayLabel}
-            >
-              <div className="daily-nudge-heading">
-                <span aria-hidden="true">👉</span>
-                <div>
-                  <h2>{dailyNudgeDisplayLabel}</h2>
-                </div>
-                <p className="daily-nudge-streak">
-                  {selectedDailyNudgeStreak > 0
-                    ? `🔥 ${selectedDailyNudgeStreak}日連続`
-                    : '今日からスタート'}
-                </p>
-              </div>
-              {selectedDailyNudgeRecord ? (
-                <>
-                  <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
-                  <div className="daily-nudge-actions">
-                    {selectedDailyNudgeRecord.completed ? (
-                      <span className="daily-nudge-win-label">今日の勝ち！</span>
-                    ) : (
-                      <button
-                        onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
-                        type="button"
-                      >
-                        OK
-                      </button>
-                    )}
-                    {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
-                      <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
-                        +{dailyNudgePointFlash.points}PT
-                      </span>
-                    )}
-                    {selectedDailyNudgeRecord.completed && (
-                      <p className="daily-nudge-celebration">
-                        {selectedDailyNudgeRecord.celebrationMessage ??
-                          selectedDailyNudgeRecord.completionMessage}
-                      </p>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <p className="daily-nudge-empty">ログインクエストは準備中です</p>
-              )}
-            </section>
-          )}
           {routineRenderSections.map((section) => {
             const isBonusSection = section.id === bonusSectionId;
             const isPresentationSection =
@@ -14448,6 +14959,58 @@ function App() {
                   )}
                 </div>
               </div>
+              {page === 'today' && section.id === 'wake' && (
+                <section
+                  className="daily-nudge-card daily-nudge-inline"
+                  data-celebrating={
+                    dailyNudgePointFlash && selectedDailyNudgeAward?.active ? 'true' : 'false'
+                  }
+                  data-completed={selectedDailyNudgeRecord?.completed ? 'true' : 'false'}
+                  aria-label={dailyNudgeDisplayLabel}
+                >
+                  <div className="daily-nudge-heading">
+                    <span aria-hidden="true">👉</span>
+                    <div>
+                      <h2>{dailyNudgeDisplayLabel}</h2>
+                    </div>
+                    <p className="daily-nudge-streak">
+                      {selectedDailyNudgeStreak > 0
+                        ? `🔥 ${selectedDailyNudgeStreak}日連続`
+                        : '今日からスタート'}
+                    </p>
+                  </div>
+                  {selectedDailyNudgeRecord ? (
+                    <>
+                      <p className="daily-nudge-text">{selectedDailyNudgeRecord.text}</p>
+                      <div className="daily-nudge-actions">
+                        {selectedDailyNudgeRecord.completed ? (
+                          <span className="daily-nudge-win-label">今日の勝ち！</span>
+                        ) : (
+                          <button
+                            onClick={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                            type="button"
+                          >
+                            OK
+                          </button>
+                        )}
+                        {dailyNudgePointFlash && selectedDailyNudgeAward?.active && (
+                          <span className="daily-nudge-point-pop" key={dailyNudgePointFlash.id}>
+                            +{dailyNudgePointFlash.points}PT
+                          </span>
+                        )}
+                        {selectedDailyNudgeRecord.completed && (
+                          <p className="daily-nudge-celebration">
+                            {selectedDailyNudgeRecord.celebrationMessage ??
+                              selectedDailyNudgeRecord.completionMessage}
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="daily-nudge-empty">ログインクエストは準備中です</p>
+                  )}
+                </section>
+              )}
               <div className="routine-items">
                 {getMixedRoutineEntries(section, {
                   includeCoreRoutines: page === 'today' && !isBonusSection,
@@ -15220,7 +15783,14 @@ function App() {
                   aria-current={scheduleView === view ? 'page' : undefined}
                   data-active={scheduleView === view ? 'true' : 'false'}
                   key={view}
-                  onClick={() => setScheduleView(view)}
+                  onClick={() => {
+                    if (view === 'list') {
+                      showScheduleCalendarToday('smooth');
+                      return;
+                    }
+
+                    setScheduleView(view);
+                  }}
                   type="button"
                 >
                   {label}
@@ -15242,7 +15812,7 @@ function App() {
                       <h2>🗓️ {todayScheduleTitle}</h2>
                     </div>
                   </div>
-                  {todayScheduleItems.length > 0 ? (
+                  {todayScheduleItems.length > 0 && (
                     <div className="schedule-read-list schedule-today-list">
                       {todayScheduleItems.map((scheduleItem) => (
                         <button
@@ -15256,9 +15826,14 @@ function App() {
                         </button>
                       ))}
                     </div>
-                  ) : (
-                    <p className="schedule-today-empty">今日の予定はありません</p>
                   )}
+                  <button
+                    className="schedule-today-add-button"
+                    onClick={() => openScheduleEditor(today, { closeAfterAdd: true, resetDraft: true })}
+                    type="button"
+                  >
+                    ＋ 予定を追加
+                  </button>
                 </section>
               );
             })()}
@@ -15281,6 +15856,13 @@ function App() {
                     ›
                   </button>
                 </div>
+                <button
+                  className="schedule-agenda-add-button"
+                  onClick={() => openScheduleEditor(today)}
+                  type="button"
+                >
+                  ＋予定を追加
+                </button>
                 {yearlyScheduleGroups.length > 0 ? (
                   <div className="schedule-agenda-list">
                     {yearlyScheduleGroups.map((monthGroup) => (
@@ -15569,6 +16151,8 @@ function App() {
                   onClick={() => {
                     setSelectedScheduleDate(null);
                     setActiveScheduleMenuId(null);
+                    setIsScheduleDetailDatePickerOpen(false);
+                    setShouldCloseScheduleEditorAfterAdd(false);
                   }}
                 >
                   <section
@@ -15586,6 +16170,8 @@ function App() {
                         onClick={() => {
                           setSelectedScheduleDate(null);
                           setActiveScheduleMenuId(null);
+                          setIsScheduleDetailDatePickerOpen(false);
+                          setShouldCloseScheduleEditorAfterAdd(false);
                         }}
                         type="button"
                       >
@@ -15600,25 +16186,18 @@ function App() {
                         <div className="schedule-editor-list">
                           {scheduleItems.map((scheduleItem, index) => (
                             <div className="schedule-editor-row" key={scheduleItem.id}>
-                              <select
-                                aria-label={`${dateTitle}のスケジュール ${index + 1}の時間`}
-                                onChange={(event) =>
+                              <ScheduleTimeWheelPicker
+                                ariaLabel={`${dateTitle}のスケジュール ${index + 1}の時間`}
+                                onChange={(nextTime) =>
                                   updateScheduleItem(
                                     scheduleDate,
                                     scheduleItem,
                                     'time',
-                                    event.target.value,
+                                    nextTime,
                                   )
                                 }
                                 value={scheduleItem.time}
-                              >
-                                <option value="">--:--</option>
-                                {scheduleTimeOptions.map((timeOption) => (
-                                  <option key={timeOption} value={timeOption}>
-                                    {timeOption}
-                                  </option>
-                                ))}
-                              </select>
+                              />
                               <input
                                 aria-label={`${dateTitle}のスケジュール ${index + 1}の内容`}
                                 id={`schedule-item-text-${scheduleItem.id}`}
@@ -15689,10 +16268,21 @@ function App() {
                         予定を追加
                       </label>
                       <div className="schedule-detail-add-row schedule-editor-row" data-new="true">
-                        <select
-                          aria-label={`${dateTitle}へ追加する予定の時刻`}
-                          onChange={(event) => {
-                            const [hour = '', minute = ''] = event.target.value.split(':');
+                        <button
+                          aria-expanded={isScheduleDetailDatePickerOpen}
+                          aria-label="追加する予定の日付を変更"
+                          className="schedule-date-trigger"
+                          onClick={() =>
+                            setIsScheduleDetailDatePickerOpen((isOpen) => !isOpen)
+                          }
+                          type="button"
+                        >
+                          {formatScheduleDateCompactLabel(scheduleDate)}
+                        </button>
+                        <ScheduleTimeWheelPicker
+                          ariaLabel={`${dateTitle}へ追加する予定の時刻`}
+                          onChange={(nextTime) => {
+                            const [hour = '', minute = ''] = nextTime.split(':');
 
                             updateScheduleDetailDraft(scheduleDate, { hour, minute });
                             window.setTimeout(() => {
@@ -15702,14 +16292,7 @@ function App() {
                             }, 0);
                           }}
                           value={getScheduleDetailDraftTime(scheduleDetailDraft)}
-                        >
-                          <option value="">--:--</option>
-                          {scheduleTimeOptions.map((timeOption) => (
-                            <option key={timeOption} value={timeOption}>
-                              {timeOption}
-                            </option>
-                          ))}
-                        </select>
+                        />
                         <input
                           aria-label={`${dateTitle}へ追加する予定名`}
                           data-schedule-detail-text={dateKey}
@@ -15729,6 +16312,36 @@ function App() {
                           value={scheduleDetailDraft.text}
                         />
                       </div>
+                      {isScheduleDetailDatePickerOpen && (
+                        <div className="schedule-detail-date-picker-popover">
+                          <div className="schedule-detail-date-picker-header">
+                            <span>日付</span>
+                            <button
+                              onClick={() => {
+                                setIsScheduleDetailDatePickerOpen(false);
+                                window.setTimeout(() => {
+                                  document
+                                    .querySelector<HTMLInputElement>(
+                                      `[data-schedule-detail-text="${getDateKey(selectedScheduleDate ?? scheduleDate)}"]`,
+                                    )
+                                    ?.focus({ preventScroll: true });
+                                }, 0);
+                              }}
+                              type="button"
+                            >
+                              完了
+                            </button>
+                          </div>
+                          <ScheduleDateWheelPicker
+                            onChange={(nextDate) => {
+                              moveScheduleDetailDraft(scheduleDate, nextDate);
+                              setSelectedScheduleDate(nextDate);
+                              setActiveScheduleMenuId(null);
+                            }}
+                            value={scheduleDate}
+                          />
+                        </div>
+                      )}
                       {(scheduleDetailDraft.error || scheduleDetailDraft.message) && (
                         <p
                           className="schedule-detail-status"
@@ -17709,24 +18322,30 @@ function App() {
             </div>
             <section className="monthly-stamp-summary" aria-label="今月のスタンプ集計">
               <div className="monthly-stamp-summary-heading">
-                <h3>今月のスタンプ</h3>
+                <h3>今月の獲得スタンプ</h3>
                 <span>合計{monthlyStampSummary.total}こ</span>
               </div>
               <div className="monthly-stamp-summary-grid">
-                {monthlyStampSummary.items.map((stamp) => (
-                  <article
-                    className="monthly-stamp-card"
-                    data-stamp-level={stamp.level}
-                    data-empty={stamp.count === 0 ? 'true' : 'false'}
-                    key={stamp.level}
-                  >
-                    <span className="monthly-stamp-icon" aria-hidden="true">
-                      {stamp.icon}
-                    </span>
-                    <span className="monthly-stamp-name">{stamp.label}</span>
-                    <strong>{stamp.count}こ</strong>
-                  </article>
-                ))}
+                {monthlyStampSummary.items
+                  .filter((stamp) => stamp.count > 0)
+                  .sort(
+                    (first, second) =>
+                      monthlyStampSummaryDisplayOrder[first.level] -
+                      monthlyStampSummaryDisplayOrder[second.level],
+                  )
+                  .map((stamp) => (
+                    <article
+                      className="monthly-stamp-card"
+                      data-stamp-level={stamp.level}
+                      key={stamp.level}
+                    >
+                      <span className="monthly-stamp-icon" aria-hidden="true">
+                        {stamp.icon}
+                      </span>
+                      <span className="monthly-stamp-name">{stamp.label}</span>
+                      <strong>{stamp.count}</strong>
+                    </article>
+                  ))}
               </div>
             </section>
             <div className="completion-calendar-grid">
