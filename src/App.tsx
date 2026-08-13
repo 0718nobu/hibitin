@@ -44,6 +44,7 @@ type MenuViewName =
   | 'recordAdvanced'
   | 'achievements'
   | 'status'
+  | 'questManagement'
   | 'shop'
   | 'settings';
 type ScheduleViewName = 'list' | 'agenda' | 'today' | 'year';
@@ -52,6 +53,7 @@ type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
 type TodoViewName = 'todo' | 'today' | 'date' | 'folders' | 'completed';
+type SettingsViewName = 'top' | 'gameMode' | 'player' | 'account' | 'templates' | 'data' | 'admin';
 const INITIAL_SCHEDULE_VIEW: ScheduleViewName = 'list';
 const INITIAL_TODO_VIEW: TodoViewName = 'todo';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
@@ -186,6 +188,7 @@ const menuViewOptions: {
   { key: 'recordAdvanced', icon: '⚙️', label: 'アドバンスト', description: '追加記録を日付ごとに見る' },
   { key: 'achievements', icon: '🏆', label: '実績', description: '育った記録とスターを見る' },
   { key: 'status', icon: '🏅', label: 'ステータス', description: 'PTやフリークエストを確認する' },
+  { key: 'questManagement', icon: '🎯', label: 'クエスト管理', description: 'フリークエストを確認・育成する' },
   { key: 'shop', icon: '🎁', label: 'ショップ', description: '追加機能や枠を確認する' },
   { key: 'settings', icon: '⚙️', label: '設定', description: 'アプリの設定を変更する' },
 ];
@@ -198,7 +201,7 @@ const libraryCategories: {
 }[] = [
   { key: 'tools', icon: '🧰', title: 'アイテム', items: ['timer'] },
   { key: 'log', icon: '📝', title: 'ログ', items: ['recordMemo', 'recordEvents', 'recordAnyMemo', 'recordAdvanced'] },
-  { key: 'player', icon: '👤', title: 'プレイヤー', items: ['achievements', 'status'] },
+  { key: 'player', icon: '👤', title: 'プレイヤー', items: ['achievements', 'status', 'questManagement'] },
   { key: 'system', icon: '⚙️', title: 'システム', items: ['shop', 'settings'] },
 ];
 
@@ -209,6 +212,21 @@ const libraryRecordViewMap: Partial<Record<MenuViewName, RecordViewName>> = {
   recordAdvanced: 'advanced',
   achievements: 'achievements',
 };
+
+const settingsCategoryOptions: {
+  key: Exclude<SettingsViewName, 'top'>;
+  icon: string;
+  label: string;
+  description: string;
+  adminOnly?: boolean;
+}[] = [
+  { key: 'gameMode', icon: '🎮', label: 'ゲームモード', description: '遊び方・モード' },
+  { key: 'player', icon: '👤', label: 'プレイヤー設定', description: '名前・表示など' },
+  { key: 'account', icon: '🔐', label: 'アカウント', description: 'ログイン・同期' },
+  { key: 'templates', icon: '📋', label: 'テンプレート設定', description: '1日の構成' },
+  { key: 'data', icon: '💾', label: 'データ管理', description: '保存・復元' },
+  { key: 'admin', icon: '🛠', label: '管理', description: '運営・開発', adminOnly: true },
+];
 
 type RoutineItem = {
   id: string;
@@ -616,6 +634,27 @@ type MasteryStats = {
   isHallOfFame: boolean;
   isCurrentItem: boolean;
   lastSeenDateKey: string;
+};
+
+type QuestManagementCategory = 'fixed' | 'choice' | 'free';
+
+type QuestManagementItem = {
+  key: string;
+  category: QuestManagementCategory;
+  categoryLabel: string;
+  icon: string;
+  title: string;
+  currentName?: string;
+  optionLabels?: string[];
+  status: 'active' | 'inactive' | 'unset';
+  totalCompletions: number;
+  currentStreak: number;
+  recentCompletionRate: {
+    completedDays: number;
+    targetDays: number;
+    rate: number | null;
+  };
+  editableSlotNumber?: number;
 };
 
 type MasteryProgressState = {
@@ -1330,7 +1369,7 @@ const defaultRoutineSections: RoutineSection[] = [
     items: [
       {
         id: 'morning-walk-or-running',
-        label: '散歩 or ランニング',
+        label: 'フリークエスト1',
         order: 10,
         source: 'default',
         createdAt: '2026-06-01T00:00:00.000Z',
@@ -1423,6 +1462,115 @@ const formatRoutineNumber = (routineNumber?: number) => {
   ];
 
   return circledNumbers[roundedNumber - 1] ?? `${roundedNumber}.`;
+};
+
+const formatFreeQuestSlotName = (slotNumber: number) => `フリークエスト${slotNumber}`;
+
+const questProficiencyTiers = [
+  { minCompletions: 0, level: 1, icon: '🌱', label: '見習い' },
+  { minCompletions: 30, level: 2, icon: '🌿', label: '初級者' },
+  { minCompletions: 60, level: 3, icon: '🛠', label: '中級者' },
+  { minCompletions: 90, level: 4, icon: '🏅', label: '職人' },
+  { minCompletions: 120, level: 5, icon: '👑', label: '達人' },
+] as const;
+
+const getQuestProficiency = (totalCompletions: number) =>
+  [...questProficiencyTiers]
+    .reverse()
+    .find((tier) => totalCompletions >= tier.minCompletions) ?? questProficiencyTiers[0];
+
+const formatQuestProficiencyStars = (level: number) =>
+  `${'★'.repeat(Math.max(0, Math.min(5, level)))}${'☆'.repeat(Math.max(0, 5 - level))}`;
+
+const getQuestManagementFixedIcon = (itemId: string) => {
+  if (itemId === 'core:daily-memo') {
+    return '📝';
+  }
+
+  if (itemId === 'core:daily-events') {
+    return '📖';
+  }
+
+  if (itemId === 'morning-wake-up') {
+    return '🚶';
+  }
+
+  if (itemId === 'night-sleep') {
+    return '🛏';
+  }
+
+  if (itemId === 'fixed-schedule-check') {
+    return '📅';
+  }
+
+  if (itemId === 'fixed-todo-check') {
+    return '✅';
+  }
+
+  return '🎯';
+};
+
+const getQuestManagementFixedTitle = (itemStats: MasteryStats) => {
+  if (itemStats.itemId === 'core:daily-memo') {
+    return '今日のひとこと';
+  }
+
+  if (itemStats.itemId === 'core:daily-events') {
+    return '今日のできごと';
+  }
+
+  return itemStats.label.replace(/^[^\p{L}\p{N}]+/u, '').trim() || itemStats.label;
+};
+
+const getDateKeyFromIsoLike = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return getDateKey(date);
+};
+
+const calculateRecentQuestCompletionRate = (
+  todayKey: string,
+  isCompletedOnDate: (date: Date, dateKey: string) => boolean,
+  availableFromDateKey?: string | null,
+) => {
+  const todayDate = getDateFromKey(todayKey);
+  const periodStartDate = addDays(todayDate, -29);
+  const periodStartKey = getDateKey(periodStartDate);
+  const startKey =
+    availableFromDateKey && availableFromDateKey > periodStartKey
+      ? availableFromDateKey
+      : periodStartKey;
+  const startDate = getDateFromKey(startKey);
+  let completedDays = 0;
+  let targetDays = 0;
+
+  for (
+    let date = startDate;
+    getDateKey(date) <= todayKey;
+    date = addDays(date, 1)
+  ) {
+    const dateKey = getDateKey(date);
+
+    targetDays += 1;
+
+    if (isCompletedOnDate(date, dateKey)) {
+      completedDays += 1;
+    }
+  }
+
+  return {
+    completedDays,
+    targetDays,
+    rate: targetDays > 0 ? Math.round((completedDays / targetDays) * 100) : null,
+  };
 };
 
 const getCoreRoutineDisplayLabel = (
@@ -5709,6 +5857,7 @@ function App() {
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
   const [menuView, setMenuView] = useState<MenuViewName>('list');
+  const [settingsView, setSettingsView] = useState<SettingsViewName>('top');
   const [isLibraryBackAnimating, setIsLibraryBackAnimating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
@@ -5721,6 +5870,8 @@ function App() {
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [recordDisplayMode, setRecordDisplayMode] =
     useState<RecordDisplayMode>(() => loadRecordDisplayMode());
+  const [selectedQuestManagementItemKey, setSelectedQuestManagementItemKey] = useState<string | null>(null);
+  const [questManagementEditText, setQuestManagementEditText] = useState('');
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
   const [scheduleRevision, setScheduleRevision] = useState(0);
   const [scheduleDetailDrafts, setScheduleDetailDrafts] = useState<Record<string, ScheduleDetailDraft>>({});
@@ -6070,8 +6221,16 @@ function App() {
   const isMenuTimerView = page === 'library' && menuView === 'timer';
   const isMenuNotesView = false;
   const isMenuStatusView = page === 'library' && menuView === 'status';
+  const isQuestManagementView = page === 'library' && menuView === 'questManagement';
   const isShopView = page === 'library' && menuView === 'shop';
   const isSettingsView = page === 'library' && menuView === 'settings';
+  const isSettingsTopView = isSettingsView && settingsView === 'top';
+  const isSettingsGameModeView = isSettingsView && settingsView === 'gameMode';
+  const isSettingsPlayerView = isSettingsView && settingsView === 'player';
+  const isSettingsAccountView = isSettingsView && settingsView === 'account';
+  const isSettingsTemplatesView = isSettingsView && settingsView === 'templates';
+  const isSettingsDataView = isSettingsView && settingsView === 'data';
+  const isSettingsAdminView = isSettingsView && settingsView === 'admin';
   const isLibraryDetailView = page === 'library' && menuView !== 'list';
   const libraryRecordView = libraryRecordViewMap[menuView] ?? null;
   const isLibraryRecordView = page === 'library' && Boolean(libraryRecordView);
@@ -6131,8 +6290,8 @@ function App() {
     rhythmSettings[todayTemplate],
   );
   const isCheckMode = page === 'today';
-  const canEditRoutines = isSettingsView || (page === 'today' && isEditMode);
-  const canEditRoutineDetails = isSettingsView || (page === 'today' && isToday);
+  const canEditRoutines = isSettingsTemplatesView || (page === 'today' && isEditMode);
+  const canEditRoutineDetails = isSettingsTemplatesView || (page === 'today' && isToday);
   const totalQuestSlotLimit = getEffectiveQuestSlotLimit(playerUnlocks, gameBalance);
   const usedQuestSlots = countFreeQuestItems(displaySections);
   const remainingQuestSlots = Math.max(0, totalQuestSlotLimit - usedQuestSlots);
@@ -6288,6 +6447,172 @@ function App() {
     () => masteryStats.filter((itemStats) => itemStats.questKind === 'core'),
     [masteryStats],
   );
+  const questManagementSlots = useMemo(() => {
+    const numberedItems = todayDisplaySections
+      .filter((section) => isCoreRoutineSectionId(section.id))
+      .flatMap((section) =>
+        section.items
+          .filter((item) => !item.fixedKind)
+          .map((item, itemIndex) => ({
+            item,
+            section,
+            slotNumber: normalizeRoutineNumber(item.routineNumber) ?? itemIndex + 1,
+          })),
+      )
+      .sort((first, second) => first.slotNumber - second.slotNumber);
+    const itemBySlotNumber = new Map<number, typeof numberedItems[number]>();
+
+    numberedItems.forEach((entry) => {
+      if (!itemBySlotNumber.has(entry.slotNumber)) {
+        itemBySlotNumber.set(entry.slotNumber, entry);
+      }
+    });
+
+    const maxSlotNumber = Math.max(
+      totalQuestSlotLimit,
+      1,
+      ...numberedItems.map((entry) => entry.slotNumber),
+    );
+
+    return Array.from({ length: maxSlotNumber }, (_, index) => {
+      const slotNumber = index + 1;
+      const entry = itemBySlotNumber.get(slotNumber);
+      const stats = entry ? masteryStatsByItemId.get(entry.item.id) : undefined;
+
+      return {
+        item: entry?.item ?? null,
+        section: entry?.section ?? null,
+        slotNumber,
+        stats,
+      };
+    });
+  }, [masteryStatsByItemId, todayDisplaySections, totalQuestSlotLimit]);
+  const questManagementFixedItems = useMemo<QuestManagementItem[]>(
+    () => {
+      const isFixedQuestCompletedOnDate = (itemId: string, date: Date) => {
+        if (itemId === 'core:daily-memo' || itemId === 'core:daily-events') {
+          const completion = getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date));
+
+          return itemId === 'core:daily-memo'
+            ? completion['daily-memo']
+            : completion['daily-events'];
+        }
+
+        return Boolean(loadCheckedItems(date)[itemId]);
+      };
+
+      return fixedQuestMasteryStats.map((itemStats) => ({
+        key: `fixed:${itemStats.itemId}`,
+        category: 'fixed',
+        categoryLabel: '固定クエスト',
+        icon: getQuestManagementFixedIcon(itemStats.itemId),
+        title: getQuestManagementFixedTitle(itemStats),
+        status: 'active',
+        totalCompletions: itemStats.totalCompletions,
+        currentStreak: itemStats.currentStreak,
+        recentCompletionRate: calculateRecentQuestCompletionRate(
+          todayKey,
+          (date) => isFixedQuestCompletedOnDate(itemStats.itemId, date),
+        ),
+      }));
+    },
+    [fixedQuestMasteryStats, todayKey],
+  );
+  const questManagementChoiceItems = useMemo<QuestManagementItem[]>(() => {
+    const firstDateKey =
+      Object.keys(choiceQuestRecords)
+        .filter((dateKey) => dateKey <= todayKey)
+        .sort()[0] ?? todayKey;
+
+    const getChoiceQuestProgress = (questId: string) => {
+      let totalCompletions = 0;
+      let currentStreak = 0;
+
+      for (
+        let date = getDateFromKey(firstDateKey);
+        getDateKey(date) <= todayKey;
+        date = addDays(date, 1)
+      ) {
+        const dateKey = getDateKey(date);
+        const record = choiceQuestRecords[dateKey]?.[questId];
+        const isCompleted = Boolean(record?.completed);
+
+        if (isCompleted) {
+          totalCompletions += 1;
+          currentStreak += 1;
+        } else {
+          currentStreak = 0;
+        }
+      }
+
+      return { totalCompletions, currentStreak };
+    };
+
+    return choiceQuestDefinitions.map((definition, index) => {
+      const progress = getChoiceQuestProgress(definition.id);
+      const optionLabels = definition.options.map((option) => option.label);
+
+      return {
+        key: `choice:${definition.id}`,
+        category: 'choice',
+        categoryLabel: '選択クエスト',
+        icon: definition.icon,
+        title: `選択クエスト${index + 1}`,
+        currentName: optionLabels.join(' / '),
+        optionLabels,
+        status: 'active',
+        totalCompletions: progress.totalCompletions,
+        currentStreak: progress.currentStreak,
+        recentCompletionRate: calculateRecentQuestCompletionRate(
+          todayKey,
+          (_date, dateKey) => Boolean(choiceQuestRecords[dateKey]?.[definition.id]?.completed),
+        ),
+      };
+    });
+  }, [choiceQuestRecords, todayKey]);
+  const questManagementFreeItems = useMemo<QuestManagementItem[]>(
+    () =>
+      questManagementSlots.map((slot) => {
+        const itemId = slot.item?.id ?? null;
+
+        return {
+          key: `free:${slot.slotNumber}`,
+          category: 'free',
+          categoryLabel: 'フリークエスト',
+          icon: '🌱',
+          title: formatFreeQuestSlotName(slot.slotNumber),
+          currentName: slot.item?.label ?? '未設定',
+          status: slot.item ? 'active' : 'unset',
+          totalCompletions: slot.stats?.totalCompletions ?? 0,
+          currentStreak: slot.stats?.currentStreak ?? 0,
+          recentCompletionRate: itemId
+            ? calculateRecentQuestCompletionRate(
+              todayKey,
+              (date) => Boolean(loadCheckedItems(date)[itemId]),
+              getDateKeyFromIsoLike(slot.item?.createdAt),
+            )
+            : { completedDays: 0, targetDays: 0, rate: null },
+          editableSlotNumber: slot.slotNumber,
+        };
+      }),
+    [questManagementSlots, todayKey],
+  );
+  const questManagementSections = useMemo(
+    () => [
+      { key: 'fixed' as const, title: '固定クエスト', items: questManagementFixedItems },
+      { key: 'choice' as const, title: '選択クエスト', items: questManagementChoiceItems },
+      { key: 'free' as const, title: 'フリークエスト', items: questManagementFreeItems },
+    ],
+    [questManagementChoiceItems, questManagementFixedItems, questManagementFreeItems],
+  );
+  const questManagementItems = useMemo(
+    () => questManagementSections.flatMap((section) => section.items),
+    [questManagementSections],
+  );
+  const selectedQuestManagementItem =
+    selectedQuestManagementItemKey === null
+      ? null
+      : questManagementItems.find((item) => item.key === selectedQuestManagementItemKey) ?? null;
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
   const todoMonthLabel = monthFormatter.format(todoMonth);
   const todoMonthDates = useMemo(
@@ -7517,6 +7842,53 @@ function App() {
     }
 
     return displayedTarget;
+  };
+
+  const updateQuestManagementSlotName = (slotNumber: number, rawValue: string) => {
+    const nextLabel = rawValue.trim();
+    const slotInfo = questManagementSlots.find((slot) => slot.slotNumber === slotNumber);
+
+    if (!nextLabel) {
+      setQuestManagementEditText(slotInfo?.item?.label ?? '');
+      return;
+    }
+
+    updateSectionsForTarget(todayTarget, (currentSections) => {
+      if (slotInfo?.item) {
+        return currentSections.map((section) => ({
+          ...section,
+          items: section.items.map((item) =>
+            item.id === slotInfo.item?.id ? { ...item, label: nextLabel } : item,
+          ),
+        }));
+      }
+
+      return currentSections.map((section) => {
+        if (section.id !== 'morning') {
+          return section;
+        }
+
+        const nextOrder =
+          section.items.length === 0
+            ? 10
+            : Math.max(...section.items.map((item) => item.order)) + 10;
+
+        return {
+          ...section,
+          items: [
+            ...section.items,
+            {
+              id: createRoutineId(section.id),
+              label: nextLabel,
+              order: nextOrder,
+              source: 'user',
+              createdAt: new Date().toISOString(),
+              routineNumber: slotNumber,
+            },
+          ],
+        };
+      });
+    });
   };
 
   const getItemNote = (dateKey: string, itemId: string) => itemNotes[dateKey]?.[itemId] ?? '';
@@ -12410,6 +12782,7 @@ function App() {
 
     if (targetPage === 'library') {
       setMenuView('list');
+      setSettingsView('top');
       setSelectedAnyMemoFolderId(null);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -12424,6 +12797,7 @@ function App() {
     resetEditUiState();
     if (nextPage === 'library') {
       setMenuView('list');
+      setSettingsView('top');
     }
     if (nextPage === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
@@ -12446,6 +12820,9 @@ function App() {
     resetEditUiState();
     setPage('library');
     setMenuView(nextMenuView);
+    setSettingsView('top');
+    setSelectedQuestManagementItemKey(null);
+    setQuestManagementEditText('');
     if (nextMenuView === 'schedule') {
       scheduleTodayScrollMonthRef.current = null;
       scheduleListScrollYearRef.current = null;
@@ -12502,6 +12879,19 @@ function App() {
       return;
     }
 
+    if (isSettingsView && settingsView !== 'top') {
+      setSettingsView('top');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (isQuestManagementView && selectedQuestManagementItemKey !== null) {
+      setSelectedQuestManagementItemKey(null);
+      setQuestManagementEditText('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     returnToLibraryList(options);
   };
 
@@ -12513,6 +12903,7 @@ function App() {
     const finishReturn = () => {
       resetEditUiState();
       setMenuView('list');
+      setSettingsView('top');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       setIsLibraryBackAnimating(false);
     };
@@ -13448,7 +13839,13 @@ function App() {
           {isLibraryDetailView && (
             <button
               className="header-back-icon-button"
-              aria-label={isAnyMemoFolderDetailView ? 'フォルダ一覧へ戻る' : 'かばん一覧へ戻る'}
+              aria-label={
+                isAnyMemoFolderDetailView
+                  ? 'フォルダ一覧へ戻る'
+                  : isSettingsView && settingsView !== 'top'
+                    ? '設定へ戻る'
+                    : 'かばん一覧へ戻る'
+              }
               onClick={() => returnFromLibraryDetail()}
               type="button"
             >
@@ -13517,6 +13914,154 @@ function App() {
                 </div>
               </section>
             ))}
+          </section>
+        )}
+
+        {isQuestManagementView && (
+          <section className="quest-management-page" aria-label="クエスト管理">
+            {selectedQuestManagementItem ? (() => {
+              const proficiency = getQuestProficiency(selectedQuestManagementItem.totalCompletions);
+              const canEditName = selectedQuestManagementItem.category === 'free';
+
+              return (
+                <article className="quest-management-detail">
+                  <div className="quest-management-detail-header">
+                    <div>
+                      <p>{selectedQuestManagementItem.categoryLabel}</p>
+                      <h2>
+                        {selectedQuestManagementItem.icon} {selectedQuestManagementItem.title}
+                      </h2>
+                    </div>
+                    <span data-active={selectedQuestManagementItem.status === 'active' ? 'true' : 'false'}>
+                      {selectedQuestManagementItem.status === 'unset'
+                        ? '未設定'
+                        : selectedQuestManagementItem.status === 'active'
+                          ? '有効'
+                          : '無効'}
+                    </span>
+                  </div>
+                  {canEditName ? (
+                    <label className="quest-management-name-field">
+                      <span>現在のクエスト名</span>
+                      <input
+                        onBlur={(event) => {
+                          if (selectedQuestManagementItem.editableSlotNumber) {
+                            updateQuestManagementSlotName(
+                              selectedQuestManagementItem.editableSlotNumber,
+                              event.currentTarget.value,
+                            );
+                          }
+                        }}
+                        onChange={(event) => setQuestManagementEditText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        placeholder="クエスト名を入力"
+                        type="text"
+                        value={questManagementEditText}
+                      />
+                    </label>
+                  ) : (
+                    <div className="quest-management-read-field">
+                      <span>
+                        {selectedQuestManagementItem.category === 'choice' ? '選択肢' : 'クエスト名'}
+                      </span>
+                      {selectedQuestManagementItem.optionLabels ? (
+                        <ul className="quest-management-option-list">
+                          {selectedQuestManagementItem.optionLabels.map((optionLabel) => (
+                            <li key={optionLabel}>{optionLabel}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <strong>{selectedQuestManagementItem.title}</strong>
+                      )}
+                    </div>
+                  )}
+                  <section className="quest-growth-panel" aria-label="熟練度">
+                    <h3>熟練度</h3>
+                    <p className="quest-proficiency-rank">
+                      <span>{proficiency.icon}</span>
+                      <strong>{proficiency.label}</strong>
+                    </p>
+                    <p className="mastery-stars">
+                      {formatQuestProficiencyStars(proficiency.level)}
+                    </p>
+                  </section>
+                  <dl className="quest-management-metrics">
+                    <div>
+                      <dt>累計達成</dt>
+                      <dd>{selectedQuestManagementItem.totalCompletions}回</dd>
+                    </div>
+                    <div>
+                      <dt>連続達成</dt>
+                      <dd>{selectedQuestManagementItem.currentStreak}日</dd>
+                    </div>
+                    <div data-wide="true">
+                      <dt>直近30日の継続率</dt>
+                      <dd className="quest-continuity-rate">
+                        <strong>
+                          {selectedQuestManagementItem.recentCompletionRate.rate === null
+                            ? '--'
+                            : `${selectedQuestManagementItem.recentCompletionRate.rate}%`}
+                        </strong>
+                        <span>
+                          {selectedQuestManagementItem.recentCompletionRate.completedDays} / {selectedQuestManagementItem.recentCompletionRate.targetDays}日
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              );
+            })() : (
+              <div className="quest-management-list">
+                {questManagementSections.map((section) => (
+                  <section className="quest-management-section" key={section.key}>
+                    <h2>{section.title}</h2>
+                    <div className="quest-management-section-list">
+                      {section.items.map((item) => {
+                        const proficiency = getQuestProficiency(item.totalCompletions);
+
+                        return (
+                          <button
+                            className="quest-management-card"
+                            data-empty={item.status === 'unset' ? 'true' : 'false'}
+                            key={item.key}
+                            onClick={() => {
+                              setSelectedQuestManagementItemKey(item.key);
+                              setQuestManagementEditText(item.currentName ?? item.title);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            type="button"
+                          >
+                            <span className="quest-management-card-copy">
+                              <strong>{item.icon} {item.title}</strong>
+                              {item.currentName && <span>{item.currentName}</span>}
+                            </span>
+                            <span className="quest-management-card-growth">
+                              {proficiency.icon} {proficiency.label}
+                            </span>
+                            <span className="menu-list-arrow" aria-hidden="true">
+                              ›
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {section.key === 'free' && (
+                      <button
+                        className="quest-management-add-button"
+                        onClick={() => openMenuView('shop')}
+                        type="button"
+                      >
+                        ➕ クエストを追加
+                      </button>
+                    )}
+                  </section>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
@@ -13983,7 +14528,42 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && (
+        {isSettingsTopView && (
+          <section className="settings-top-page" aria-label="設定">
+            <div className="settings-top-header">
+              <h2>設定</h2>
+              <p>変更したい種類を選んでください。</p>
+            </div>
+            <div className="settings-category-grid">
+              {settingsCategoryOptions
+                .filter((option) => !option.adminOnly || isAdminUser)
+                .map((option) => (
+                  <button
+                    className="settings-category-card"
+                    key={option.key}
+                    onClick={() => {
+                      setSettingsView(option.key);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    type="button"
+                  >
+                    <span className="settings-category-icon" aria-hidden="true">
+                      {option.icon}
+                    </span>
+                    <span className="settings-category-copy">
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                    <span className="settings-category-arrow" aria-hidden="true">
+                      ›
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </section>
+        )}
+
+        {isSettingsGameModeView && (
           <section className="game-mode-settings" aria-label="ゲームモード">
             <div className="settings-header">
               <div>
@@ -14031,7 +14611,7 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && (
+        {isSettingsPlayerView && (
           <section className="player-profile-settings" aria-label="プレイヤー設定">
             <div className="settings-header">
               <div>
@@ -14087,7 +14667,7 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && (
+        {isSettingsAccountView && (
           <section className="account-settings" aria-label="アカウント">
             <div className="settings-header">
               <div>
@@ -14186,7 +14766,7 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && isAdminUser && (
+        {isSettingsAdminView && isAdminUser && (
           <section className="daily-nudge-admin-settings" aria-label="管理">
             <div className="settings-header">
               <div>
@@ -14427,7 +15007,7 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && gameMode === 'developer' && (
+        {isSettingsGameModeView && gameMode === 'developer' && (
           <section className="admin-balance-settings" aria-label="ゲームバランス設定">
             <div className="settings-header">
               <div>
@@ -14661,7 +15241,7 @@ function App() {
           </section>
         )}
 
-        {isSettingsView && (
+        {isSettingsTemplatesView && (
           <section className="template-settings">
             <div className="settings-header">
               <div>
@@ -14836,7 +15416,7 @@ function App() {
           );
         })()}
 
-        {(isTodayQuestView || isSettingsView) && (
+        {(isTodayQuestView || isSettingsTemplatesView) && (
         <div
           className="routine-list"
           data-progress-level={page === 'today' ? selectedDateVisualRank.level : undefined}
@@ -14878,7 +15458,7 @@ function App() {
               )}
             </section>
           )}
-          {(isSettingsView || isEditMode) && (
+          {(isSettingsTemplatesView || isEditMode) && (
             <div className="routine-context" data-quiet={page === 'today' ? 'true' : 'false'}>
               <p>
                 {page === 'today' && isEditMode
@@ -14887,7 +15467,7 @@ function App() {
                   ? `${selectedDateKey}だけの変更があります`
                   : `${getTargetLabel(editTarget)}を編集中`}
               </p>
-              {isSettingsView && (
+              {isSettingsTemplatesView && (
                 <p>テンプレート編集では、チェック記録はメイン画面に戻ると使えます。</p>
               )}
             </div>
@@ -15177,10 +15757,6 @@ function App() {
                     isCoreRoutineSectionId(section.id) &&
                     !isFixedItem;
                   const itemMasteryStats = masteryStatsByItemId.get(item.id);
-                  const itemNote = page === 'today' ? getItemNote(selectedDateKey, item.id) : '';
-                  const isItemNoteOpen =
-                    noteEditorTarget?.dateKey === selectedDateKey &&
-                    noteEditorTarget.itemId === item.id;
                   const questEmote = questEmotes[getQuestEmoteKey(selectedDateKey, item.id)];
                   return (
                     <div
@@ -15366,21 +15942,6 @@ function App() {
                           {formatMasteryStars(itemMasteryStats.starCount, itemMasteryStats.trophyCount)}
                         </span>
                       )}
-                      {page === 'today' && (
-                        <button
-                          aria-label={`${item.label}のメモ`}
-                          className="item-note-toggle"
-                          data-has-note={itemNote.trim() ? 'true' : 'false'}
-                          data-popup-ui="true"
-                          onClick={() => toggleItemNoteEditor(selectedDateKey, item.id)}
-                          type="button"
-                        >
-                          {itemNote.trim() ? '📝✨' : '📝'}
-                        </button>
-                      )}
-                      {page === 'today' && itemNote.trim() && (
-                        <p className="item-note-preview">📝 {itemNote.trim()}</p>
-                      )}
                       {questEmote && (
                         <div className="quest-emote" key={questEmote.id} role="status">
                           <span>{questEmote.message}</span>
@@ -15407,20 +15968,6 @@ function App() {
                         >
                           削除
                         </button>
-                      )}
-                      {page === 'today' && isItemNoteOpen && (
-                        <div className="item-note-editor" data-popup-ui="true">
-                          <textarea
-                            aria-label={`${item.label}のメモ`}
-                            autoFocus
-                            onChange={(event) =>
-                              updateItemNote(selectedDateKey, item.id, event.target.value)
-                            }
-                            placeholder="ひとこと記録を残す"
-                            rows={2}
-                            value={itemNote}
-                          />
-                        </div>
                       )}
                     </div>
                   );
@@ -18320,34 +18867,6 @@ function App() {
                 </button>
               </div>
             </div>
-            <section className="monthly-stamp-summary" aria-label="今月のスタンプ集計">
-              <div className="monthly-stamp-summary-heading">
-                <h3>今月の獲得スタンプ</h3>
-                <span>合計{monthlyStampSummary.total}こ</span>
-              </div>
-              <div className="monthly-stamp-summary-grid">
-                {monthlyStampSummary.items
-                  .filter((stamp) => stamp.count > 0)
-                  .sort(
-                    (first, second) =>
-                      monthlyStampSummaryDisplayOrder[first.level] -
-                      monthlyStampSummaryDisplayOrder[second.level],
-                  )
-                  .map((stamp) => (
-                    <article
-                      className="monthly-stamp-card"
-                      data-stamp-level={stamp.level}
-                      key={stamp.level}
-                    >
-                      <span className="monthly-stamp-icon" aria-hidden="true">
-                        {stamp.icon}
-                      </span>
-                      <span className="monthly-stamp-name">{stamp.label}</span>
-                      <strong>{stamp.count}</strong>
-                    </article>
-                  ))}
-              </div>
-            </section>
             <div className="completion-calendar-grid">
               {weekdayOptions.map((weekday) => (
                 <div className="calendar-weekday" key={weekday.key}>
@@ -18403,6 +18922,34 @@ function App() {
                 );
               })}
             </div>
+            <section className="monthly-stamp-summary" aria-label="今月のスタンプ集計">
+              <div className="monthly-stamp-summary-heading">
+                <h3>今月の獲得スタンプ</h3>
+                <span>合計{monthlyStampSummary.total}こ</span>
+              </div>
+              <div className="monthly-stamp-summary-grid">
+                {monthlyStampSummary.items
+                  .filter((stamp) => stamp.count > 0)
+                  .sort(
+                    (first, second) =>
+                      monthlyStampSummaryDisplayOrder[first.level] -
+                      monthlyStampSummaryDisplayOrder[second.level],
+                  )
+                  .map((stamp) => (
+                    <article
+                      className="monthly-stamp-card"
+                      data-stamp-level={stamp.level}
+                      key={stamp.level}
+                    >
+                      <span className="monthly-stamp-icon" aria-hidden="true">
+                        {stamp.icon}
+                      </span>
+                      <span className="monthly-stamp-name">{stamp.label}</span>
+                      <strong>{stamp.count}</strong>
+                    </article>
+                  ))}
+              </div>
+            </section>
             {historySelectedDate ? (
               <div className="history-detail">
                 <div className="history-detail-heading">
@@ -19137,10 +19684,10 @@ function App() {
           </section>
         )}
 
-        {(isSettingsView || (page === 'today' && isEditMode)) && (
+        {(isSettingsTemplatesView || (page === 'today' && isEditMode)) && (
           <div
             className="main-actions"
-            data-editing={isSettingsView || (page === 'today' && isEditMode) ? 'true' : 'false'}
+            data-editing={isSettingsTemplatesView || (page === 'today' && isEditMode) ? 'true' : 'false'}
           >
             <button
               className="default-template-button"
@@ -19168,7 +19715,7 @@ function App() {
           </div>
         )}
 
-        {isSettingsView && (
+        {isSettingsDataView && (
           <section className="data-management" aria-label="データ管理">
             <div className="data-management-heading">
               <h2>データ管理</h2>
