@@ -543,6 +543,8 @@ type BackupDownload = {
 type AutoBackupRecord = BackupFile & {
   autoBackupVersion: 1;
   id: string;
+  saveId: string | null;
+  saveName: string;
   createdAt: string;
   dataCount: number;
   contentHash: string;
@@ -764,6 +766,7 @@ const ANY_MEMO_ITEMS_STORAGE_KEY = 'hibitin:anyMemoItems:v1';
 const ANY_MEMO_FOLDERS_STORAGE_KEY = 'hibitin:anyMemoFolders:v1';
 const ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY = 'hibitin:anyMemoFolderItems:v1';
 const CURRENT_SAVE_ID_STORAGE_KEY = 'hibitinSystem:currentSaveId:v1';
+const CURRENT_SAVE_NAME_STORAGE_KEY = 'hibitinSystem:currentSaveName:v1';
 const SAVE_SLOT_SHARED_CACHE_STORAGE_KEYS = new Set([
   DAILY_QUEST_MASTER_CACHE_STORAGE_KEY,
   NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY,
@@ -889,8 +892,14 @@ const createSaveSlotBackupFromCurrentStorage = (): BackupFile => {
 
 const getCurrentSaveId = () => window.localStorage.getItem(CURRENT_SAVE_ID_STORAGE_KEY);
 
-const setCurrentSaveIdStorage = (saveId: string) => {
+const getCurrentSaveName = () => window.localStorage.getItem(CURRENT_SAVE_NAME_STORAGE_KEY);
+
+const setCurrentSaveStorage = (saveId: string, saveName?: string) => {
   window.localStorage.setItem(CURRENT_SAVE_ID_STORAGE_KEY, saveId);
+
+  if (saveName) {
+    window.localStorage.setItem(CURRENT_SAVE_NAME_STORAGE_KEY, saveName);
+  }
 };
 
 const createLocalStorageSnapshot = () => {
@@ -1227,6 +1236,8 @@ const isAutoBackupRecord = (value: unknown): value is AutoBackupRecord => {
     record.autoBackupVersion === AUTO_BACKUP_VERSION &&
     typeof record.id === 'string' &&
     record.id.trim().length > 0 &&
+    (typeof record.saveId === 'string' || record.saveId === null || record.saveId === undefined) &&
+    (typeof record.saveName === 'string' || record.saveName === undefined) &&
     typeof record.createdAt === 'string' &&
     !Number.isNaN(Date.parse(record.createdAt)) &&
     typeof record.dataCount === 'number' &&
@@ -1281,6 +1292,11 @@ const loadAutoBackupRecords = async () => {
 
   return records
     .filter(isAutoBackupRecord)
+    .map((record) => ({
+      ...record,
+      saveId: record.saveId ?? null,
+      saveName: record.saveName ?? '旧方式',
+    }))
     .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt));
 };
 
@@ -1290,13 +1306,22 @@ const putAutoBackupRecord = (record: AutoBackupRecord) =>
 const deleteAutoBackupRecord = (id: string) =>
   runAutoBackupStore<undefined>('readwrite', (store) => store.delete(id));
 
-const createAutoBackupRecord = (backup: BackupFile): AutoBackupRecord => {
+const createAutoBackupRecord = (
+  backup: BackupFile,
+  saveContext: {
+    saveId?: string | null;
+    saveName?: string | null;
+  } = {},
+): AutoBackupRecord => {
   const createdAt = new Date().toISOString();
+  const saveId = saveContext.saveId ?? null;
 
   return {
     ...backup,
     autoBackupVersion: AUTO_BACKUP_VERSION,
     id: `auto-backup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    saveId,
+    saveName: saveContext.saveName?.trim() || (saveId ? '現在のセーブ' : '旧方式'),
     createdAt,
     exportedAt: createdAt,
     dataCount: Object.keys(backup.data.storage).length,
@@ -1320,11 +1345,7 @@ const getClosestAutoBackupId = (
   }, null)?.id;
 
 const getAutoBackupIdsToKeep = (records: AutoBackupRecord[]) => {
-  const sortedRecords = [...records].sort(
-    (first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt),
-  );
   const keepIds = new Set<string>();
-  const now = Date.now();
   const targetOffsets = [
     0,
     24 * 60 * 60 * 1000,
@@ -1332,18 +1353,35 @@ const getAutoBackupIdsToKeep = (records: AutoBackupRecord[]) => {
     7 * 24 * 60 * 60 * 1000,
   ];
 
-  targetOffsets.forEach((offset) => {
-    const keepId = getClosestAutoBackupId(sortedRecords, now - offset);
+  const groups = new Map<string, AutoBackupRecord[]>();
 
-    if (keepId) {
-      keepIds.add(keepId);
-    }
+  records.forEach((record) => {
+    const groupKey = record.saveId ?? 'legacy';
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), record]);
   });
 
-  sortedRecords.forEach((record) => {
-    if (keepIds.size < AUTO_BACKUP_MAX_GENERATIONS) {
-      keepIds.add(record.id);
-    }
+  groups.forEach((groupRecords) => {
+    const sortedRecords = [...groupRecords].sort(
+      (first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt),
+    );
+    const now = Date.now();
+
+    targetOffsets.forEach((offset) => {
+      const keepId = getClosestAutoBackupId(sortedRecords, now - offset);
+
+      if (keepId) {
+        keepIds.add(keepId);
+      }
+    });
+
+    let groupKeepCount = sortedRecords.filter((record) => keepIds.has(record.id)).length;
+
+    sortedRecords.forEach((record) => {
+      if (groupKeepCount < AUTO_BACKUP_MAX_GENERATIONS && !keepIds.has(record.id)) {
+        keepIds.add(record.id);
+        groupKeepCount += 1;
+      }
+    });
   });
 
   return keepIds;
@@ -1367,12 +1405,17 @@ const pruneAutoBackupRecords = async () => {
 const saveAutoBackupFromCurrentStorage = async (
   options: {
     force?: boolean;
+    saveId?: string | null;
+    saveName?: string | null;
   } = {},
 ) => {
-  const backup = createBackupFromCurrentStorage();
+  const backup = options.saveId
+    ? createSaveSlotBackupFromCurrentStorage()
+    : createBackupFromCurrentStorage();
   const contentHash = getBackupContentHash(backup);
   const records = await loadAutoBackupRecords();
-  const latestRecord = records[0];
+  const saveId = options.saveId ?? null;
+  const latestRecord = records.find((record) => (record.saveId ?? null) === saveId);
 
   if (!options.force && latestRecord?.contentHash === contentHash) {
     return {
@@ -1381,7 +1424,10 @@ const saveAutoBackupFromCurrentStorage = async (
     };
   }
 
-  const record = createAutoBackupRecord(backup);
+  const record = createAutoBackupRecord(backup, {
+    saveId,
+    saveName: options.saveName,
+  });
 
   await putAutoBackupRecord(record);
 
@@ -6611,6 +6657,11 @@ function App() {
   const isInitialCloudBackupRunningRef = useRef(false);
   const pendingInitialCloudBackupUserIdRef = useRef<string | null>(null);
   const scheduleCloudBackupRef = useRef<() => void>(() => {});
+  const saveSlotMigrationAttemptedUserIdsRef = useRef<Set<string>>(new Set());
+  const currentSaveContextRef = useRef<{ saveId: string | null; saveName: string | null }>({
+    saveId: getCurrentSaveId(),
+    saveName: getCurrentSaveName(),
+  });
   const [dailyEvent, setDailyEvent] = useState(() => loadDailyEvent(today));
   const [dailyEventDateKey, setDailyEventDateKey] = useState(() => todayKey);
   const [dailyMemo, setDailyMemo] = useState(() => loadDailyMemo(today));
@@ -10448,9 +10499,18 @@ function App() {
     }
   };
 
+  const saveCurrentAutoBackup = (
+    options: {
+      force?: boolean;
+    } = {},
+  ) => saveAutoBackupFromCurrentStorage({
+    ...options,
+    ...currentSaveContextRef.current,
+  });
+
   const createAutoBackupNow = async (message = '自動バックアップを作成しました。') => {
     try {
-      const result = await saveAutoBackupFromCurrentStorage();
+      const result = await saveCurrentAutoBackup();
 
       setAutoBackups(result.records);
       setAutoBackupMessage(result.created ? message : '前回と同じ内容のため、新しい自動バックアップは作成しませんでした。');
@@ -10470,6 +10530,43 @@ function App() {
     setIsCloudBackupChecking(true);
 
     try {
+      const activeSaveId = getCurrentSaveId();
+
+      if (activeSaveId) {
+        const result = await fetchHibitinSaveBackup(userId, activeSaveId);
+
+        if (result.status === 'found') {
+          cloudBackupHashRef.current = getBackupContentHash(result.info.backup);
+          setCloudBackupInfo({
+            updatedAt: result.info.updatedAt,
+            dataCount: result.info.dataCount,
+            backupVersion: result.info.backupVersion,
+          });
+
+          if (cloudBackupMessage === '現在のセーブのクラウドバックアップはまだありません。') {
+            setCloudBackupMessage('');
+          }
+
+          return {
+            status: 'found',
+            info: {
+              updatedAt: result.info.updatedAt,
+              dataCount: result.info.dataCount,
+              backupVersion: result.info.backupVersion,
+            },
+          };
+        }
+
+        if (result.status === 'missing') {
+          setCloudBackupInfo(null);
+          cloudBackupHashRef.current = null;
+          setCloudBackupMessage('現在のセーブのクラウドバックアップはまだありません。');
+          return { status: 'missing' };
+        }
+
+        throw new Error(result.error);
+      }
+
       const { data, error } = await supabase
         .from('hibitin_backups')
         .select('backup_data, backup_version, data_count, updated_at')
@@ -10550,7 +10647,11 @@ function App() {
       return false;
     }
 
-    const backup = createBackupFromCurrentStorage();
+    const activeSaveId = getCurrentSaveId();
+    const activeSaveName = getCurrentSaveName();
+    const backup = activeSaveId
+      ? createSaveSlotBackupFromCurrentStorage()
+      : createBackupFromCurrentStorage();
     const contentHash = getBackupContentHash(backup);
 
     if (!options.force && cloudBackupHashRef.current === contentHash) {
@@ -10576,7 +10677,7 @@ function App() {
       setCloudBackupMessage('端末内バックアップを作成しています。');
 
       try {
-        await saveAutoBackupFromCurrentStorage({ force: true });
+        await saveCurrentAutoBackup({ force: true });
       } catch (error) {
         console.warn('Cloud backup safety auto backup failed:', error);
         setCloudBackupStatus('failed');
@@ -10593,6 +10694,41 @@ function App() {
     try {
       const updatedAt = new Date().toISOString();
       const dataCount = Object.keys(backup.data.storage).length;
+
+      if (activeSaveId) {
+        const saveResult = await saveHibitinSaveBackup(uploadUser.id, activeSaveId, backup);
+
+        if (saveResult.status !== 'success') {
+          throw new Error(saveResult.error);
+        }
+
+        const playedResult = await updateHibitinSaveLastPlayedAt(uploadUser.id, activeSaveId, updatedAt);
+
+        if (playedResult.status === 'success') {
+          setCurrentSaveStorage(playedResult.save.id, playedResult.save.saveName);
+          setCurrentSaveId(playedResult.save.id);
+          setSaveSlotList((slots) =>
+            slots.map((slot) => (slot.id === playedResult.save.id ? playedResult.save : slot)),
+          );
+        }
+
+        cloudBackupHashRef.current = contentHash;
+        hasPendingCloudBackupRef.current = false;
+        setLastCloudBackupAt(saveResult.info.updatedAt);
+        setCloudBackupInfo({
+          updatedAt: saveResult.info.updatedAt,
+          dataCount: saveResult.info.dataCount,
+          backupVersion: saveResult.info.backupVersion,
+        });
+        setCloudBackupStatus('success');
+        setCloudBackupMessage(options.initial
+          ? `${activeSaveName ?? '現在のセーブ'}をクラウド保存しました。`
+          : options.manual
+            ? `${activeSaveName ?? '現在のセーブ'}をクラウドへバックアップしました。`
+            : `${activeSaveName ?? '現在のセーブ'}をクラウドへ自動保存しました。`);
+        return true;
+      }
+
       const { error } = await supabase
         .from('hibitin_backups')
         .upsert(
@@ -10666,6 +10802,7 @@ function App() {
 
     if (storedSaveId && !slots.some((slot) => slot.id === storedSaveId)) {
       window.localStorage.removeItem(CURRENT_SAVE_ID_STORAGE_KEY);
+      window.localStorage.removeItem(CURRENT_SAVE_NAME_STORAGE_KEY);
       setCurrentSaveId(null);
     }
 
@@ -10683,9 +10820,72 @@ function App() {
       return null;
     }
 
-    setCurrentSaveIdStorage(initialSave.id);
+    setCurrentSaveStorage(initialSave.id, initialSave.saveName);
     setCurrentSaveId(initialSave.id);
     return initialSave.id;
+  };
+
+  const migrateExistingDataToInitialSaveSlot = async (userId: string) => {
+    if (saveSlotMigrationAttemptedUserIdsRef.current.has(userId)) {
+      return;
+    }
+
+    if (getCurrentSaveId()) {
+      return;
+    }
+
+    const localStorageCount = Object.keys(collectSaveSlotStorage()).length;
+
+    if (localStorageCount === 0 || !window.navigator.onLine) {
+      return;
+    }
+
+    saveSlotMigrationAttemptedUserIdsRef.current.add(userId);
+
+    try {
+      const slots = await fetchHibitinSaveSlots(userId);
+
+      if (slots.length > 0) {
+        await resolveInitialCurrentSaveId(slots);
+        return;
+      }
+
+      const backup = createSaveSlotBackupFromCurrentStorage();
+
+      if (!isBackupFile(backup)) {
+        return;
+      }
+
+      const createResult = await createHibitinSaveSlot(userId, 'セーブ1');
+
+      if (createResult.status !== 'success') {
+        throw new Error(createResult.error);
+      }
+
+      const saveResult = await saveHibitinSaveBackup(userId, createResult.save.id, backup);
+
+      if (saveResult.status !== 'success') {
+        throw new Error(saveResult.error);
+      }
+
+      const savedBackup = await fetchHibitinSaveBackup(userId, createResult.save.id);
+
+      if (savedBackup.status !== 'found') {
+        throw new Error('保存後のセーブ1バックアップを確認できませんでした。');
+      }
+
+      setCurrentSaveStorage(createResult.save.id, createResult.save.saveName);
+      setCurrentSaveId(createResult.save.id);
+      setSaveSlotList([createResult.save]);
+      setCloudBackupStatus('success');
+      setCloudBackupMessage('クラウドセーブの準備が完了しました。現在のデータはセーブ1として保存されています。');
+    } catch (error) {
+      console.warn('Save slot auto migration failed:', error);
+      setCloudBackupStatus('failed');
+      setCloudBackupMessage(
+        'クラウドセーブの準備に失敗しました。現在のデータはそのまま利用できます。',
+      );
+    }
   };
 
   const copyCurrentDataToInitialSaveSlot = async () => {
@@ -10763,7 +10963,7 @@ function App() {
         updatedAt: savedBackup.info.updatedAt,
         backupVersion: savedBackup.info.backupVersion,
       });
-      setCurrentSaveIdStorage(saveSlot.id);
+      setCurrentSaveStorage(saveSlot.id, saveSlot.saveName);
       setCurrentSaveId(saveSlot.id);
       setSaveSlotCopyMessage('セーブ1へのコピーが完了しました。現在のデータと旧クラウドバックアップはそのまま残っています。');
     } catch (error) {
@@ -10878,7 +11078,7 @@ function App() {
       }
 
       try {
-        await saveAutoBackupFromCurrentStorage({ force: true });
+        await saveCurrentAutoBackup({ force: true });
       } catch (autoBackupError) {
         console.warn('Save slot switch safety auto backup failed:', autoBackupError);
       }
@@ -10897,7 +11097,7 @@ function App() {
       }
 
       restoreSaveSlotStorageFromBackup(targetBackupResult.info.backup);
-      setCurrentSaveIdStorage(slot.id);
+      setCurrentSaveStorage(slot.id, slot.saveName);
 
       const lastPlayedResult = await updateHibitinSaveLastPlayedAt(authUser.id, slot.id);
 
@@ -11072,7 +11272,7 @@ function App() {
       setCloudBackupMessage('最初のクラウドバックアップを作成中…');
 
       try {
-        const result = await saveAutoBackupFromCurrentStorage({ force: true });
+        const result = await saveCurrentAutoBackup({ force: true });
         setAutoBackups(result.records);
       } catch (error) {
         console.warn('Initial cloud backup safety auto backup failed:', error);
@@ -11131,6 +11331,50 @@ function App() {
     setCloudBackupMessage('クラウドバックアップを確認中…');
 
     try {
+      const activeSaveId = getCurrentSaveId();
+
+      if (activeSaveId) {
+        const result = await fetchHibitinSaveBackup(authUser.id, activeSaveId);
+
+        if (result.status !== 'found') {
+          setCloudBackupMessage(
+            result.status === 'missing'
+              ? '現在のセーブのクラウドバックアップはまだありません。'
+              : `現在のセーブを復元できませんでした。${result.error}`,
+          );
+          return;
+        }
+
+        const safetyBackup = createBackupFile();
+
+        if (!safetyBackup) {
+          setCloudBackupMessage('復元前バックアップを作成できなかったため、復元を中止しました。');
+          return;
+        }
+
+        downloadBackupFile(
+          safetyBackup,
+          '復元前に現在データをJSONファイルとして書き出しました。復元後に画面を再読み込みします。',
+        );
+
+        await saveCurrentAutoBackup({ force: true });
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 100);
+        });
+
+        try {
+          restoreSaveSlotStorageFromBackup(result.info.backup);
+        } catch (restoreError) {
+          console.warn('Save slot cloud restore failed after safety backup:', restoreError);
+          restoreStorageFromBackup(safetyBackup);
+          throw restoreError;
+        }
+
+        setCloudBackupMessage('現在のセーブをクラウドバックアップから復元しました。');
+        window.location.reload();
+        return;
+      }
+
       const { data, error } = await supabase
         .from('hibitin_backups')
         .select('backup_data, backup_version, data_count, updated_at')
@@ -11164,7 +11408,7 @@ function App() {
         '復元前に現在データをJSONファイルとして書き出しました。復元後に画面を再読み込みします。',
       );
 
-      await saveAutoBackupFromCurrentStorage({ force: true });
+      await saveCurrentAutoBackup({ force: true });
       await new Promise((resolve) => {
         window.setTimeout(resolve, 100);
       });
@@ -11206,8 +11450,18 @@ function App() {
       return;
     }
 
+    const activeSaveId = getCurrentSaveId();
+    const recordSaveId = record.saveId ?? null;
+
+    if (recordSaveId && activeSaveId !== recordSaveId) {
+      window.alert(
+        `この自動バックアップは「${record.saveName}」のものです。先にそのセーブへ切り替えてから復元してください。`,
+      );
+      return;
+    }
+
     const shouldRestore = window.confirm(
-      'このバックアップへ復元しますか？ 現在のデータは先に書き出されます。',
+      `このバックアップへ復元しますか？\n\n対象: ${record.saveName}\n現在のデータは先に書き出されます。`,
     );
 
     if (!shouldRestore) {
@@ -11230,7 +11484,11 @@ function App() {
       window.setTimeout(resolve, 100);
     });
 
-    restoreStorageFromBackup(record);
+    if (recordSaveId) {
+      restoreSaveSlotStorageFromBackup(record);
+    } else {
+      restoreStorageFromBackup(record);
+    }
     window.location.reload();
   };
 
@@ -11288,7 +11546,9 @@ function App() {
       }
 
       backupTimerId = window.setTimeout(() => {
-        void saveAutoBackupFromCurrentStorage()
+        void saveAutoBackupFromCurrentStorage({
+          ...currentSaveContextRef.current,
+        })
           .then((result) => {
             setAutoBackups(result.records);
 
@@ -11380,6 +11640,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const saveName =
+      saveSlotList.find((slot) => slot.id === currentSaveId)?.saveName ??
+      getCurrentSaveName();
+
+    currentSaveContextRef.current = {
+      saveId: currentSaveId,
+      saveName,
+    };
+
+    if (currentSaveId && saveName) {
+      setCurrentSaveStorage(currentSaveId, saveName);
+    }
+  }, [currentSaveId, saveSlotList]);
+
+  useEffect(() => {
     authUserRef.current = authUser;
     void refreshAdminStatus(authUser);
 
@@ -11398,21 +11673,31 @@ function App() {
       cloudBackupHashRef.current = null;
       pendingInitialCloudBackupUserIdRef.current = null;
       initialCloudBackupAttemptedUserIdsRef.current.clear();
+      saveSlotMigrationAttemptedUserIdsRef.current.clear();
       setCloudBackupInfo(null);
       setLastCloudBackupAt(null);
       setCloudBackupStatus('idle');
       return;
     }
 
-    void refreshCloudBackupInfo(authUser.id).then((result) => {
-      if (result.status === 'missing') {
+    void (async () => {
+      await migrateExistingDataToInitialSaveSlot(authUser.id);
+
+      const activeSaveId = getCurrentSaveId();
+      const result = await refreshCloudBackupInfo(authUser.id);
+
+      if (!activeSaveId && result.status === 'missing') {
         scheduleInitialCloudBackup(authUser.id);
       }
-    });
+    })();
   }, [authUser]);
 
   useEffect(() => {
     const retryPendingCloudBackup = () => {
+      if (authUserRef.current) {
+        void migrateExistingDataToInitialSaveSlot(authUserRef.current.id);
+      }
+
       const pendingInitialUserId = pendingInitialCloudBackupUserIdRef.current;
 
       if (
@@ -20833,7 +21118,7 @@ function App() {
                         <article className="auto-backup-item" key={record.id}>
                           <div>
                             <strong>{backupDateTimeFormatter.format(new Date(record.createdAt))}</strong>
-                            <span>{record.dataCount}件 / v{record.backupVersion}</span>
+                            <span>{record.saveName} / {record.dataCount}件 / v{record.backupVersion}</span>
                           </div>
                           <div className="auto-backup-item-actions">
                             <button onClick={() => void restoreAutoBackup(record)} type="button">
