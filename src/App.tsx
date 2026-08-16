@@ -53,7 +53,15 @@ type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
 type TodoViewName = 'todo' | 'today' | 'date' | 'folders' | 'completed';
-type SettingsViewName = 'top' | 'gameMode' | 'player' | 'account' | 'templates' | 'data' | 'admin';
+type SettingsViewName =
+  | 'top'
+  | 'gameMode'
+  | 'player'
+  | 'account'
+  | 'templates'
+  | 'data'
+  | 'saveData'
+  | 'admin';
 const INITIAL_SCHEDULE_VIEW: ScheduleViewName = 'list';
 const INITIAL_TODO_VIEW: TodoViewName = 'todo';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
@@ -90,6 +98,57 @@ type CloudBackupLookupResult =
   | { status: 'found'; info: CloudBackupInfo }
   | { status: 'missing' }
   | { status: 'failed' };
+
+export type SaveSlotSummary = {
+  id: string;
+  userId: string;
+  saveName: string;
+  schemaVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  lastPlayedAt: string | null;
+};
+
+type SaveSlotRow = {
+  id: string;
+  user_id: string;
+  save_name: string;
+  schema_version: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  last_played_at: string | null;
+};
+
+type SaveSlotBackupRow = {
+  backup_data: unknown;
+  backup_version: number | null;
+  data_count: number | null;
+  updated_at: string | null;
+};
+
+export type SaveSlotBackupInfo = {
+  backup: BackupFile;
+  updatedAt: string;
+  dataCount: number;
+  backupVersion: number;
+};
+
+export type SaveSlotBackupLookupResult =
+  | { status: 'found'; info: SaveSlotBackupInfo }
+  | { status: 'missing' }
+  | { status: 'failed'; error: string };
+
+export type SaveSlotBackupSaveResult =
+  | { status: 'success'; info: Omit<SaveSlotBackupInfo, 'backup'> }
+  | { status: 'failed'; error: string };
+
+export type SaveSlotCreateResult =
+  | { status: 'success'; save: SaveSlotSummary }
+  | { status: 'failed'; error: string };
+
+export type SaveSlotUpdateResult =
+  | { status: 'success'; save: SaveSlotSummary }
+  | { status: 'failed'; error: string };
 
 const getAuthErrorMessage = (message: string) => {
   const normalizedMessage = message.toLowerCase();
@@ -214,7 +273,7 @@ const libraryRecordViewMap: Partial<Record<MenuViewName, RecordViewName>> = {
 };
 
 const settingsCategoryOptions: {
-  key: Exclude<SettingsViewName, 'top'>;
+  key: Exclude<SettingsViewName, 'top' | 'saveData'>;
   icon: string;
   label: string;
   description: string;
@@ -467,7 +526,7 @@ type ArchivedItem = {
   retiredAt?: string;
 };
 
-type BackupFile = {
+export type BackupFile = {
   backupVersion: 1;
   exportedAt: string;
   appName: 'hibitin';
@@ -668,6 +727,7 @@ type MasteryProgressState = {
 };
 
 const BACKUP_VERSION = 1;
+const SAVE_SLOT_SCHEMA_VERSION = 1;
 const AUTO_BACKUP_VERSION = 1;
 const AUTO_BACKUP_DB_NAME = 'hibitin:autoBackups';
 const AUTO_BACKUP_STORE_NAME = 'autoBackups';
@@ -703,6 +763,11 @@ const RECORD_DISPLAY_MODE_STORAGE_KEY = 'hibitin:recordDisplayMode:v1';
 const ANY_MEMO_ITEMS_STORAGE_KEY = 'hibitin:anyMemoItems:v1';
 const ANY_MEMO_FOLDERS_STORAGE_KEY = 'hibitin:anyMemoFolders:v1';
 const ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY = 'hibitin:anyMemoFolderItems:v1';
+const CURRENT_SAVE_ID_STORAGE_KEY = 'hibitinSystem:currentSaveId:v1';
+const SAVE_SLOT_SHARED_CACHE_STORAGE_KEYS = new Set([
+  DAILY_QUEST_MASTER_CACHE_STORAGE_KEY,
+  NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY,
+]);
 
 const isHibitinStorageKey = (key: string) =>
   key.startsWith('hibitin:') || key.startsWith('hibitin-');
@@ -710,6 +775,9 @@ const isHibitinStorageKey = (key: string) =>
 const isAllowedBackupStorageKey = (key: string) =>
   isHibitinStorageKey(key) &&
   !/supabase|auth|password|secret|service_role|vite_/i.test(key);
+
+const isSaveSlotStorageKey = (key: string) =>
+  isAllowedBackupStorageKey(key) && !SAVE_SLOT_SHARED_CACHE_STORAGE_KEYS.has(key);
 
 const isDailyTextStorageKey = (key: string) =>
   /^hibitin:(memo|events|anyMemo):\d{4}-\d{2}-\d{2}$/.test(key);
@@ -753,6 +821,34 @@ const collectHibitinStorage = () => {
   return storage;
 };
 
+const collectSaveSlotStorage = () => {
+  const storage: Record<string, unknown> = {};
+  const saveSlotKeys = Array.from({ length: window.localStorage.length }, (_, index) =>
+    window.localStorage.key(index),
+  )
+    .filter((key): key is string => key !== null && isSaveSlotStorageKey(key))
+    .sort();
+
+  saveSlotKeys.forEach((key) => {
+    const savedValue = window.localStorage.getItem(key);
+
+    if (savedValue !== null) {
+      if (isRawStringStorageKey(key)) {
+        storage[key] = savedValue;
+        return;
+      }
+
+      try {
+        storage[key] = JSON.parse(savedValue) as unknown;
+      } catch {
+        storage[key] = savedValue;
+      }
+    }
+  });
+
+  return storage;
+};
+
 const createBackupFromCurrentStorage = (): BackupFile => ({
   backupVersion: BACKUP_VERSION,
   exportedAt: new Date().toISOString(),
@@ -761,6 +857,86 @@ const createBackupFromCurrentStorage = (): BackupFile => ({
     storage: collectHibitinStorage(),
   },
 });
+
+const createSaveSlotBackupFromCurrentStorage = (): BackupFile => {
+  const storage = collectSaveSlotStorage();
+
+  if (!(TEMPLATES_STORAGE_KEY in storage)) {
+    storage[TEMPLATES_STORAGE_KEY] = createDefaultSettings();
+  }
+
+  if (!(DATE_SNAPSHOTS_STORAGE_KEY in storage)) {
+    storage[DATE_SNAPSHOTS_STORAGE_KEY] = {};
+  }
+
+  if (!(DATE_OVERRIDES_STORAGE_KEY in storage)) {
+    storage[DATE_OVERRIDES_STORAGE_KEY] = {};
+  }
+
+  if (!(RHYTHM_SETTINGS_STORAGE_KEY in storage)) {
+    storage[RHYTHM_SETTINGS_STORAGE_KEY] = { ...defaultRhythmSettings };
+  }
+
+  return {
+    backupVersion: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    appName: 'hibitin',
+    data: {
+      storage,
+    },
+  };
+};
+
+const getCurrentSaveId = () => window.localStorage.getItem(CURRENT_SAVE_ID_STORAGE_KEY);
+
+const setCurrentSaveIdStorage = (saveId: string) => {
+  window.localStorage.setItem(CURRENT_SAVE_ID_STORAGE_KEY, saveId);
+};
+
+const createLocalStorageSnapshot = () => {
+  const snapshot: Record<string, string> = {};
+
+  Array.from({ length: window.localStorage.length }, (_, index) =>
+    window.localStorage.key(index),
+  ).forEach((key) => {
+    if (!key) {
+      return;
+    }
+
+    const value = window.localStorage.getItem(key);
+
+    if (value !== null) {
+      snapshot[key] = value;
+    }
+  });
+
+  return snapshot;
+};
+
+const restoreLocalStorageSnapshot = (snapshot: Record<string, string>) => {
+  window.localStorage.clear();
+  Object.entries(snapshot).forEach(([key, value]) => {
+    window.localStorage.setItem(key, value);
+  });
+};
+
+const restoreSaveSlotStorageFromBackup = (backup: BackupFile) => {
+  if (!isBackupFile(backup)) {
+    throw new Error('Invalid save slot backup data.');
+  }
+
+  Array.from({ length: window.localStorage.length }, (_, index) =>
+    window.localStorage.key(index),
+  )
+    .filter((key): key is string => key !== null && isSaveSlotStorageKey(key))
+    .forEach((key) => window.localStorage.removeItem(key));
+
+  Object.entries(backup.data.storage)
+    .filter(([key]) => isSaveSlotStorageKey(key))
+    .forEach(([key, value]) => {
+      window.localStorage.setItem(key, serializeRestoredStorageValue(key, value));
+    });
+};
 
 const getBackupContentHash = (backup: BackupFile) => {
   const content = JSON.stringify(backup.data.storage);
@@ -813,6 +989,231 @@ const isBackupFile = (value: unknown): value is BackupFile => {
         !Array.isArray(storage[key]),
     )
   );
+};
+
+const normalizeSaveSlotRow = (row: SaveSlotRow): SaveSlotSummary => ({
+  id: row.id,
+  userId: row.user_id,
+  saveName: row.save_name,
+  schemaVersion: row.schema_version ?? SAVE_SLOT_SCHEMA_VERSION,
+  createdAt: row.created_at ?? '',
+  updatedAt: row.updated_at ?? '',
+  lastPlayedAt: row.last_played_at,
+});
+
+const getSaveSlotErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Save slot operation failed.';
+
+export const fetchHibitinSaveSlots = async (userId: string): Promise<SaveSlotSummary[]> => {
+  if (!supabase || !userId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('hibitin_saves')
+    .select('id, user_id, save_name, schema_version, created_at, updated_at, last_played_at')
+    .eq('user_id', userId)
+    .order('last_played_at', { ascending: false, nullsFirst: false })
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data ?? []) as SaveSlotRow[]).map(normalizeSaveSlotRow);
+};
+
+export const createHibitinSaveSlot = async (
+  userId: string,
+  saveName: string,
+  options: {
+    lastPlayedAt?: string | null;
+  } = {},
+): Promise<SaveSlotCreateResult> => {
+  if (!supabase || !userId || !saveName.trim()) {
+    return {
+      status: 'failed',
+      error: 'Supabase is not configured or user/save name is missing.',
+    };
+  }
+
+  try {
+    const lastPlayedAt =
+      'lastPlayedAt' in options ? options.lastPlayedAt ?? null : new Date().toISOString();
+    const { data, error } = await supabase
+      .from('hibitin_saves')
+      .insert({
+        user_id: userId,
+        save_name: saveName.trim(),
+        schema_version: SAVE_SLOT_SCHEMA_VERSION,
+        last_played_at: lastPlayedAt,
+      })
+      .select('id, user_id, save_name, schema_version, created_at, updated_at, last_played_at')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      status: 'success',
+      save: normalizeSaveSlotRow(data as SaveSlotRow),
+    };
+  } catch (error) {
+    console.warn('Save slot create failed:', error);
+    return {
+      status: 'failed',
+      error: getSaveSlotErrorMessage(error),
+    };
+  }
+};
+
+export const updateHibitinSaveLastPlayedAt = async (
+  userId: string,
+  saveId: string,
+  playedAt = new Date().toISOString(),
+): Promise<SaveSlotUpdateResult> => {
+  if (!supabase || !userId || !saveId) {
+    return {
+      status: 'failed',
+      error: 'Supabase is not configured or user/save id is missing.',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('hibitin_saves')
+      .update({
+        last_played_at: playedAt,
+      })
+      .eq('user_id', userId)
+      .eq('id', saveId)
+      .select('id, user_id, save_name, schema_version, created_at, updated_at, last_played_at')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      status: 'success',
+      save: normalizeSaveSlotRow(data as SaveSlotRow),
+    };
+  } catch (error) {
+    console.warn('Save slot last played update failed:', error);
+    return {
+      status: 'failed',
+      error: getSaveSlotErrorMessage(error),
+    };
+  }
+};
+
+export const fetchHibitinSaveBackup = async (
+  userId: string,
+  saveId: string,
+): Promise<SaveSlotBackupLookupResult> => {
+  if (!supabase || !userId || !saveId) {
+    return {
+      status: 'failed',
+      error: 'Supabase is not configured or user/save id is missing.',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('hibitin_save_backups')
+      .select('backup_data, backup_version, data_count, updated_at')
+      .eq('user_id', userId)
+      .eq('save_id', saveId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return { status: 'missing' };
+    }
+
+    const row = data as SaveSlotBackupRow;
+
+    if (
+      typeof row.updated_at !== 'string' ||
+      typeof row.data_count !== 'number' ||
+      typeof row.backup_version !== 'number' ||
+      !isBackupFile(row.backup_data)
+    ) {
+      throw new Error('Invalid save slot backup metadata.');
+    }
+
+    return {
+      status: 'found',
+      info: {
+        backup: row.backup_data,
+        updatedAt: row.updated_at,
+        dataCount: row.data_count,
+        backupVersion: row.backup_version,
+      },
+    };
+  } catch (error) {
+    console.warn('Save slot backup fetch failed:', error);
+    return {
+      status: 'failed',
+      error: getSaveSlotErrorMessage(error),
+    };
+  }
+};
+
+export const saveHibitinSaveBackup = async (
+  userId: string,
+  saveId: string,
+  backup = createSaveSlotBackupFromCurrentStorage(),
+): Promise<SaveSlotBackupSaveResult> => {
+  if (!supabase || !userId || !saveId) {
+    return {
+      status: 'failed',
+      error: 'Supabase is not configured or user/save id is missing.',
+    };
+  }
+
+  try {
+    const updatedAt = new Date().toISOString();
+    const dataCount = Object.keys(backup.data.storage).length;
+    const { error } = await supabase
+      .from('hibitin_save_backups')
+      .upsert(
+        {
+          user_id: userId,
+          save_id: saveId,
+          backup_data: backup,
+          backup_version: backup.backupVersion,
+          data_count: dataCount,
+          updated_at: updatedAt,
+        },
+        {
+          onConflict: 'user_id,save_id',
+        },
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      status: 'success',
+      info: {
+        updatedAt,
+        dataCount,
+        backupVersion: backup.backupVersion,
+      },
+    };
+  } catch (error) {
+    console.warn('Save slot backup save failed:', error);
+    return {
+      status: 'failed',
+      error: getSaveSlotErrorMessage(error),
+    };
+  }
 };
 
 const isAutoBackupRecord = (value: unknown): value is AutoBackupRecord => {
@@ -1415,6 +1816,20 @@ const backupDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
   hour: '2-digit',
   minute: '2-digit',
 });
+
+const formatSaveSlotDateTime = (value: string | null) => {
+  if (!value) {
+    return '未記録';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '未記録';
+  }
+
+  return backupDateTimeFormatter.format(date);
+};
 
 const copySections = (sections: RoutineSection[]) =>
   sections.map((section) => ({
@@ -5512,6 +5927,75 @@ const loadStoredTimerState = (): StoredTimerState => {
   }
 };
 
+const createNewGameSaveBackup = (): BackupFile => ({
+  backupVersion: BACKUP_VERSION,
+  exportedAt: new Date().toISOString(),
+  appName: 'hibitin',
+  data: {
+    storage: {
+      [TEMPLATES_STORAGE_KEY]: createDefaultSettings(),
+      [DATE_SNAPSHOTS_STORAGE_KEY]: {},
+      [DATE_OVERRIDES_STORAGE_KEY]: {},
+      [RHYTHM_SETTINGS_STORAGE_KEY]: { ...defaultRhythmSettings },
+      [ARCHIVED_ITEMS_STORAGE_KEY]: {},
+      [TIMER_STATE_STORAGE_KEY]: {
+        activeTimer: null,
+        pausedTimers: {},
+      },
+      [ITEM_NOTES_STORAGE_KEY]: {},
+      [CORE_ROUTINE_PLACEMENTS_STORAGE_KEY]: { ...defaultCoreRoutinePlacements },
+      [DAILY_NUDGE_RECORDS_STORAGE_KEY]: {},
+      [NIGHTLY_NUDGE_RECORDS_STORAGE_KEY]: {},
+      [CHOICE_QUEST_RECORDS_STORAGE_KEY]: {},
+      [GAME_MODE_STORAGE_KEY]: 'player',
+      [GAME_BALANCE_STORAGE_KEY]: defaultGameBalanceSettings,
+      [PLAYER_ECONOMY_STORAGE_KEY]: createDefaultPlayerEconomy(),
+      [PLAYER_PROFILE_STORAGE_KEY]: { ...defaultPlayerProfile },
+      [PLAYER_BADGES_STORAGE_KEY]: { ...defaultPlayerBadgeState },
+      [PLAYER_UNLOCKS_STORAGE_KEY]: createDefaultPlayerUnlocks(),
+      [TODO_ITEMS_STORAGE_KEY]: [],
+      [TODO_FOLDERS_STORAGE_KEY]: [],
+      [RECORD_DISPLAY_MODE_STORAGE_KEY]: 'withRecords',
+      [ANY_MEMO_ITEMS_STORAGE_KEY]: [],
+      [ANY_MEMO_FOLDERS_STORAGE_KEY]: [],
+      [ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY]: [],
+    },
+  },
+});
+
+const getUniqueSaveSlotName = (baseName: string, slots: SaveSlotSummary[]) => {
+  const existingNames = new Set(slots.map((slot) => slot.saveName.trim()));
+  const normalizedBaseName = baseName.trim() || `セーブ${slots.length + 1}`;
+
+  if (!existingNames.has(normalizedBaseName)) {
+    return normalizedBaseName;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${normalizedBaseName} ${index}`;
+
+    if (!existingNames.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `${normalizedBaseName} ${Date.now().toString(36)}`;
+};
+
+const getDefaultNewSaveSlotName = (slots: SaveSlotSummary[]) => {
+  const existingNames = new Set(slots.map((slot) => slot.saveName.trim()));
+
+  for (let index = slots.length + 1; index < slots.length + 1000; index += 1) {
+    const candidate = `セーブ${index}`;
+
+    if (!existingNames.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `セーブ${Date.now().toString(36)}`;
+};
+
 const isMasteryTargetSectionId = (sectionId: string): sectionId is StartSection =>
   dailySectionIds.includes(sectionId as StartSection);
 
@@ -6095,6 +6579,29 @@ function App() {
   const [isCloudBackupChecking, setIsCloudBackupChecking] = useState(false);
   const [isCloudRestoreConfirmOpen, setIsCloudRestoreConfirmOpen] = useState(false);
   const [isCloudRestoreBusy, setIsCloudRestoreBusy] = useState(false);
+  const [saveSlotCopyStatus, setSaveSlotCopyStatus] =
+    useState<'idle' | 'copying' | 'success' | 'failed'>('idle');
+  const [saveSlotCopyMessage, setSaveSlotCopyMessage] = useState('');
+  const [saveSlotCopyInfo, setSaveSlotCopyInfo] = useState<{
+    saveId: string;
+    saveName: string;
+    dataCount: number;
+    updatedAt: string;
+    backupVersion: number;
+  } | null>(null);
+  const [saveSlotList, setSaveSlotList] = useState<SaveSlotSummary[]>([]);
+  const [saveSlotListStatus, setSaveSlotListStatus] =
+    useState<'idle' | 'loading' | 'success' | 'failed'>('idle');
+  const [saveSlotListMessage, setSaveSlotListMessage] = useState('');
+  const [selectedSaveSlotId, setSelectedSaveSlotId] = useState<string | null>(null);
+  const [selectedSaveSlotBackupInfo, setSelectedSaveSlotBackupInfo] =
+    useState<SaveSlotBackupInfo | null>(null);
+  const [currentSaveId, setCurrentSaveId] = useState<string | null>(() => getCurrentSaveId());
+  const [saveSlotSwitchStatus, setSaveSlotSwitchStatus] =
+    useState<'idle' | 'switching' | 'failed'>('idle');
+  const [isNewSaveDialogOpen, setIsNewSaveDialogOpen] = useState(false);
+  const [newSaveNameDraft, setNewSaveNameDraft] = useState('');
+  const [isNewSaveCreating, setIsNewSaveCreating] = useState(false);
   const authUserRef = useRef<User | null>(null);
   const cloudBackupTimerIdRef = useRef<number | null>(null);
   const initialCloudBackupTimerIdRef = useRef<number | null>(null);
@@ -6230,6 +6737,7 @@ function App() {
   const isSettingsAccountView = isSettingsView && settingsView === 'account';
   const isSettingsTemplatesView = isSettingsView && settingsView === 'templates';
   const isSettingsDataView = isSettingsView && settingsView === 'data';
+  const isSettingsSaveDataView = isSettingsView && settingsView === 'saveData';
   const isSettingsAdminView = isSettingsView && settingsView === 'admin';
   const isLibraryDetailView = page === 'library' && menuView !== 'list';
   const libraryRecordView = libraryRecordViewMap[menuView] ?? null;
@@ -10143,6 +10651,379 @@ function App() {
     });
   };
 
+  const resolveInitialCurrentSaveId = async (slots: SaveSlotSummary[]) => {
+    if (!authUser) {
+      setCurrentSaveId(null);
+      return null;
+    }
+
+    const storedSaveId = getCurrentSaveId();
+
+    if (storedSaveId && slots.some((slot) => slot.id === storedSaveId)) {
+      setCurrentSaveId(storedSaveId);
+      return storedSaveId;
+    }
+
+    if (storedSaveId && !slots.some((slot) => slot.id === storedSaveId)) {
+      window.localStorage.removeItem(CURRENT_SAVE_ID_STORAGE_KEY);
+      setCurrentSaveId(null);
+    }
+
+    const initialSave = slots.find((slot) => slot.saveName === 'セーブ1');
+
+    if (!initialSave) {
+      setCurrentSaveId(null);
+      return null;
+    }
+
+    const initialBackup = await fetchHibitinSaveBackup(authUser.id, initialSave.id);
+
+    if (initialBackup.status !== 'found') {
+      setCurrentSaveId(null);
+      return null;
+    }
+
+    setCurrentSaveIdStorage(initialSave.id);
+    setCurrentSaveId(initialSave.id);
+    return initialSave.id;
+  };
+
+  const copyCurrentDataToInitialSaveSlot = async () => {
+    if (!authUser) {
+      setSaveSlotCopyStatus('failed');
+      setSaveSlotCopyInfo(null);
+      setSaveSlotCopyMessage('セーブ1へのコピーにはログインが必要です。');
+      return;
+    }
+
+    const shouldCopy = window.confirm(
+      '現在の日々ティンデータを、新しいセーブシステムの「セーブ1」へコピーします。\n\n現在のデータや旧クラウドバックアップは削除されません。',
+    );
+
+    if (!shouldCopy) {
+      return;
+    }
+
+    setSaveSlotCopyStatus('copying');
+    setSaveSlotCopyInfo(null);
+    setSaveSlotCopyMessage('セーブ1へのコピーを準備しています。');
+
+    try {
+      const slots = await fetchHibitinSaveSlots(authUser.id);
+      let saveSlot = slots.find((slot) => slot.saveName === 'セーブ1') ?? null;
+      let createdSlot = false;
+
+      if (!saveSlot) {
+        if (slots.length > 0) {
+          setSaveSlotCopyStatus('failed');
+          setSaveSlotCopyMessage(
+            '新セーブシステム側に既にセーブがあります。重複作成を避けるため、セーブ1は自動作成しませんでした。',
+          );
+          return;
+        }
+
+        const createResult = await createHibitinSaveSlot(authUser.id, 'セーブ1');
+
+        if (createResult.status !== 'success') {
+          setSaveSlotCopyStatus('failed');
+          setSaveSlotCopyMessage(`セーブ1を作成できませんでした。${createResult.error}`);
+          return;
+        }
+
+        saveSlot = createResult.save;
+        createdSlot = true;
+      }
+
+      const backup = createSaveSlotBackupFromCurrentStorage();
+      const saveResult = await saveHibitinSaveBackup(authUser.id, saveSlot.id, backup);
+
+      if (saveResult.status !== 'success') {
+        setSaveSlotCopyStatus('failed');
+        setSaveSlotCopyMessage(
+          createdSlot
+            ? `セーブ1は作成されましたが、バックアップJSONの保存に失敗しました。旧データは変更していません。${saveResult.error}`
+            : `セーブ1へのバックアップJSON保存に失敗しました。旧データは変更していません。${saveResult.error}`,
+        );
+        return;
+      }
+
+      const savedBackup = await fetchHibitinSaveBackup(authUser.id, saveSlot.id);
+
+      if (savedBackup.status !== 'found') {
+        setSaveSlotCopyStatus('failed');
+        setSaveSlotCopyMessage('保存後のセーブ1バックアップを確認できませんでした。旧データは変更していません。');
+        return;
+      }
+
+      setSaveSlotCopyStatus('success');
+      setSaveSlotCopyInfo({
+        saveId: saveSlot.id,
+        saveName: saveSlot.saveName,
+        dataCount: savedBackup.info.dataCount,
+        updatedAt: savedBackup.info.updatedAt,
+        backupVersion: savedBackup.info.backupVersion,
+      });
+      setCurrentSaveIdStorage(saveSlot.id);
+      setCurrentSaveId(saveSlot.id);
+      setSaveSlotCopyMessage('セーブ1へのコピーが完了しました。現在のデータと旧クラウドバックアップはそのまま残っています。');
+    } catch (error) {
+      console.warn('Initial save slot copy failed:', error);
+      setSaveSlotCopyStatus('failed');
+      setSaveSlotCopyInfo(null);
+      setSaveSlotCopyMessage(
+        `セーブ1へのコピーに失敗しました。旧データは変更していません。${getSaveSlotErrorMessage(error)}`,
+      );
+    }
+  };
+
+  const loadSaveSlotList = async () => {
+    if (!authUser) {
+      setSaveSlotList([]);
+      setSelectedSaveSlotId(null);
+      setSelectedSaveSlotBackupInfo(null);
+      setSaveSlotListStatus('idle');
+      setSaveSlotListMessage('セーブデータの確認にはログインが必要です。');
+      return;
+    }
+
+    setSaveSlotListStatus('loading');
+    setSaveSlotListMessage('セーブデータを確認しています。');
+    setSelectedSaveSlotBackupInfo(null);
+
+    try {
+      const slots = await fetchHibitinSaveSlots(authUser.id);
+      await resolveInitialCurrentSaveId(slots);
+
+      setSaveSlotList(slots);
+      setSaveSlotListStatus('success');
+      setSaveSlotListMessage(slots.length > 0 ? '' : 'まだセーブデータがありません。');
+
+      if (selectedSaveSlotId && !slots.some((slot) => slot.id === selectedSaveSlotId)) {
+        setSelectedSaveSlotId(null);
+      }
+    } catch (error) {
+      console.warn('Save slot list fetch failed:', error);
+      setSaveSlotList([]);
+      setSelectedSaveSlotId(null);
+      setSaveSlotListStatus('failed');
+      setSaveSlotListMessage(`セーブデータを読み込めませんでした。${getSaveSlotErrorMessage(error)}`);
+    }
+  };
+
+  const openSaveSlotDetails = async (saveId: string) => {
+    if (!authUser) {
+      setSaveSlotListMessage('セーブデータの確認にはログインが必要です。');
+      return;
+    }
+
+    setSelectedSaveSlotId(saveId);
+    setSelectedSaveSlotBackupInfo(null);
+    setSaveSlotListMessage('セーブデータの詳細を確認しています。');
+
+    const result = await fetchHibitinSaveBackup(authUser.id, saveId);
+
+    if (result.status === 'found') {
+      setSelectedSaveSlotBackupInfo(result.info);
+      setSaveSlotListMessage('');
+      return;
+    }
+
+    if (result.status === 'missing') {
+      setSaveSlotListMessage('このセーブにはまだバックアップJSONがありません。');
+      return;
+    }
+
+    setSaveSlotListMessage(`セーブ詳細を読み込めませんでした。${result.error}`);
+  };
+
+  const switchToSaveSlot = async (slot: SaveSlotSummary) => {
+    if (!authUser || saveSlotSwitchStatus === 'switching') {
+      return;
+    }
+
+    const latestSlots = saveSlotList.length > 0 ? saveSlotList : await fetchHibitinSaveSlots(authUser.id);
+    const activeSaveId = await resolveInitialCurrentSaveId(latestSlots);
+
+    if (!activeSaveId) {
+      setSaveSlotListMessage(
+        '現在使用中のセーブを確認できませんでした。先に「現在のデータをセーブ1へコピー」を完了してから切り替えてください。',
+      );
+      return;
+    }
+
+    if (activeSaveId === slot.id) {
+      setSaveSlotListMessage(`${slot.saveName}は現在使用中です。`);
+      return;
+    }
+
+    const shouldSwitch = window.confirm(
+      `${slot.saveName}へ切り替えます。\n\n現在のセーブ内容を保存してから、${slot.saveName}を読み込みます。`,
+    );
+
+    if (!shouldSwitch) {
+      return;
+    }
+
+    const rollbackSnapshot = createLocalStorageSnapshot();
+
+    setSaveSlotSwitchStatus('switching');
+    setSaveSlotListMessage(`${slot.saveName}へ切り替えています。`);
+
+    try {
+      const currentBackup = createSaveSlotBackupFromCurrentStorage();
+      const currentSaveResult = await saveHibitinSaveBackup(authUser.id, activeSaveId, currentBackup);
+
+      if (currentSaveResult.status !== 'success') {
+        throw new Error(`現在のセーブ保存に失敗しました。${currentSaveResult.error}`);
+      }
+
+      try {
+        await saveAutoBackupFromCurrentStorage({ force: true });
+      } catch (autoBackupError) {
+        console.warn('Save slot switch safety auto backup failed:', autoBackupError);
+      }
+
+      const targetBackupResult =
+        selectedSaveSlotId === slot.id && selectedSaveSlotBackupInfo
+          ? { status: 'found' as const, info: selectedSaveSlotBackupInfo }
+          : await fetchHibitinSaveBackup(authUser.id, slot.id);
+
+      if (targetBackupResult.status === 'missing') {
+        throw new Error('切り替え先のバックアップJSONがありません。');
+      }
+
+      if (targetBackupResult.status === 'failed') {
+        throw new Error(`切り替え先の取得に失敗しました。${targetBackupResult.error}`);
+      }
+
+      restoreSaveSlotStorageFromBackup(targetBackupResult.info.backup);
+      setCurrentSaveIdStorage(slot.id);
+
+      const lastPlayedResult = await updateHibitinSaveLastPlayedAt(authUser.id, slot.id);
+
+      if (lastPlayedResult.status !== 'success') {
+        throw new Error(`最終プレイ日時を更新できませんでした。${lastPlayedResult.error}`);
+      }
+
+      setCurrentSaveId(slot.id);
+      setSaveSlotList((slots) =>
+        slots.map((saveSlot) =>
+          saveSlot.id === slot.id ? lastPlayedResult.save : saveSlot,
+        ),
+      );
+      setSaveSlotListMessage(`${slot.saveName}へ切り替えました。画面を再読み込みします。`);
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 120);
+    } catch (error) {
+      console.warn('Save slot switch failed:', error);
+      restoreLocalStorageSnapshot(rollbackSnapshot);
+      setCurrentSaveId(getCurrentSaveId());
+      setSaveSlotSwitchStatus('failed');
+      setSaveSlotListMessage(
+        `セーブ切り替えに失敗しました。切り替え前の端末データへ戻しました。${getSaveSlotErrorMessage(error)}`,
+      );
+      return;
+    }
+
+    setSaveSlotSwitchStatus('idle');
+  };
+
+  const openNewSaveDialog = async () => {
+    if (!authUser) {
+      setSaveSlotListMessage('新しいセーブの作成にはログインが必要です。');
+      return;
+    }
+
+    try {
+      const slots = saveSlotList.length > 0 ? saveSlotList : await fetchHibitinSaveSlots(authUser.id);
+
+      setNewSaveNameDraft(getDefaultNewSaveSlotName(slots));
+      setSaveSlotList(slots);
+      setIsNewSaveDialogOpen(true);
+    } catch (error) {
+      console.warn('New save slot dialog open failed:', error);
+      setSaveSlotListMessage(`新しいセーブの準備に失敗しました。${getSaveSlotErrorMessage(error)}`);
+    }
+  };
+
+  const closeNewSaveDialog = () => {
+    if (isNewSaveCreating) {
+      return;
+    }
+
+    setIsNewSaveDialogOpen(false);
+    setNewSaveNameDraft('');
+  };
+
+  const createNewSaveSlot = async () => {
+    if (!authUser || isNewSaveCreating) {
+      return;
+    }
+
+    setIsNewSaveCreating(true);
+    setSaveSlotListMessage('新しいセーブを作成しています。');
+
+    try {
+      const latestSlots = await fetchHibitinSaveSlots(authUser.id);
+      const baseName = newSaveNameDraft.trim() || getDefaultNewSaveSlotName(latestSlots);
+      const saveName = getUniqueSaveSlotName(baseName, latestSlots);
+      const createResult = await createHibitinSaveSlot(authUser.id, saveName, {
+        lastPlayedAt: null,
+      });
+
+      if (createResult.status !== 'success') {
+        setSaveSlotListMessage(`新しいセーブを作成できませんでした。${createResult.error}`);
+        return;
+      }
+
+      const initialBackup = createNewGameSaveBackup();
+      const saveResult = await saveHibitinSaveBackup(
+        authUser.id,
+        createResult.save.id,
+        initialBackup,
+      );
+
+      if (saveResult.status !== 'success') {
+        setSelectedSaveSlotId(createResult.save.id);
+        setSelectedSaveSlotBackupInfo(null);
+        await loadSaveSlotList();
+        setSelectedSaveSlotId(createResult.save.id);
+        setSaveSlotListMessage(
+          `セーブ枠は作成されましたが、初期データの保存に失敗しました。現在のデータや既存セーブは変更していません。${saveResult.error}`,
+        );
+        return;
+      }
+
+      setIsNewSaveDialogOpen(false);
+      setNewSaveNameDraft('');
+      await loadSaveSlotList();
+      setSelectedSaveSlotId(createResult.save.id);
+      setSelectedSaveSlotBackupInfo({
+        backup: initialBackup,
+        updatedAt: saveResult.info.updatedAt,
+        dataCount: saveResult.info.dataCount,
+        backupVersion: saveResult.info.backupVersion,
+      });
+      setSaveSlotListMessage(`${createResult.save.saveName}を作成しました。まだこのセーブには切り替えていません。`);
+    } catch (error) {
+      console.warn('New save slot create failed:', error);
+      setSaveSlotListMessage(
+        `新しいセーブを作成できませんでした。現在のデータや既存セーブは変更していません。${getSaveSlotErrorMessage(error)}`,
+      );
+    } finally {
+      setIsNewSaveCreating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isSettingsSaveDataView) {
+      return;
+    }
+
+    void loadSaveSlotList();
+  }, [authUser?.id, isSettingsSaveDataView]);
+
   const runInitialCloudBackup = async (userId: string) => {
     const currentUser = authUserRef.current;
 
@@ -12875,6 +13756,14 @@ function App() {
   const returnFromLibraryDetail = (options: { animated?: boolean } = {}) => {
     if (isAnyMemoFolderDetailView) {
       setSelectedAnyMemoFolderId(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (isSettingsView && settingsView === 'saveData') {
+      setSettingsView('data');
+      setSelectedSaveSlotId(null);
+      setSelectedSaveSlotBackupInfo(null);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -19751,6 +20640,21 @@ function App() {
               <p className="backup-warning">
                 読み込み時は、復元前に現在データの自動バックアップを書き出してから上書きします。
               </p>
+              <button
+                className="save-data-entry-button"
+                onClick={() => {
+                  setSettingsView('saveData');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                type="button"
+              >
+                <span aria-hidden="true">🎮</span>
+                <span>
+                  <strong>セーブデータ</strong>
+                  <small>新しいセーブスロットの一覧を確認</small>
+                </span>
+                <span aria-hidden="true">›</span>
+              </button>
               <div className="cloud-backup-panel">
                 <div className="cloud-backup-header">
                   <div>
@@ -19821,6 +20725,70 @@ function App() {
                 </button>
                 {cloudBackupMessage && (
                   <p className="backup-message">{cloudBackupMessage}</p>
+                )}
+              </div>
+              <div className="cloud-backup-panel">
+                <div className="cloud-backup-header">
+                  <div>
+                    <h3>セーブスロット Phase 2</h3>
+                    <p>現在の端末内データを、新しいセーブシステムの「セーブ1」へコピーします。</p>
+                  </div>
+                  <span data-status={saveSlotCopyStatus}>
+                    {saveSlotCopyStatus === 'copying'
+                      ? 'コピー中'
+                      : saveSlotCopyStatus === 'success'
+                        ? '完了'
+                        : saveSlotCopyStatus === 'failed'
+                          ? '失敗'
+                          : '未実行'}
+                  </span>
+                </div>
+                <p className="cloud-backup-login-note">
+                  Phase 2ではコピーだけを行います。localStorage、IndexedDB自動バックアップ、旧クラウドバックアップは変更しません。
+                </p>
+                <button
+                  className="cloud-backup-button"
+                  disabled={!authUser || saveSlotCopyStatus === 'copying'}
+                  onClick={() => void copyCurrentDataToInitialSaveSlot()}
+                  type="button"
+                >
+                  現在のデータをセーブ1へコピー
+                </button>
+                {!authUser && (
+                  <p className="cloud-backup-login-note">
+                    セーブ1へのコピーにはログインが必要です。
+                  </p>
+                )}
+                {saveSlotCopyInfo && (
+                  <dl className="cloud-backup-summary">
+                    <div>
+                      <dt>save_id</dt>
+                      <dd>{saveSlotCopyInfo.saveId}</dd>
+                    </div>
+                    <div>
+                      <dt>save_name</dt>
+                      <dd>{saveSlotCopyInfo.saveName}</dd>
+                    </div>
+                    <div>
+                      <dt>backup_data</dt>
+                      <dd>保存済み</dd>
+                    </div>
+                    <div>
+                      <dt>データ件数</dt>
+                      <dd>{saveSlotCopyInfo.dataCount}件</dd>
+                    </div>
+                    <div>
+                      <dt>updated_at</dt>
+                      <dd>{backupDateTimeFormatter.format(new Date(saveSlotCopyInfo.updatedAt))}</dd>
+                    </div>
+                    <div>
+                      <dt>backup_version</dt>
+                      <dd>v{saveSlotCopyInfo.backupVersion}</dd>
+                    </div>
+                  </dl>
+                )}
+                {saveSlotCopyMessage && (
+                  <p className="backup-message">{saveSlotCopyMessage}</p>
                 )}
               </div>
               <div className="auto-backup-panel">
@@ -19899,7 +20867,205 @@ function App() {
           </section>
         )}
 
+        {isSettingsSaveDataView && (
+          <section className="save-data-page" aria-label="セーブデータ">
+            <div className="data-management-heading">
+              <h2>🎮 セーブデータ</h2>
+            </div>
+            <div className="save-data-content">
+              <p>
+                新しいセーブスロット基盤に保存されているデータを確認し、保存済みのセーブへ切り替えます。
+              </p>
+              <div className="save-data-actions">
+                <button
+                  disabled={!authUser || saveSlotListStatus === 'loading'}
+                  onClick={() => void loadSaveSlotList()}
+                  type="button"
+                >
+                  再読み込み
+                </button>
+                <button
+                  disabled={!authUser || isNewSaveCreating}
+                  onClick={() => void openNewSaveDialog()}
+                  type="button"
+                >
+                  ＋ 新しいセーブ
+                </button>
+              </div>
+              {!authUser && (
+                <p className="save-data-message">セーブデータの確認にはログインが必要です。</p>
+              )}
+              {saveSlotListMessage && (
+                <p className="save-data-message">{saveSlotListMessage}</p>
+              )}
+              {authUser && saveSlotListStatus === 'loading' && !saveSlotListMessage && (
+                <p className="save-data-message">読み込み中…</p>
+              )}
+              {authUser &&
+                saveSlotListStatus !== 'loading' &&
+                saveSlotList.length === 0 &&
+                !saveSlotListMessage && (
+                <p className="save-data-empty">まだセーブデータがありません。</p>
+              )}
+              {saveSlotList.length > 0 && (
+                <div className="save-slot-list">
+                  {saveSlotList.map((slot) => {
+                    const isSelected = selectedSaveSlotId === slot.id;
+                    const isCurrentSave = currentSaveId === slot.id;
+                    const canSwitchToSelectedSave =
+                      isSelected &&
+                      selectedSaveSlotBackupInfo !== null &&
+                      !isCurrentSave &&
+                      saveSlotSwitchStatus !== 'switching';
+
+                    return (
+                      <article
+                        className="save-slot-card"
+                        data-current={isCurrentSave ? 'true' : 'false'}
+                        data-selected={isSelected ? 'true' : 'false'}
+                        key={slot.id}
+                      >
+                        <button
+                          aria-expanded={isSelected}
+                          onClick={() => void openSaveSlotDetails(slot.id)}
+                          type="button"
+                        >
+                          <span className="save-slot-icon" aria-hidden="true">
+                            🎮
+                          </span>
+                          <span className="save-slot-copy">
+                            <strong>
+                              {slot.saveName}
+                              {isCurrentSave && <em>▶ 使用中</em>}
+                            </strong>
+                            <small>最終更新 {formatSaveSlotDateTime(slot.updatedAt)}</small>
+                            <small>
+                              最終プレイ {slot.lastPlayedAt ? formatSaveSlotDateTime(slot.lastPlayedAt) : '未プレイ'}
+                            </small>
+                          </span>
+                          <span className="save-slot-arrow" aria-hidden="true">
+                            ›
+                          </span>
+                        </button>
+                        {isSelected && (
+                          <dl className="save-slot-details">
+                            <div>
+                              <dt>save_id</dt>
+                              <dd>{slot.id}</dd>
+                            </div>
+                            <div>
+                              <dt>schema_version</dt>
+                              <dd>v{slot.schemaVersion}</dd>
+                            </div>
+                            <div>
+                              <dt>作成日時</dt>
+                              <dd>{formatSaveSlotDateTime(slot.createdAt)}</dd>
+                            </div>
+                            <div>
+                              <dt>backup_data</dt>
+                              <dd>{selectedSaveSlotBackupInfo ? '保存済み' : '未確認'}</dd>
+                            </div>
+                            <div>
+                              <dt>data_count</dt>
+                              <dd>
+                                {selectedSaveSlotBackupInfo
+                                  ? `${selectedSaveSlotBackupInfo.dataCount}件`
+                                  : '-'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>backup_version</dt>
+                              <dd>
+                                {selectedSaveSlotBackupInfo
+                                  ? `v${selectedSaveSlotBackupInfo.backupVersion}`
+                                  : '-'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>backup_updated_at</dt>
+                              <dd>
+                                {selectedSaveSlotBackupInfo
+                                  ? formatSaveSlotDateTime(selectedSaveSlotBackupInfo.updatedAt)
+                                  : '-'}
+                              </dd>
+                            </div>
+                            <div className="save-slot-details-action">
+                              <dt>操作</dt>
+                              {isCurrentSave ? (
+                                <dd>このセーブを使用中です。</dd>
+                              ) : selectedSaveSlotBackupInfo ? (
+                                <dd>
+                                  <button
+                                    disabled={!canSwitchToSelectedSave}
+                                    onClick={() => void switchToSaveSlot(slot)}
+                                    type="button"
+                                  >
+                                    {saveSlotSwitchStatus === 'switching'
+                                      ? '切り替え中…'
+                                      : 'このセーブで遊ぶ'}
+                                  </button>
+                                </dd>
+                              ) : (
+                                <dd>バックアップJSON確認後に切り替えできます。</dd>
+                              )}
+                            </div>
+                          </dl>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
       </div>
+
+      {isNewSaveDialogOpen && (
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={closeNewSaveDialog}
+        >
+          <section
+            aria-labelledby="new-save-dialog-title"
+            aria-modal="true"
+            className="new-save-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <h2 id="new-save-dialog-title">新しいセーブ</h2>
+            <p>現在のデータはコピーせず、初回起動と同じ新規ゲーム状態をSupabaseに作成します。</p>
+            <label>
+              <span>セーブ名</span>
+              <input
+                disabled={isNewSaveCreating}
+                onChange={(event) => setNewSaveNameDraft(event.target.value)}
+                placeholder={getDefaultNewSaveSlotName(saveSlotList)}
+                type="text"
+                value={newSaveNameDraft}
+              />
+            </label>
+            <div className="dialog-actions">
+              <button
+                disabled={isNewSaveCreating}
+                onClick={closeNewSaveDialog}
+                type="button"
+              >
+                キャンセル
+              </button>
+              <button
+                disabled={isNewSaveCreating}
+                onClick={() => void createNewSaveSlot()}
+                type="button"
+              >
+                {isNewSaveCreating ? '作成中…' : '作成'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isTodoReviewOpen && pendingTodoReviews.length > 0 && (
         <div
