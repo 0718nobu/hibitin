@@ -52,7 +52,7 @@ type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements
 type RecordDisplayMode = 'all' | 'withRecords';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
-type TodoViewName = 'todo' | 'today' | 'date' | 'folders' | 'completed';
+type TodoViewName = 'todo' | 'today' | 'soon' | 'date' | 'folders' | 'completed';
 type SettingsViewName =
   | 'top'
   | 'gameMode'
@@ -67,7 +67,7 @@ const INITIAL_TODO_VIEW: TodoViewName = 'todo';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
 type AuthMode = 'login' | 'signup';
 type SupabaseConnectionStatus = 'unconfigured' | 'checking' | 'connected' | 'failed';
-type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'failed';
+type CloudBackupStatus = 'idle' | 'saving' | 'success' | 'pending' | 'conflict' | 'failed';
 type DailyQuestMasterStatus = 'idle' | 'loading' | 'success' | 'cache' | 'failed';
 type RoutineKind = TemplateKind | 'custom';
 type StartSection = 'morning' | 'noon' | 'evening' | 'night';
@@ -98,6 +98,17 @@ type CloudBackupLookupResult =
   | { status: 'found'; info: CloudBackupInfo }
   | { status: 'missing' }
   | { status: 'failed' };
+
+type CloudSyncConflict = {
+  saveId: string;
+  saveName: string;
+  remoteUpdatedAt: string;
+  lastKnownUpdatedAt: string | null;
+  remoteBackup: BackupFile;
+  remoteDataCount: number;
+  remoteBackupVersion: number;
+  reason: 'remote-newer' | 'unknown-revision';
+};
 
 export type SaveSlotSummary = {
   id: string;
@@ -184,6 +195,7 @@ const cloudBackupStatusLabels: Record<CloudBackupStatus, string> = {
   saving: '同期中…',
   success: '保存済み',
   pending: 'オフライン（同期待ち）',
+  conflict: '競合あり',
   failed: '保存失敗',
 };
 
@@ -197,7 +209,7 @@ const dailyQuestMasterStatusLabels: Record<DailyQuestMasterStatus, string> = {
 
 const recordViewOptions: { key: RecordViewName; icon: string; label: string }[] = [
   { key: 'memo', icon: '✍️', label: 'ひとこと' },
-  { key: 'events', icon: '📅', label: 'できごと' },
+  { key: 'events', icon: '📅', label: '記録' },
   { key: 'anyMemo', icon: '📝', label: 'メモ' },
   { key: 'advanced', icon: '⚙️', label: 'アドバンスト' },
   { key: 'achievements', icon: '🏆', label: '実績' },
@@ -242,7 +254,7 @@ const menuViewOptions: {
   { key: 'todos', icon: '✅', label: 'やること', description: '今日や今後のタスクを整理する' },
   { key: 'timer', icon: '⏱', label: 'タイマー', description: '時間を決めて集中する' },
   { key: 'recordMemo', icon: '✍️', label: 'ひとこと', description: '月ごとのひとことを振り返る' },
-  { key: 'recordEvents', icon: '📖', label: 'できごと', description: 'その日にあったことを読む' },
+  { key: 'recordEvents', icon: '📖', label: '記録', description: 'その日に起きたことを読む' },
   { key: 'recordAnyMemo', icon: '📝', label: 'メモ', description: '思いついたことをすぐ書く' },
   { key: 'recordAdvanced', icon: '⚙️', label: 'アドバンスト', description: '追加記録を日付ごとに見る' },
   { key: 'achievements', icon: '🏆', label: '実績', description: '育った記録とスターを見る' },
@@ -767,6 +779,7 @@ const ANY_MEMO_FOLDERS_STORAGE_KEY = 'hibitin:anyMemoFolders:v1';
 const ANY_MEMO_FOLDER_ITEMS_STORAGE_KEY = 'hibitin:anyMemoFolderItems:v1';
 const CURRENT_SAVE_ID_STORAGE_KEY = 'hibitinSystem:currentSaveId:v1';
 const CURRENT_SAVE_NAME_STORAGE_KEY = 'hibitinSystem:currentSaveName:v1';
+const SAVE_CLOUD_REVISIONS_STORAGE_KEY = 'hibitinSystem:saveCloudRevisions:v1';
 const SAVE_SLOT_SHARED_CACHE_STORAGE_KEYS = new Set([
   DAILY_QUEST_MASTER_CACHE_STORAGE_KEY,
   NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY,
@@ -900,6 +913,68 @@ const setCurrentSaveStorage = (saveId: string, saveName?: string) => {
   if (saveName) {
     window.localStorage.setItem(CURRENT_SAVE_NAME_STORAGE_KEY, saveName);
   }
+};
+
+const parseCloudRevisionMap = (value: string | null): Record<string, string> => {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.entries(parsed as Record<string, unknown>).reduce<Record<string, string>>(
+      (revisionMap, [saveId, updatedAt]) => {
+        if (
+          saveId.trim().length > 0 &&
+          typeof updatedAt === 'string' &&
+          !Number.isNaN(Date.parse(updatedAt))
+        ) {
+          revisionMap[saveId] = updatedAt;
+        }
+
+        return revisionMap;
+      },
+      {},
+    );
+  } catch {
+    return {};
+  }
+};
+
+const getSaveCloudRevisions = () =>
+  parseCloudRevisionMap(window.localStorage.getItem(SAVE_CLOUD_REVISIONS_STORAGE_KEY));
+
+const getLastKnownCloudUpdatedAt = (saveId: string) =>
+  getSaveCloudRevisions()[saveId] ?? null;
+
+const setLastKnownCloudUpdatedAt = (saveId: string, updatedAt: string) => {
+  if (Number.isNaN(Date.parse(updatedAt))) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    SAVE_CLOUD_REVISIONS_STORAGE_KEY,
+    JSON.stringify({
+      ...getSaveCloudRevisions(),
+      [saveId]: updatedAt,
+    }),
+  );
+};
+
+const isCloudUpdatedAfter = (remoteUpdatedAt: string, lastKnownUpdatedAt: string | null) => {
+  if (!lastKnownUpdatedAt) {
+    return false;
+  }
+
+  const remoteTime = Date.parse(remoteUpdatedAt);
+  const knownTime = Date.parse(lastKnownUpdatedAt);
+
+  return Number.isFinite(remoteTime) && Number.isFinite(knownTime) && remoteTime > knownTime;
 };
 
 const createLocalStorageSnapshot = () => {
@@ -1977,7 +2052,7 @@ const getQuestManagementFixedTitle = (itemStats: MasteryStats) => {
   }
 
   if (itemStats.itemId === 'core:daily-events') {
-    return '今日のできごと';
+    return '今日の記録';
   }
 
   return itemStats.label.replace(/^[^\p{L}\p{N}]+/u, '').trim() || itemStats.label;
@@ -2674,7 +2749,7 @@ const basicBadgeDefinitions: BadgeDefinition[] = [
   {
     id: 'event-sprout',
     name: '記録の芽',
-    description: '今日のできごとを初めて記録',
+    description: '今日の記録を初めて残す',
     icon: '🌱',
     category: 'record',
   },
@@ -4635,7 +4710,7 @@ const applyTodoRollover = (todos: ManagedTodos, todayDate: Date) => {
 
   const rolloverTimestamp = new Date().toISOString();
   const rolledTodos = todos.map((todo) => {
-    if (todo.status === 'completed') {
+    if (todo.status === 'completed' || todo.completed) {
       return todo;
     }
 
@@ -6148,7 +6223,7 @@ const getCoreRoutinePointTargetKind = (kind: CoreRoutineKind): PointTargetKind =
   kind === 'memo' ? 'coreMemo' : 'coreEvents';
 
 const getCoreRoutinePointLabel = (kind: CoreRoutineKind) =>
-  kind === 'memo' ? '今日のひとことを残す' : '今日のできごとを残す';
+  kind === 'memo' ? '今日のひとことを残す' : '今日の記録を残す';
 
 const getCoreRoutinePointMessage = (kind: CoreRoutineKind) =>
   kind === 'memo' ? '今日の想いを残しました' : '今日の記憶を残しました';
@@ -6413,6 +6488,7 @@ function App() {
   const [selectedTodoDate, setSelectedTodoDate] = useState<Date | null>(null);
   const [newTodoText, setNewTodoText] = useState('');
   const [newTodoTodayText, setNewTodoTodayText] = useState('');
+  const [newTodoSoonText, setNewTodoSoonText] = useState('');
   const [newTodoDateText, setNewTodoDateText] = useState('');
   const [activeTodoMenuId, setActiveTodoMenuId] = useState<string | null>(null);
   const [todoDueDateDrafts, setTodoDueDateDrafts] = useState<Record<string, TodoDueDateDraft>>({});
@@ -6428,8 +6504,11 @@ function App() {
     useState<TodoFloatingMenuPosition | null>(null);
   const newTodoInputRef = useRef<HTMLTextAreaElement | null>(null);
   const newTodoTodayInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const newTodoSoonInputRef = useRef<HTMLTextAreaElement | null>(null);
   const newTodoDateInputRef = useRef<HTMLTextAreaElement | null>(null);
   const newTodoFolderInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const todoTodayDateCardRef = useRef<HTMLElement | null>(null);
+  const shouldScrollTodoDateTodayRef = useRef(false);
   const todoDraftTextsRef = useRef<Record<string, string | undefined>>({});
   const todoMenuAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const todoMenuPanelRef = useRef<HTMLDivElement | null>(null);
@@ -6473,6 +6552,11 @@ function App() {
     todo.status !== 'completed';
   const shouldShowManagedTodoInCompletedHistory = (todo: ManagedTodoItem) =>
     todo.status === 'completed';
+  const isManagedTodoCompletedOnDate = (todo: ManagedTodoItem, dateKey: string) =>
+    todo.status === 'completed' &&
+    typeof todo.completedAt === 'string' &&
+    !Number.isNaN(Date.parse(todo.completedAt)) &&
+    getDateKey(new Date(todo.completedAt)) === dateKey;
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const eventStorageKey = getDailyEventStorageKey(selectedDate);
@@ -6532,7 +6616,7 @@ function App() {
   const dailyMessage = getDailyMessage(selectedDateKey, playerProfile.displayName);
   const dailyOneLineExample = getDailyOneLineExample(selectedDateKey);
   const dailyEventExample = getDailyEventExample(selectedDateKey);
-  const dailyEventLabel = isToday ? '今日のできごと' : '昨日のできごと';
+  const dailyEventLabel = isToday ? '今日の記録' : '昨日の記録';
   const dailyOneLineLabel = isToday ? '今日のひとこと' : '昨日のひとこと';
   const dailyAnyMemoLabel = 'なんでもメモ';
   const dailyNudgeDisplayLabel = isToday ? '今日のログインクエスト' : '昨日のログインクエスト';
@@ -6625,6 +6709,9 @@ function App() {
   const [isCloudBackupChecking, setIsCloudBackupChecking] = useState(false);
   const [isCloudRestoreConfirmOpen, setIsCloudRestoreConfirmOpen] = useState(false);
   const [isCloudRestoreBusy, setIsCloudRestoreBusy] = useState(false);
+  const [cloudSyncConflict, setCloudSyncConflict] = useState<CloudSyncConflict | null>(null);
+  const [isCloudSyncConflictDismissed, setIsCloudSyncConflictDismissed] = useState(false);
+  const [isCloudSyncConflictResolving, setIsCloudSyncConflictResolving] = useState(false);
   const [saveSlotCopyStatus, setSaveSlotCopyStatus] =
     useState<'idle' | 'copying' | 'success' | 'failed'>('idle');
   const [saveSlotCopyMessage, setSaveSlotCopyMessage] = useState('');
@@ -7797,6 +7884,27 @@ function App() {
 
     return () => window.clearTimeout(focusTimerId);
   }, [isTodayTodoView, todoView]);
+
+  useEffect(() => {
+    if (
+      !isTodayTodoView ||
+      todoView !== 'date' ||
+      !shouldScrollTodoDateTodayRef.current ||
+      getDateKey(todoMonth) !== getDateKey(getMonthStart(today))
+    ) {
+      return;
+    }
+
+    const scrollTimerId = window.setTimeout(() => {
+      todoTodayDateCardRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+      shouldScrollTodoDateTodayRef.current = false;
+    }, 120);
+
+    return () => window.clearTimeout(scrollTimerId);
+  }, [isTodayTodoView, todoMonth, today, todayKey, todoView]);
 
   useEffect(() => {
     if (!editingDailyRecord) {
@@ -10508,6 +10616,60 @@ function App() {
     ...currentSaveContextRef.current,
   });
 
+  const registerCloudSyncConflict = (conflict: CloudSyncConflict) => {
+    setCloudSyncConflict(conflict);
+    setIsCloudSyncConflictDismissed(false);
+    setCloudBackupStatus('conflict');
+    setCloudBackupInfo({
+      updatedAt: conflict.remoteUpdatedAt,
+      dataCount: conflict.remoteDataCount,
+      backupVersion: conflict.remoteBackupVersion,
+    });
+    setCloudBackupMessage('別の端末で新しいデータが保存されています。確認するまで、このセーブの自動クラウド上書きは止めています。');
+  };
+
+  const detectSaveCloudConflict = async (
+    userId: string,
+    saveId: string,
+    saveName: string,
+  ) => {
+    const result = await fetchHibitinSaveBackup(userId, saveId);
+
+    if (result.status !== 'found') {
+      return {
+        status: result.status,
+        error: result.status === 'failed' ? result.error : undefined,
+      } as
+        | { status: 'missing'; error?: undefined }
+        | { status: 'failed'; error: string };
+    }
+
+    const lastKnownUpdatedAt = getLastKnownCloudUpdatedAt(saveId);
+    const isUnknownRevision = !lastKnownUpdatedAt;
+    const isRemoteNewer = isCloudUpdatedAfter(result.info.updatedAt, lastKnownUpdatedAt);
+
+    if (isUnknownRevision || isRemoteNewer) {
+      return {
+        status: 'conflict' as const,
+        conflict: {
+          saveId,
+          saveName,
+          remoteUpdatedAt: result.info.updatedAt,
+          lastKnownUpdatedAt,
+          remoteBackup: result.info.backup,
+          remoteDataCount: result.info.dataCount,
+          remoteBackupVersion: result.info.backupVersion,
+          reason: isUnknownRevision ? 'unknown-revision' as const : 'remote-newer' as const,
+        },
+      };
+    }
+
+    return {
+      status: 'current' as const,
+      info: result.info,
+    };
+  };
+
   const createAutoBackupNow = async (message = '自動バックアップを作成しました。') => {
     try {
       const result = await saveCurrentAutoBackup();
@@ -10533,10 +10695,24 @@ function App() {
       const activeSaveId = getCurrentSaveId();
 
       if (activeSaveId) {
-        const result = await fetchHibitinSaveBackup(userId, activeSaveId);
+        const activeSaveName = getCurrentSaveName() ?? '現在のセーブ';
+        const result = await detectSaveCloudConflict(userId, activeSaveId, activeSaveName);
 
-        if (result.status === 'found') {
+        if (result.status === 'conflict') {
+          registerCloudSyncConflict(result.conflict);
+          return {
+            status: 'found',
+            info: {
+              updatedAt: result.conflict.remoteUpdatedAt,
+              dataCount: result.conflict.remoteDataCount,
+              backupVersion: result.conflict.remoteBackupVersion,
+            },
+          };
+        }
+
+        if (result.status === 'current') {
           cloudBackupHashRef.current = getBackupContentHash(result.info.backup);
+          setLastKnownCloudUpdatedAt(activeSaveId, result.info.updatedAt);
           setCloudBackupInfo({
             updatedAt: result.info.updatedAt,
             dataCount: result.info.dataCount,
@@ -10628,6 +10804,7 @@ function App() {
       manual?: boolean;
       force?: boolean;
       initial?: boolean;
+      forceConflict?: boolean;
     } = {},
   ) => {
     if (!supabase) {
@@ -10653,6 +10830,30 @@ function App() {
       ? createSaveSlotBackupFromCurrentStorage()
       : createBackupFromCurrentStorage();
     const contentHash = getBackupContentHash(backup);
+    let currentRemoteSaveInfo: SaveSlotBackupInfo | null = null;
+
+    if (activeSaveId && !options.forceConflict) {
+      const remoteState = await detectSaveCloudConflict(
+        uploadUser.id,
+        activeSaveId,
+        activeSaveName ?? '現在のセーブ',
+      );
+
+      if (remoteState.status === 'conflict') {
+        registerCloudSyncConflict(remoteState.conflict);
+        return false;
+      }
+
+      if (remoteState.status === 'failed') {
+        setCloudBackupStatus('failed');
+        setCloudBackupMessage(`クラウド状態を確認できなかったため、保存を中止しました。${remoteState.error}`);
+        return false;
+      }
+
+      if (remoteState.status === 'current') {
+        currentRemoteSaveInfo = remoteState.info;
+      }
+    }
 
     if (!options.force && cloudBackupHashRef.current === contentHash) {
       setCloudBackupStatus('success');
@@ -10696,6 +10897,10 @@ function App() {
       const dataCount = Object.keys(backup.data.storage).length;
 
       if (activeSaveId) {
+        if (currentRemoteSaveInfo && !options.forceConflict) {
+          cloudBackupHashRef.current = getBackupContentHash(currentRemoteSaveInfo.backup);
+        }
+
         const saveResult = await saveHibitinSaveBackup(uploadUser.id, activeSaveId, backup);
 
         if (saveResult.status !== 'success') {
@@ -10713,6 +10918,11 @@ function App() {
         }
 
         cloudBackupHashRef.current = contentHash;
+        setLastKnownCloudUpdatedAt(activeSaveId, saveResult.info.updatedAt);
+        setCloudSyncConflict((currentConflict) =>
+          currentConflict?.saveId === activeSaveId ? null : currentConflict,
+        );
+        setIsCloudSyncConflictDismissed(false);
         hasPendingCloudBackupRef.current = false;
         setLastCloudBackupAt(saveResult.info.updatedAt);
         setCloudBackupInfo({
@@ -10874,6 +11084,7 @@ function App() {
         throw new Error('保存後のセーブ1バックアップを確認できませんでした。');
       }
 
+      setLastKnownCloudUpdatedAt(createResult.save.id, savedBackup.info.updatedAt);
       setCurrentSaveStorage(createResult.save.id, createResult.save.saveName);
       setCurrentSaveId(createResult.save.id);
       setSaveSlotList([createResult.save]);
@@ -10963,6 +11174,7 @@ function App() {
         updatedAt: savedBackup.info.updatedAt,
         backupVersion: savedBackup.info.backupVersion,
       });
+      setLastKnownCloudUpdatedAt(saveSlot.id, savedBackup.info.updatedAt);
       setCurrentSaveStorage(saveSlot.id, saveSlot.saveName);
       setCurrentSaveId(saveSlot.id);
       setSaveSlotCopyMessage('セーブ1へのコピーが完了しました。現在のデータと旧クラウドバックアップはそのまま残っています。');
@@ -11070,12 +11282,33 @@ function App() {
     setSaveSlotListMessage(`${slot.saveName}へ切り替えています。`);
 
     try {
+      const activeSaveName =
+        latestSlots.find((saveSlot) => saveSlot.id === activeSaveId)?.saveName ??
+        getCurrentSaveName() ??
+        '現在のセーブ';
+      const activeRemoteState = await detectSaveCloudConflict(authUser.id, activeSaveId, activeSaveName);
+
+      if (activeRemoteState.status === 'conflict') {
+        registerCloudSyncConflict(activeRemoteState.conflict);
+        setSaveSlotListMessage(
+          '現在のセーブが別の端末で更新されています。競合を解決してから切り替えてください。',
+        );
+        setSaveSlotSwitchStatus('failed');
+        return;
+      }
+
+      if (activeRemoteState.status === 'failed') {
+        throw new Error(`現在のセーブのクラウド状態を確認できませんでした。${activeRemoteState.error}`);
+      }
+
       const currentBackup = createSaveSlotBackupFromCurrentStorage();
       const currentSaveResult = await saveHibitinSaveBackup(authUser.id, activeSaveId, currentBackup);
 
       if (currentSaveResult.status !== 'success') {
         throw new Error(`現在のセーブ保存に失敗しました。${currentSaveResult.error}`);
       }
+
+      setLastKnownCloudUpdatedAt(activeSaveId, currentSaveResult.info.updatedAt);
 
       try {
         await saveCurrentAutoBackup({ force: true });
@@ -11105,6 +11338,7 @@ function App() {
         throw new Error(`最終プレイ日時を更新できませんでした。${lastPlayedResult.error}`);
       }
 
+      setLastKnownCloudUpdatedAt(slot.id, targetBackupResult.info.updatedAt);
       setCurrentSaveId(slot.id);
       setSaveSlotList((slots) =>
         slots.map((saveSlot) =>
@@ -11205,6 +11439,7 @@ function App() {
         dataCount: saveResult.info.dataCount,
         backupVersion: saveResult.info.backupVersion,
       });
+      setLastKnownCloudUpdatedAt(createResult.save.id, saveResult.info.updatedAt);
       setSaveSlotListMessage(`${createResult.save.saveName}を作成しました。まだこのセーブには切り替えていません。`);
     } catch (error) {
       console.warn('New save slot create failed:', error);
@@ -11370,6 +11605,7 @@ function App() {
           throw restoreError;
         }
 
+        setLastKnownCloudUpdatedAt(activeSaveId, result.info.updatedAt);
         setCloudBackupMessage('現在のセーブをクラウドバックアップから復元しました。');
         window.location.reload();
         return;
@@ -11430,6 +11666,107 @@ function App() {
       setIsCloudRestoreBusy(false);
       setIsCloudRestoreConfirmOpen(false);
     }
+  };
+
+  const loadCloudConflictVersion = async () => {
+    if (!cloudSyncConflict) {
+      return;
+    }
+
+    const rollbackSnapshot = createLocalStorageSnapshot();
+
+    setIsCloudSyncConflictResolving(true);
+    setCloudBackupMessage('クラウド版を読み込む準備をしています。');
+
+    try {
+      const safetyAutoBackup = await saveCurrentAutoBackup({ force: true });
+      setAutoBackups(safetyAutoBackup.records);
+      restoreSaveSlotStorageFromBackup(cloudSyncConflict.remoteBackup);
+      setLastKnownCloudUpdatedAt(cloudSyncConflict.saveId, cloudSyncConflict.remoteUpdatedAt);
+      cloudBackupHashRef.current = getBackupContentHash(cloudSyncConflict.remoteBackup);
+      setCloudBackupInfo({
+        updatedAt: cloudSyncConflict.remoteUpdatedAt,
+        dataCount: cloudSyncConflict.remoteDataCount,
+        backupVersion: cloudSyncConflict.remoteBackupVersion,
+      });
+      setLastCloudBackupAt(cloudSyncConflict.remoteUpdatedAt);
+      setCloudBackupStatus('success');
+      setCloudBackupMessage('クラウド版を読み込みました。画面を再読み込みします。');
+      setCloudSyncConflict(null);
+      setIsCloudSyncConflictDismissed(false);
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 120);
+    } catch (error) {
+      console.warn('Cloud conflict remote load failed:', error);
+      restoreLocalStorageSnapshot(rollbackSnapshot);
+      setCloudBackupStatus('conflict');
+      setCloudBackupMessage(
+        `クラウド版を読み込めませんでした。端末データは元に戻しました。${getSaveSlotErrorMessage(error)}`,
+      );
+    } finally {
+      setIsCloudSyncConflictResolving(false);
+    }
+  };
+
+  const preferLocalConflictVersion = async () => {
+    if (!cloudSyncConflict) {
+      return;
+    }
+
+    const activeSaveId = getCurrentSaveId();
+
+    if (activeSaveId !== cloudSyncConflict.saveId) {
+      setCloudBackupMessage('現在開いているセーブと競合中のセーブが違うため、上書きできません。');
+      return;
+    }
+
+    const shouldOverwrite = window.confirm(
+      'クラウドにある他端末の変更を、この端末のデータで上書きします。\n\n上書き前のクラウドデータは端末内の自動バックアップへ退避します。',
+    );
+
+    if (!shouldOverwrite) {
+      return;
+    }
+
+    setIsCloudSyncConflictResolving(true);
+    setCloudBackupMessage('上書き前のクラウド版を端末内へ退避しています。');
+
+    try {
+      const cloudSafetyRecord = createAutoBackupRecord(cloudSyncConflict.remoteBackup, {
+        saveId: cloudSyncConflict.saveId,
+        saveName: `${cloudSyncConflict.saveName}（上書き前クラウド）`,
+      });
+
+      await putAutoBackupRecord(cloudSafetyRecord);
+      setAutoBackups(await pruneAutoBackupRecords());
+
+      const uploaded = await uploadCloudBackup({
+        manual: true,
+        force: true,
+        forceConflict: true,
+      });
+
+      if (!uploaded) {
+        throw new Error('端末版をクラウドへ保存できませんでした。');
+      }
+
+      setCloudSyncConflict(null);
+      setIsCloudSyncConflictDismissed(false);
+      setCloudBackupStatus('success');
+    } catch (error) {
+      console.warn('Cloud conflict local overwrite failed:', error);
+      setCloudBackupStatus('conflict');
+      setCloudBackupMessage(`端末版で上書きできませんでした。${getSaveSlotErrorMessage(error)}`);
+    } finally {
+      setIsCloudSyncConflictResolving(false);
+    }
+  };
+
+  const decideCloudConflictLater = () => {
+    setIsCloudSyncConflictDismissed(true);
+    setCloudBackupStatus('conflict');
+    setCloudBackupMessage('競合は未解決です。このセーブの自動クラウド上書きは停止中です。');
   };
 
   const restoreStorageFromBackup = (backup: BackupFile) => {
@@ -11510,6 +11847,12 @@ function App() {
 
   const scheduleCloudBackup = () => {
     if (!authUserRef.current) {
+      return;
+    }
+
+    if (cloudSyncConflict && cloudSyncConflict.saveId === getCurrentSaveId()) {
+      hasPendingCloudBackupRef.current = false;
+      setCloudBackupStatus('conflict');
       return;
     }
 
@@ -12324,6 +12667,7 @@ function App() {
           ? {
               ...todo,
               status,
+              dueDate: getDueDateForTodoStatus(status),
               completed: false,
               completedAt: undefined,
               originalStatus: undefined,
@@ -12341,6 +12685,7 @@ function App() {
           ? {
               ...todo,
               status,
+              dueDate: getDueDateForTodoStatus(status),
               completed: false,
               completedAt: undefined,
               originalStatus: undefined,
@@ -12378,6 +12723,7 @@ function App() {
       const movedTodo: ManagedTodoItem = {
         ...movingTodo,
         status: targetStatus,
+        dueDate: getDueDateForTodoStatus(targetStatus),
         completed: false,
         completedAt: undefined,
         originalStatus: undefined,
@@ -12477,6 +12823,18 @@ function App() {
     return 'someday';
   };
 
+  const getDueDateForTodoStatus = (status: ActiveTodoStatus) => {
+    if (status === 'today') {
+      return todayKey;
+    }
+
+    if (status === 'tomorrow') {
+      return getDateKey(addDays(today, 1));
+    }
+
+    return undefined;
+  };
+
   const addManagedTodoQuick = (text: string, dueDate?: string, folderId?: string) => {
     const trimmedText = text.trim();
 
@@ -12536,6 +12894,7 @@ function App() {
   const commitAndResetTodoDraftInputs = () => {
     commitTodoDraft('todo:list', setNewTodoText);
     commitTodoDraft('todo:today', setNewTodoTodayText, { dueDate: todayKey });
+    commitTodoDraft('todo:soon', setNewTodoSoonText);
 
     if (selectedTodoDate) {
       const dateKey = getDateKey(selectedTodoDate);
@@ -12606,6 +12965,11 @@ function App() {
   const submitNewTodoForToday = () => {
     commitTodoDraft('todo:today', setNewTodoTodayText, { dueDate: todayKey });
     window.setTimeout(() => adjustTextareaHeight(newTodoTodayInputRef.current), 0);
+  };
+
+  const submitNewTodoForSoon = () => {
+    commitTodoDraft('todo:soon', setNewTodoSoonText);
+    window.setTimeout(() => adjustTextareaHeight(newTodoSoonInputRef.current), 0);
   };
 
   const submitNewTodoForDate = (date: Date) => {
@@ -12850,6 +13214,31 @@ function App() {
           ? `${targetIds.size}件の日付を設定しました`
           : `${targetIds.size}件の日付を外しました`,
     );
+    clearTodoSelection();
+  };
+
+  const bulkMoveSelectedTodosToSoon = () => {
+    const targetIds = new Set(getSelectedTodoIdList());
+
+    if (targetIds.size === 0) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    setManagedTodos((currentTodos) =>
+      currentTodos.map((todo) =>
+        targetIds.has(todo.id) && todo.status !== 'completed'
+          ? {
+              ...todo,
+              dueDate: undefined,
+              status: 'soon' as const,
+              pendingReview: undefined,
+              updatedAt: timestamp,
+            }
+          : todo,
+      ),
+    );
+    showTodoBulkStatus(`${targetIds.size}件を早めに設定しました`);
     clearTodoSelection();
   };
 
@@ -13102,9 +13491,14 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const showTodoToday = () => {
+  const requestTodoDateTodayScroll = () => {
+    shouldScrollTodoDateTodayRef.current = true;
     setTodoMonth(getMonthStart(today));
-    setSelectedTodoDate(today);
+    setSelectedTodoDate(null);
+  };
+
+  const showTodoToday = () => {
+    requestTodoDateTodayScroll();
   };
 
   const applyTodoReviewActions = (actions: Record<string, TodoReviewAction>) => {
@@ -13144,9 +13538,17 @@ function App() {
           }];
         }
 
+        const nextDueDate =
+          action === 'today'
+            ? todayKey
+            : action === 'tomorrow'
+              ? getDateKey(addDays(today, 1))
+              : undefined;
+
         return [{
           ...todo,
           status: action,
+          dueDate: nextDueDate,
           completed: false,
           completedAt: undefined,
           originalStatus: undefined,
@@ -14562,7 +14964,7 @@ function App() {
     const icon = isMemo ? '✍️' : '📖';
     const placeholder = isMemo
       ? '今日の気付きや思ったことを書き残しておこう'
-      : `${isToday ? '今日あったことややったこと書き残してみよう' : '昨日あったことややったこと書き残してみよう'}`;
+      : `${isToday ? '今日' : '昨日'}起きたできごとや、${isToday ? '今日' : '昨日'}やったことを記録しておこう`;
     const updateEntry = isMemo
       ? updateDailyMemoForSelectedDate
       : updateDailyEventForSelectedDate;
@@ -16227,7 +16629,7 @@ function App() {
                     ['advanced', 'アドバンスト'],
                     ['dailyNudge', '今日のログインクエスト'],
                     ['coreMemo', '今日のひとことを残す'],
-                    ['coreEvents', '今日のできごとを残す'],
+                    ['coreEvents', '今日の記録を残す'],
                   ] as [PointTargetKind, string][]).map(([targetKind, label]) => (
                     <div className="admin-point-target-row" key={targetKind}>
                       <label>
@@ -16538,13 +16940,16 @@ function App() {
         })()}
 
         {isTodayQuestView && isToday && (() => {
-          const todayTodoItems = managedTodos
-            .filter((todo) =>
-              hasManagedTodoText(todo) &&
-              !todo.pendingReview &&
-              shouldShowManagedTodoInWorkingList(todo) &&
-              todo.dueDate === todayKey,
-            );
+	          const todayTodoItems = managedTodos
+	            .filter((todo) =>
+	              hasManagedTodoText(todo) &&
+	              !todo.pendingReview &&
+	              todo.dueDate === todayKey &&
+                (
+                  shouldShowManagedTodoInWorkingList(todo) ||
+                  isManagedTodoCompletedOnDate(todo, todayKey)
+                ),
+	            );
           const visibleTodoItems = todayTodoItems.slice(0, 3);
           const remainingTodoCount = Math.max(0, todayTodoItems.length - visibleTodoItems.length);
 
@@ -17434,7 +17839,7 @@ function App() {
                           adjustTextareaHeight(event.currentTarget);
                           updateDailyEventForSelectedDate(index, event.target.value);
                         }}
-                        placeholder={`${isToday ? '今日' : '昨日'}あったことを書いてみよう`}
+                        placeholder={`${isToday ? '今日' : '昨日'}起きたできごとや、${isToday ? '今日' : '昨日'}やったことを記録しておこう`}
                         ref={(element) => {
                           if (index === 0) {
                             dailyEventTextareaRef.current = element;
@@ -17460,7 +17865,7 @@ function App() {
                   );
                 })}
               </div>
-              <div className="daily-one-line-example" aria-label="できごとの例">
+              <div className="daily-one-line-example" aria-label="記録の例">
                 <p>例えばこんなの</p>
                 <blockquote>「{dailyEventExample.text}」</blockquote>
               </div>
@@ -18095,6 +18500,7 @@ function App() {
             )
             .sort((first, second) => (second.createdAt ?? '').localeCompare(first.createdAt ?? ''));
           const todayTodos = activeTodos.filter((todo) => todo.dueDate === todayKey);
+          const soonTodos = activeTodos.filter((todo) => todo.status === 'soon');
           const formatTodoDueDate = (dateKey: string) => {
             const date = getDateFromKey(dateKey);
 
@@ -18150,9 +18556,31 @@ function App() {
 	                          setActiveTodoMenuId(null);
 	                        }}
 	                        type="button"
+		                      >
+		                        {todo.dueDate === todayKey ? '⭐ 今日やる ✓' : '⭐ 今日やる'}
+		                      </button>
+	                      <button
+	                        onClick={() => {
+                            const tomorrowKey = getDateKey(addDays(today, 1));
+
+	                          if (todo.dueDate !== tomorrowKey) {
+	                            updateManagedTodoDueDate(todo.id, tomorrowKey);
+	                          }
+	                          setActiveTodoMenuId(null);
+	                        }}
+	                        type="button"
 	                      >
-	                        {todo.dueDate === todayKey ? '⭐ 今日やる ✓' : '⭐ 今日やる'}
+	                        {todo.dueDate === getDateKey(addDays(today, 1)) ? '🌤️ 明日やる ✓' : '🌤️ 明日やる'}
 	                      </button>
+	                      <button
+	                        onClick={() => {
+	                          moveManagedTodo(todo.id, 'soon');
+                          setActiveTodoMenuId(null);
+                        }}
+                        type="button"
+                      >
+                        🏃 早めにやる
+                      </button>
 	                      {(() => {
 	                        const dueDraft = getTodoDueDateDraft(todo);
 	                        const todayMonthPlaceholder = String(today.getMonth() + 1);
@@ -18598,6 +19026,7 @@ function App() {
 	                {([
 	                  ['todo', '一覧'],
                   ['today', '今日'],
+                  ['soon', '早め'],
                   ['date', '日付'],
                   ['folders', 'フォルダ'],
                   ['completed', '完了済み'],
@@ -18606,11 +19035,14 @@ function App() {
                     aria-current={todoView === view ? 'page' : undefined}
 	                    data-active={todoView === view ? 'true' : 'false'}
 	                    key={view}
-	                    onClick={() => {
+		                    onClick={() => {
                         commitAndResetTodoDraftInputs();
-	                      clearTodoSelection();
-	                      setTodoView(view);
-	                    }}
+		                      clearTodoSelection();
+                        if (view === 'date') {
+                          requestTodoDateTodayScroll();
+                        }
+		                      setTodoView(view);
+		                    }}
 	                    type="button"
 	                  >
 	                    {label}
@@ -18717,6 +19149,40 @@ function App() {
                 </>
               )}
 
+              {todoView === 'soon' && (
+                <>
+                  <section className="todo-capture-card" aria-label="早めのやることを追加">
+                    <textarea
+                      aria-label="早めのやること"
+                      onBlur={() => submitNewTodoForSoon()}
+                      onChange={(event) => {
+                        adjustTextareaHeight(event.currentTarget);
+                        updateTodoDraftText('todo:soon', event.target.value, setNewTodoSoonText);
+                      }}
+                      onKeyDown={(event) => handleTodoCaptureKeyDown(event, submitNewTodoForSoon)}
+                      enterKeyHint="done"
+                      placeholder="早めに片付けたいことを入力する"
+                      ref={(element) => {
+                        newTodoSoonInputRef.current = element;
+                        if (element) {
+                          adjustTextareaHeight(element);
+                        }
+                      }}
+                      rows={1}
+                      value={newTodoSoonText}
+                    />
+                  </section>
+                  <section className="todo-capture-list" aria-label="早めの未完了のやること">
+                    {renderTodoCaptureListHeader(soonTodos)}
+                    {soonTodos.length > 0 ? (
+                      soonTodos.map(renderTodoRow)
+                    ) : (
+                      <p className="todo-completed-empty">早めに片付けたいことを置いておけます。</p>
+                    )}
+                  </section>
+                </>
+              )}
+
               {todoView === 'date' && (
                 <section className="todo-date-page" aria-label="日付ごとのやること">
                   <div className="records-month-header">
@@ -18750,13 +19216,18 @@ function App() {
                       }${holidayName ? `・${holidayName}` : ''}）`;
 
                       return (
-                        <article
-                          className="record-day-card todo-date-card"
-                          data-day-kind={dayKind}
-                          data-empty={dateTodos.length === 0 ? 'true' : 'false'}
-                          data-today={dateKey === todayKey ? 'true' : 'false'}
-                          key={dateKey}
-                        >
+	                        <article
+	                          className="record-day-card todo-date-card"
+	                          data-day-kind={dayKind}
+	                          data-empty={dateTodos.length === 0 ? 'true' : 'false'}
+	                          data-today={dateKey === todayKey ? 'true' : 'false'}
+	                          key={dateKey}
+                            ref={(element) => {
+                              if (dateKey === todayKey) {
+                                todoTodayDateCardRef.current = element;
+                              }
+                            }}
+	                        >
                           <button
                             className="record-day-toggle"
                             onClick={() => {
@@ -19017,6 +19488,9 @@ function App() {
 	                  >
 	                    明日
 	                  </button>
+                    <button onClick={bulkMoveSelectedTodosToSoon} type="button">
+                      早め
+                    </button>
 	                  <label>
 	                    日付
 	                    <input
@@ -19817,7 +20291,7 @@ function App() {
                         )}
                         {recordView === 'events' && savedEventEntries.length > 0 && (
                           <div className="record-read-section">
-                            <h3>📅 できごと</h3>
+                            <h3>📅 記録</h3>
                             <div className="record-read-list">
                               {savedEventEntries.map((entry, index) => (
                                 <p key={`record-read-events-${dateKey}-${index}`}>
@@ -19942,17 +20416,17 @@ function App() {
                     )}
                     {recordView === 'events' && (
                     <div className="record-field">
-                      <label>📅 今日のできごと</label>
+                      <label>📅 今日の記録</label>
                       <div className="record-entry-list">
                         {eventEntries.map((entry, index) => (
                           <textarea
-                            aria-label={`${dateTitle}のできごと ${index + 1}`}
+                            aria-label={`${dateTitle}の記録 ${index + 1}`}
                             key={`record-editor-events-${dateKey}-${index}`}
                             onChange={(event) => {
                               adjustTextareaHeight(event.currentTarget);
                               updateRecordEvent(recordDate, index, event.target.value);
                             }}
-                            placeholder="今日あったことややったこと書き残してみよう"
+                            placeholder="今日起きたできごとや、今日やったことを記録しておこう"
                             ref={adjustTextareaHeight}
                             rows={1}
                             value={entry.text}
@@ -20265,7 +20739,7 @@ function App() {
                   <div className="daily-record-divider" aria-hidden="true" />
                   <div className="daily-record-field daily-record-field-events">
                     <label htmlFor="history-daily-events">
-                      📅 その日のできごと
+                      📅 その日の記録
                     </label>
                     <div className="daily-record-entry-list">
                       {historyDailyEvent.map((entry, index) => {
@@ -20277,7 +20751,7 @@ function App() {
                             key={`history-daily-events-${index}`}
                           >
                             <textarea
-                              aria-label={`その日のできごと ${index + 1}`}
+                              aria-label={`その日の記録 ${index + 1}`}
                               id={
                                 index === 0
                                   ? 'history-daily-events'
@@ -20287,7 +20761,7 @@ function App() {
                                 adjustTextareaHeight(event.currentTarget);
                                 updateHistoryDailyEvent(index, event.target.value);
                               }}
-                              placeholder="今日あったことややったこと書き残してみよう"
+                              placeholder="その日起きたできごとや、その日やったことを記録しておこう"
                               ref={(element) => {
                                 if (index === 0) {
                                   historyDailyEventTextareaRef.current = element;
@@ -20300,7 +20774,7 @@ function App() {
                             />
                             {!entry.saved && (
                               <button
-                                aria-label={`その日のできごと ${index + 1}をOKにする`}
+                                aria-label={`その日の記録 ${index + 1}をOKにする`}
                                 className="daily-record-save-button"
                                 disabled={!canSaveEntry}
                                 onClick={() => saveHistoryDailyEvent(index)}
@@ -20992,9 +21466,67 @@ function App() {
                     クラウドバックアップを確認中…
                   </p>
                 )}
+                {cloudSyncConflict && (
+                  <div className="cloud-sync-conflict-panel" data-collapsed={isCloudSyncConflictDismissed ? 'true' : 'false'}>
+                    <strong>☁️ 別の端末で新しいデータが見つかりました</strong>
+                    {!isCloudSyncConflictDismissed ? (
+                      <>
+                        <p>
+                          {cloudSyncConflict.saveName} は別の端末で更新されています。
+                          この端末からの自動クラウド上書きは停止中です。
+                        </p>
+                        <dl>
+                          <div>
+                            <dt>クラウド更新</dt>
+                            <dd>{formatSaveSlotDateTime(cloudSyncConflict.remoteUpdatedAt)}</dd>
+                          </div>
+                          <div>
+                            <dt>この端末の認識</dt>
+                            <dd>
+                              {cloudSyncConflict.lastKnownUpdatedAt
+                                ? formatSaveSlotDateTime(cloudSyncConflict.lastKnownUpdatedAt)
+                                : '未確認'}
+                            </dd>
+                          </div>
+                        </dl>
+                        <div className="cloud-sync-conflict-actions">
+                          <button
+                            disabled={isCloudSyncConflictResolving}
+                            onClick={() => void loadCloudConflictVersion()}
+                            type="button"
+                          >
+                            クラウド版を読み込む
+                          </button>
+                          <button
+                            disabled={isCloudSyncConflictResolving}
+                            onClick={() => void preferLocalConflictVersion()}
+                            type="button"
+                          >
+                            この端末版を優先する
+                          </button>
+                          <button
+                            disabled={isCloudSyncConflictResolving}
+                            onClick={decideCloudConflictLater}
+                            type="button"
+                          >
+                            あとで決める
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        disabled={isCloudSyncConflictResolving}
+                        onClick={() => setIsCloudSyncConflictDismissed(false)}
+                        type="button"
+                      >
+                        解決方法を選ぶ
+                      </button>
+                    )}
+                  </div>
+                )}
                 <button
                   className="cloud-backup-button"
-                  disabled={!authUser || cloudBackupStatus === 'saving'}
+                  disabled={!authUser || cloudBackupStatus === 'saving' || isCloudSyncConflictResolving}
                   onClick={() => void saveCloudBackup()}
                   type="button"
                 >

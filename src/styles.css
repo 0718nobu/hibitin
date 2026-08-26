@@ -2365,6 +2365,11 @@ h1 {
   color: #8a6517;
 }
 
+.cloud-backup-header > span[data-status='conflict'] {
+  background: #fff0d7;
+  color: #955b12;
+}
+
 .cloud-backup-header > span[data-status='failed'] {
   background: #fff0ef;
   color: #9c453c;
@@ -2401,6 +2406,75 @@ h1 {
   color: #796235;
   font-size: 0.74rem;
   font-weight: 800;
+}
+
+.cloud-sync-conflict-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgb(226 173 91 / 72%);
+  border-radius: 8px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgb(255 250 238 / 95%), rgb(255 246 226 / 88%));
+  color: #634514;
+}
+
+.cloud-sync-conflict-panel strong {
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.cloud-sync-conflict-panel p {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.cloud-sync-conflict-panel dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.cloud-sync-conflict-panel dl div {
+  border-radius: 8px;
+  padding: 6px 7px;
+  background: rgb(255 255 255 / 64%);
+}
+
+.cloud-sync-conflict-panel dt {
+  color: #7d673e;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.cloud-sync-conflict-panel dd {
+  margin: 2px 0 0;
+  color: #56390f;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.cloud-sync-conflict-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.cloud-sync-conflict-panel button {
+  min-height: 34px;
+  border: 1px solid #d19a45;
+  border-radius: 8px;
+  background: rgb(255 253 247 / 88%);
+  color: #744b0f;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.cloud-sync-conflict-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .cloud-backup-button {
@@ -6233,7 +6307,7 @@ h1 {
   position: sticky;
   top: max(8px, env(safe-area-inset-top));
   z-index: 20;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   background: rgb(255 255 249 / 96%);
   box-shadow: 0 8px 18px rgb(53 93 48 / 9%), 0 1px 0 rgb(198 222 197 / 58%);
   backdrop-filter: blur(10px);
@@ -7798,6 +7872,7 @@ h1 {
 .todo-capture-list,
 .todo-date-page {
   scroll-margin-block-start: 86px;
+  scroll-padding-block-start: 132px;
   display: grid;
   gap: 10px;
   border: 1px solid rgb(205 226 190 / 72%);
@@ -8211,6 +8286,19 @@ h1 {
 
 .todo-date-list {
   gap: 8px;
+}
+
+.todo-date-page .records-month-header {
+  top: calc(max(8px, env(safe-area-inset-top)) + 62px);
+  z-index: 19;
+  background: rgb(255 255 249 / 98%);
+  box-shadow:
+    0 8px 18px rgb(53 93 48 / 10%),
+    0 1px 0 rgb(198 222 197 / 64%);
+}
+
+.todo-date-card[data-today='true'] {
+  scroll-margin-block-start: 132px;
 }
 
 .todo-date-card[data-empty='true'] .record-day-toggle {
