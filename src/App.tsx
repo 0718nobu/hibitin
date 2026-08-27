@@ -49,7 +49,7 @@ type MenuViewName =
   | 'settings';
 type ScheduleViewName = 'list' | 'agenda' | 'today' | 'year';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
-type RecordDisplayMode = 'all' | 'withRecords';
+type RecordDisplayMode = 'all' | 'withRecords' | 'favorites';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
 type TodoViewName = 'todo' | 'today' | 'soon' | 'date' | 'folders' | 'completed';
@@ -803,6 +803,7 @@ const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
 const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
 const SLEEP_RECORDS_STORAGE_KEY = 'hibitin:sleepRecords:v1';
+const TEXT_RECORD_FAVORITES_STORAGE_KEY = 'hibitin:textRecordFavorites:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
@@ -4547,12 +4548,12 @@ function ScheduleTimeWheelPicker({
             <span>時刻</span>
             <button
               onClick={() => {
-                onChange('');
+                commitTime(selectedHourRef.current, selectedMinuteRef.current);
                 setIsOpen(false);
               }}
               type="button"
             >
-              未定
+              完了
             </button>
           </div>
           <div className="schedule-time-wheels" aria-label="時刻ホイール">
@@ -4595,6 +4596,17 @@ function ScheduleTimeWheelPicker({
               ))}
               <div className="schedule-time-wheel-spacer" aria-hidden="true" />
             </div>
+          </div>
+          <div className="schedule-time-popover-actions">
+            <button
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+              }}
+              type="button"
+            >
+              リセット
+            </button>
           </div>
         </div>
       )}
@@ -5142,7 +5154,7 @@ type AnyMemoFolderMemoItem = AnyMemoItem & {
   folderId: string;
 };
 
-type AnyMemoTabName = 'memo' | 'folders';
+type AnyMemoTabName = 'memo' | 'favorites' | 'folders';
 
 const createDailyRecordEntry = (
   text = '',
@@ -5620,18 +5632,67 @@ const formatDailyRecordSavedTime = (savedAt?: string) => {
 const loadRecordDisplayMode = (): RecordDisplayMode => {
   const savedMode = localStorage.getItem(RECORD_DISPLAY_MODE_STORAGE_KEY);
 
-  if (savedMode === 'all' || savedMode === 'withRecords') {
+  if (savedMode === 'all' || savedMode === 'withRecords' || savedMode === 'favorites') {
     return savedMode;
   }
 
   try {
     const parsedMode = JSON.parse(savedMode ?? 'null') as unknown;
 
-    return parsedMode === 'all' || parsedMode === 'withRecords' ? parsedMode : 'withRecords';
+    return parsedMode === 'all' || parsedMode === 'withRecords' || parsedMode === 'favorites'
+      ? parsedMode
+      : 'withRecords';
   } catch {
     return 'withRecords';
   }
 };
+
+const loadTextRecordFavorites = (): Record<string, boolean> => {
+  try {
+    const parsedFavorites = JSON.parse(
+      localStorage.getItem(TEXT_RECORD_FAVORITES_STORAGE_KEY) ?? '{}',
+    ) as unknown;
+
+    if (!parsedFavorites || typeof parsedFavorites !== 'object' || Array.isArray(parsedFavorites)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedFavorites as Record<string, unknown>)
+        .filter(([key, value]) => key.trim() && value === true)
+        .map(([key]) => [key, true]),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveTextRecordFavorites = (favorites: Record<string, boolean>) => {
+  const activeFavorites = Object.fromEntries(
+    Object.entries(favorites).filter(([, isFavorite]) => isFavorite),
+  );
+
+  if (Object.keys(activeFavorites).length > 0) {
+    localStorage.setItem(TEXT_RECORD_FAVORITES_STORAGE_KEY, JSON.stringify(activeFavorites));
+    return;
+  }
+
+  localStorage.removeItem(TEXT_RECORD_FAVORITES_STORAGE_KEY);
+};
+
+const getDailyTextRecordFavoriteKey = (
+  kind: Extract<RecordViewName, 'memo' | 'events'>,
+  dateKey: string,
+  index: number,
+) => `daily:${kind}:${dateKey}:${index}`;
+
+const getAnyMemoFavoriteKey = (item: Pick<AnyMemoListItem, 'id' | 'source' | 'dateKey'>) =>
+  item.source === 'legacy' && item.dateKey
+    ? `anyMemo:legacy:${item.dateKey}`
+    : `anyMemo:item:${item.id}`;
+
+const getFolderMemoFavoriteKey = (item: Pick<AnyMemoFolderMemoItem, 'id'>) =>
+  `anyMemo:folder:${item.id}`;
 
 const getDateFromKey = (dateKey: string) => {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -6775,6 +6836,10 @@ function App() {
   const [editingAnyMemoText, setEditingAnyMemoText] = useState('');
   const [expandedAnyMemoIds, setExpandedAnyMemoIds] = useState<Record<string, boolean>>({});
   const [anyMemoStatusMessage, setAnyMemoStatusMessage] = useState('');
+  const [textRecordActionFeedback, setTextRecordActionFeedback] = useState('');
+  const [textRecordFavorites, setTextRecordFavorites] = useState<Record<string, boolean>>(
+    () => loadTextRecordFavorites(),
+  );
   const [anyMemoFolders, setAnyMemoFolders] = useState<AnyMemoFolder[]>(() => loadAnyMemoFolders());
   const [anyMemoFolderItems, setAnyMemoFolderItems] = useState<AnyMemoFolderMemoItem[]>(() =>
     loadAnyMemoFolderItems(),
@@ -7600,11 +7665,21 @@ function App() {
         (entry) => entry.saved && hasMeaningfulText(entry.text),
       );
       const anyMemoText = anyMemoValue.trim();
+      const favoriteMemoEntries = savedMemoEntries.filter((_entry, index) =>
+        textRecordFavorites[getDailyTextRecordFavoriteKey('memo', dateKey, index)],
+      );
+      const favoriteEventEntries = savedEventEntries.filter((_entry, index) =>
+        textRecordFavorites[getDailyTextRecordFavoriteKey('events', dateKey, index)],
+      );
       const recordContentCount =
         recordView === 'memo'
-          ? savedMemoEntries.length
+          ? recordDisplayMode === 'favorites'
+            ? favoriteMemoEntries.length
+            : savedMemoEntries.length
           : recordView === 'events'
-            ? savedEventEntries.length
+            ? recordDisplayMode === 'favorites'
+              ? favoriteEventEntries.length
+              : savedEventEntries.length
             : recordView === 'anyMemo'
               ? anyMemoText.length > 0
                 ? 1
@@ -7622,6 +7697,8 @@ function App() {
         anyMemoText,
         dateKey,
         dateTitle,
+        favoriteEventEntries,
+        favoriteMemoEntries,
         dayKind,
         hasRecordContent,
         recordContentCount,
@@ -7642,18 +7719,35 @@ function App() {
     historySelectedDateKey,
     recordMonthDates,
     recordRevision,
+    recordDisplayMode,
     recordView,
     selectedDateKey,
     templateSettings,
+    textRecordFavorites,
     todayKey,
   ]);
-  const visibleRecordDaySummaries = recordDisplayMode === 'withRecords'
+  const visibleRecordDaySummaries = recordDisplayMode === 'withRecords' || recordDisplayMode === 'favorites'
     ? recordDaySummaries.filter((summary) => summary.hasRecordContent)
     : recordDaySummaries;
   const anyMemoListItems = useMemo(
     () => getAnyMemoListItems(anyMemoItems),
     [anyMemoItems, recordRevision],
   );
+  const favoriteAnyMemoListItems = useMemo(() => {
+    const folderItems: AnyMemoListItem[] = anyMemoFolderItems.map((item) => ({
+      ...item,
+      source: 'item',
+      hasTime: true,
+    }));
+
+    return [...anyMemoListItems, ...folderItems].filter((item) => {
+      const favoriteKey = 'folderId' in item
+        ? getFolderMemoFavoriteKey(item)
+        : getAnyMemoFavoriteKey(item);
+
+      return Boolean(textRecordFavorites[favoriteKey]);
+    });
+  }, [anyMemoFolderItems, anyMemoListItems, textRecordFavorites]);
   const sortedAnyMemoFolders = useMemo(
     () => [...anyMemoFolders].sort((first, second) =>
       Date.parse(second.updatedAt) - Date.parse(first.updatedAt),
@@ -8213,6 +8307,22 @@ function App() {
 
     return () => window.clearTimeout(timerId);
   }, [anyMemoStatusMessage]);
+
+  useEffect(() => {
+    saveTextRecordFavorites(textRecordFavorites);
+  }, [textRecordFavorites]);
+
+  useEffect(() => {
+    if (!textRecordActionFeedback) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setTextRecordActionFeedback('');
+    }, 2200);
+
+    return () => window.clearTimeout(timerId);
+  }, [textRecordActionFeedback]);
 
   useEffect(() => {
     const hasAnyCompletedQuest = getStoredCheckDateKeys().some((dateKey) =>
@@ -15402,6 +15512,107 @@ function App() {
     setRecordRevision((revision) => revision + 1);
     setEditingDailyRecord(null);
   };
+
+  const copyTextRecord = async (text: string) => {
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+      return false;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trimmedText);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = trimmedText;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.append(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+
+      setTextRecordActionFeedback('コピーしました');
+      return true;
+    } catch {
+      setTextRecordActionFeedback('コピーできませんでした');
+      return false;
+    }
+  };
+
+  const shareTextRecord = async (text: string) => {
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+      return;
+    }
+
+    try {
+      if ('share' in navigator && typeof navigator.share === 'function') {
+        await navigator.share({ text: trimmedText });
+        setTextRecordActionFeedback('共有しました');
+        return;
+      }
+
+      const copied = await copyTextRecord(trimmedText);
+      setTextRecordActionFeedback(
+        copied
+          ? 'この環境では共有機能を利用できないため、コピーしました'
+          : 'この環境では共有機能を利用できません',
+      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+
+      setTextRecordActionFeedback('共有できませんでした');
+    }
+  };
+
+  const toggleTextRecordFavorite = (favoriteKey: string) => {
+    setTextRecordFavorites((currentFavorites) => ({
+      ...currentFavorites,
+      [favoriteKey]: !currentFavorites[favoriteKey],
+    }));
+  };
+
+  const renderTextRecordActions = ({
+    favoriteKey,
+    text,
+    onEdit,
+  }: {
+    favoriteKey: string;
+    text: string;
+    onEdit: () => void;
+  }) => {
+    const isFavorite = Boolean(textRecordFavorites[favoriteKey]);
+
+    return (
+      <div className="text-record-actions" aria-label="文章操作">
+        <button onClick={() => copyTextRecord(text)} type="button">
+          コピー
+        </button>
+        <button
+          aria-pressed={isFavorite}
+          data-favorite={isFavorite ? 'true' : 'false'}
+          onClick={() => toggleTextRecordFavorite(favoriteKey)}
+          type="button"
+        >
+          {isFavorite ? '★' : '☆'}
+        </button>
+        <button onClick={() => shareTextRecord(text)} type="button">
+          共有
+        </button>
+        <button onClick={onEdit} type="button">
+          編集
+        </button>
+      </div>
+    );
+  };
+
   const renderTodayDailyRecordCard = (kind: CoreRoutineKind) => {
     const isMemo = kind === 'memo';
     const entries = isMemo ? dailyMemo : dailyEvent;
@@ -15495,6 +15706,15 @@ function App() {
                       >
                         {entry.text.trim()}
                       </button>
+                      {renderTextRecordActions({
+                        favoriteKey: getDailyTextRecordFavoriteKey(
+                          isMemo ? 'memo' : 'events',
+                          selectedDateKey,
+                          index,
+                        ),
+                        text: entry.text,
+                        onEdit: () => startDailyRecordEdit(kind, index, entry.text),
+                      })}
                       {savedTime && <time dateTime={entry.savedAt}>{savedTime}</time>}
                     </>
                   )}
@@ -15560,39 +15780,6 @@ function App() {
           coreRoutine: definition,
         }))
       : [];
-  const getSelectedChoiceQuestRoutineEntries = (): RoutineRenderEntry[] =>
-    visibleChoiceQuestDefinitions.flatMap((definition, index) => {
-      const record = selectedChoiceQuestRecords[definition.id];
-
-      if (!record?.selectedOptionId) {
-        return [];
-      }
-
-      const option = [
-        ...definition.options,
-        ...legacyChoiceQuestOptions,
-      ].find((candidate) => candidate.id === record.selectedOptionId);
-
-      if (!option) {
-        return [];
-      }
-
-      const item: RoutineItem = {
-        id: `choice-quest-${definition.id}`,
-        label: `${option.icon} ${option.label}`,
-        order: 9800 + index,
-        source: 'default',
-        createdAt: record.selectedAt ?? record.completedAt ?? new Date().toISOString(),
-        fixedKind: `choiceQuest:${definition.id}`,
-      };
-
-      return [{
-        kind: 'routine' as const,
-        key: item.id,
-        order: item.order,
-        item,
-      }];
-    });
   const getMixedRoutineEntries = (
     section: RoutineSection,
     options: { includeCoreRoutines: boolean },
@@ -15823,6 +16010,11 @@ function App() {
         </span>,
         document.body,
       )}
+      {textRecordActionFeedback && (
+        <div className="text-record-action-toast" role="status">
+          {textRecordActionFeedback}
+        </div>
+      )}
       {sleepRecordPickerDateKey && typeof document !== 'undefined' && createPortal(
         <div
           className="dialog-backdrop sleep-record-dialog-backdrop"
@@ -15837,8 +16029,13 @@ function App() {
             <div className="sleep-record-dialog-header">
               <div>
                 <h2>😴 睡眠を記録</h2>
+                <strong>昨夜はどのくらい寝られた？</strong>
                 <p>
-                  {formatQuestDateLabel(getDateFromKey(sleepRecordPickerDateKey))}の記録
+                  {(() => {
+                    const recordDate = getDateFromKey(sleepRecordPickerDateKey);
+
+                    return `${recordDate.getMonth() + 1}月${recordDate.getDate()}日の記録`;
+                  })()}
                 </p>
               </div>
               <button
@@ -17685,6 +17882,16 @@ function App() {
                   aria-label={dailyNudgeDisplayLabel}
                 >
                   <div className="daily-nudge-heading">
+                    <label className="routine-check daily-nudge-check" htmlFor="daily-nudge-check">
+                      <input
+                        aria-label={`${dailyNudgeDisplayLabel}を達成`}
+                        checked={Boolean(selectedDailyNudgeRecord?.completed)}
+                        disabled={!selectedDailyNudgeRecord}
+                        id="daily-nudge-check"
+                        onChange={() => toggleDailyNudgeCompletion(selectedDateKey)}
+                        type="checkbox"
+                      />
+                    </label>
                     <span aria-hidden="true">👉</span>
                     <div>
                       <h2>{dailyNudgeDisplayLabel}</h2>
@@ -18180,12 +18387,73 @@ function App() {
               </div>
               {page === 'today' && section.id === 'choiceQuest' && (
                 <div className="routine-subsection choice-quest-subsection">
-                  {visibleChoiceQuestDefinitions.map((choiceQuestDefinition) => {
+                  {visibleChoiceQuestDefinitions.map((choiceQuestDefinition, index) => {
                     const selectedChoiceQuestRecord =
                       selectedChoiceQuestRecords[choiceQuestDefinition.id] ?? null;
+                    const selectedChoiceOption = [
+                      ...choiceQuestDefinition.options,
+                      ...legacyChoiceQuestOptions,
+                    ].find((option) => option.id === selectedChoiceQuestRecord?.selectedOptionId);
+                    const choiceQuestItem: RoutineItem | null =
+                      selectedChoiceQuestRecord?.selectedOptionId && selectedChoiceOption
+                        ? {
+                          id: `choice-quest-${choiceQuestDefinition.id}`,
+                          label: `${selectedChoiceOption.icon} ${selectedChoiceOption.label}`,
+                          order: 9800 + index,
+                          source: 'default',
+                          createdAt:
+                            selectedChoiceQuestRecord.selectedAt ??
+                            selectedChoiceQuestRecord.completedAt ??
+                            new Date().toISOString(),
+                          fixedKind: `choiceQuest:${choiceQuestDefinition.id}`,
+                        }
+                        : null;
 
-                    if (selectedChoiceQuestRecord?.selectedOptionId) {
-                      return null;
+                    if (choiceQuestItem) {
+                      const inputId = `routine-${choiceQuestItem.id}`;
+                      const isRoutineItemChecked =
+                        isCheckMode && Boolean(selectedChoiceQuestRecord?.completed);
+
+                      return (
+                        <div
+                          className="routine-item"
+                          data-fixed="true"
+                          data-checked={isRoutineItemChecked ? 'true' : 'false'}
+                          data-section-id={section.id}
+                          key={choiceQuestItem.id}
+                        >
+                          <label className="routine-check" htmlFor={inputId}>
+                            <input
+                              checked={isRoutineItemChecked}
+                              disabled={!isCheckMode}
+                              id={inputId}
+                              onChange={() =>
+                                toggleChoiceQuestCompletion(
+                                  selectedDateKey,
+                                  choiceQuestDefinition.id,
+                                )
+                              }
+                              type="checkbox"
+                            />
+                          </label>
+                          <div className="routine-name">
+                            <span className="fixed-routine-name">
+                              <span>{choiceQuestItem.label}</span>
+                              {renderQuestInfoButton({
+                                actionLabel: '選択前に戻す',
+                                id: `today-routine-${choiceQuestItem.id}`,
+                                kind: 'fixed',
+                                onSupportClick: () =>
+                                  resetChoiceQuestSelection(
+                                    selectedDateKey,
+                                    choiceQuestDefinition.id,
+                                  ),
+                                supportLabel: getFixedQuestSupportLabel(choiceQuestItem.fixedKind),
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      );
                     }
 
                     return (
@@ -18195,6 +18463,21 @@ function App() {
                         aria-label={`${choiceQuestDefinition.title} ${choiceQuestDefinition.id}`}
                         key={choiceQuestDefinition.id}
                       >
+                        <div className="choice-quest-heading">
+                          <label
+                            className="routine-check choice-quest-placeholder-check"
+                            htmlFor={`choice-quest-placeholder-${choiceQuestDefinition.id}`}
+                          >
+                            <input
+                              aria-label={`選択クエスト${index + 1}は選択後に達成できます`}
+                              checked={false}
+                              id={`choice-quest-placeholder-${choiceQuestDefinition.id}`}
+                              onChange={() => undefined}
+                              type="checkbox"
+                            />
+                          </label>
+                          <h3>{choiceQuestDefinition.title}{index + 1}</h3>
+                        </div>
                         <div className="choice-quest-options" aria-label="選択クエスト候補">
                           {choiceQuestDefinition.options.map((option) => {
                             const isSelected =
@@ -18223,61 +18506,6 @@ function App() {
                       </section>
                     );
                   })}
-                  <div className="routine-items">
-                    {getSelectedChoiceQuestRoutineEntries().map((entry) => {
-                      if (entry.kind !== 'routine') {
-                        return null;
-                      }
-
-                      const item = entry.item;
-                      const choiceQuestId = getChoiceQuestIdFromFixedKind(item.fixedKind);
-                      const choiceQuestRecord = choiceQuestId
-                        ? selectedChoiceQuestRecords[choiceQuestId]
-                        : null;
-                      const inputId = `routine-${item.id}`;
-                      const isRoutineItemChecked =
-                        isCheckMode && Boolean(choiceQuestRecord?.completed);
-
-                      if (!choiceQuestId) {
-                        return null;
-                      }
-
-                      return (
-                        <div
-                          className="routine-item"
-                          data-fixed="true"
-                          data-checked={isRoutineItemChecked ? 'true' : 'false'}
-                          data-section-id={section.id}
-                          key={entry.key}
-                        >
-                          <label className="routine-check" htmlFor={inputId}>
-                            <input
-                              checked={isRoutineItemChecked}
-                              disabled={!isCheckMode}
-                              id={inputId}
-                              onChange={() =>
-                                toggleChoiceQuestCompletion(selectedDateKey, choiceQuestId)
-                              }
-                              type="checkbox"
-                            />
-                          </label>
-                          <div className="routine-name">
-                            <span className="fixed-routine-name">
-                              <span>{item.label}</span>
-                              {renderQuestInfoButton({
-                                actionLabel: '選択前に戻す',
-                                id: `today-routine-${item.id}`,
-                                kind: 'fixed',
-                                onSupportClick: () =>
-                                  resetChoiceQuestSelection(selectedDateKey, choiceQuestId),
-                                supportLabel: getFixedQuestSupportLabel(item.fixedKind),
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               )}
               {page === 'today' && section.id === 'sleep' && (
@@ -18290,6 +18518,16 @@ function App() {
                   aria-label={nightlyNudgeDisplayLabel}
                 >
                   <div className="daily-nudge-heading">
+                    <label className="routine-check daily-nudge-check" htmlFor="nightly-nudge-check">
+                      <input
+                        aria-label={`${nightlyNudgeDisplayLabel}を達成`}
+                        checked={Boolean(selectedNightlyNudgeRecord?.completed)}
+                        disabled={!selectedNightlyNudgeRecord}
+                        id="nightly-nudge-check"
+                        onChange={() => toggleNightlyNudgeCompletion(selectedDateKey)}
+                        type="checkbox"
+                      />
+                    </label>
                     <span aria-hidden="true">🌙</span>
                     <div>
                       <h2>{nightlyNudgeDisplayLabel}</h2>
@@ -20137,7 +20375,8 @@ function App() {
           >
             <div className="quick-memo-tabs" aria-label="メモ表示切り替え">
               {([
-                ['memo', 'メモ'],
+                ['memo', '一覧'],
+                ['favorites', 'お気に入り'],
                 ['folders', 'フォルダ'],
               ] as const).map(([tabName, label]) => (
                 <button
@@ -20321,6 +20560,11 @@ function App() {
                             >
                               {item.text.trim()}
                             </button>
+                            {renderTextRecordActions({
+                              favoriteKey: getAnyMemoFavoriteKey(item),
+                              text: item.text,
+                              onEdit: () => startEditingAnyMemo(item),
+                            })}
                             {isLongMemo && (
                               <button
                                 className="quick-memo-expand-button"
@@ -20339,6 +20583,103 @@ function App() {
               )}
             </section>
             </>
+            )}
+
+            {anyMemoTab === 'favorites' && (
+              <section className="quick-memo-list-section" aria-label="お気に入りメモ">
+                <div className="quick-memo-list-heading">
+                  <h3>お気に入り</h3>
+                  <span>{favoriteAnyMemoListItems.length}件</span>
+                </div>
+                {favoriteAnyMemoListItems.length === 0 ? (
+                  <p className="quick-memo-empty">お気に入りはまだありません。</p>
+                ) : (
+                  <div className="quick-memo-list">
+                    {favoriteAnyMemoListItems.map((item) => {
+                      const isFolderMemo = 'folderId' in item;
+                      const folderMemoItem = isFolderMemo ? item as AnyMemoFolderMemoItem : null;
+                      const isEditing = editingAnyMemoId === item.id;
+                      const favoriteKey = folderMemoItem
+                        ? getFolderMemoFavoriteKey(folderMemoItem)
+                        : getAnyMemoFavoriteKey(item);
+
+                      return (
+                        <article
+                          className="quick-memo-item"
+                          data-expanded="true"
+                          key={favoriteKey}
+                        >
+                          <div className="quick-memo-item-meta">
+                            <time dateTime={item.createdAt}>
+                              {formatAnyMemoTimestamp(item, today)}
+                            </time>
+                          </div>
+                          {isEditing ? (
+                            <div className="quick-memo-edit">
+                              <textarea
+                                aria-label="メモ本文を編集"
+                                onChange={(event) => {
+                                  setEditingAnyMemoText(event.target.value);
+                                  adjustTextareaHeight(event.currentTarget);
+                                }}
+                                onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                                ref={adjustTextareaHeight}
+                                rows={3}
+                                value={editingAnyMemoText}
+                              />
+                              <div className="quick-memo-edit-actions">
+                                <button onClick={cancelEditingAnyMemo} type="button">
+                                  キャンセル
+                                </button>
+                                <button
+                                  disabled={!hasMeaningfulText(editingAnyMemoText)}
+                                  onClick={() => {
+                                    if (folderMemoItem) {
+                                      saveEditingFolderMemo(folderMemoItem);
+                                    } else {
+                                      saveEditingAnyMemo(item);
+                                    }
+                                  }}
+                                  type="button"
+                                >
+                                  保存
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                className="quick-memo-text"
+                                onClick={() => {
+                                  if (folderMemoItem) {
+                                    startEditingFolderMemo(folderMemoItem);
+                                  } else {
+                                    startEditingAnyMemo(item);
+                                  }
+                                }}
+                                type="button"
+                              >
+                                {item.text.trim()}
+                              </button>
+                              {renderTextRecordActions({
+                                favoriteKey,
+                                text: item.text,
+                                onEdit: () => {
+                                  if (folderMemoItem) {
+                                    startEditingFolderMemo(folderMemoItem);
+                                  } else {
+                                    startEditingAnyMemo(item);
+                                  }
+                                },
+                              })}
+                            </>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             )}
 
             {anyMemoTab === 'folders' && !selectedAnyMemoFolder && (
@@ -20758,6 +21099,11 @@ function App() {
                                 >
                                   {item.text.trim()}
                                 </button>
+                                {renderTextRecordActions({
+                                  favoriteKey: getFolderMemoFavoriteKey(item),
+                                  text: item.text,
+                                  onEdit: () => startEditingFolderMemo(item),
+                                })}
                                 {isLongMemo && (
                                   <button
                                     className="quick-memo-expand-button"
@@ -20813,6 +21159,7 @@ function App() {
                 {([
                   ['all', '一覧'],
                   ['withRecords', '記録あり'],
+                  ['favorites', 'お気に入り'],
                 ] as const).map(([mode, label]) => (
                   <button
                     aria-pressed={recordDisplayMode === mode}
@@ -20828,13 +21175,19 @@ function App() {
             </div>
             <div className="records-day-list">
               {visibleRecordDaySummaries.length === 0 && (
-                <p className="records-empty-filter">この月の記録はまだありません</p>
+                <p className="records-empty-filter">
+                  {recordDisplayMode === 'favorites'
+                    ? 'お気に入りはまだありません'
+                    : 'この月の記録はまだありません'}
+                </p>
               )}
               {visibleRecordDaySummaries.map(({
                 advancedEntries,
                 anyMemoText,
                 dateKey,
                 dateTitle,
+                favoriteEventEntries,
+                favoriteMemoEntries,
                 dayKind,
                 hasRecordContent,
                 recordContentCount,
@@ -20871,11 +21224,25 @@ function App() {
                           <div className="record-read-section">
                             <h3>✍️ ひとこと</h3>
                             <div className="record-read-list">
-                              {savedMemoEntries.map((entry, index) => (
-                                <p key={`record-read-memo-${dateKey}-${index}`}>
-                                  {entry.text.trim()}
-                                </p>
-                              ))}
+                              {savedMemoEntries
+                                .map((entry, index) => ({ entry, index }))
+                                .filter(({ entry }) =>
+                                  recordDisplayMode !== 'favorites' ||
+                                  favoriteMemoEntries.includes(entry),
+                                )
+                                .map(({ entry, index }) => (
+                                  <article
+                                    className="record-read-text-item"
+                                    key={`record-read-memo-${dateKey}-${index}`}
+                                  >
+                                    <p>{entry.text.trim()}</p>
+                                    {renderTextRecordActions({
+                                      favoriteKey: getDailyTextRecordFavoriteKey('memo', dateKey, index),
+                                      text: entry.text,
+                                      onEdit: () => setSelectedRecordDate(recordDate),
+                                    })}
+                                  </article>
+                                ))}
                             </div>
                           </div>
                         )}
@@ -20883,11 +21250,25 @@ function App() {
                           <div className="record-read-section">
                             <h3>📅 記録</h3>
                             <div className="record-read-list">
-                              {savedEventEntries.map((entry, index) => (
-                                <p key={`record-read-events-${dateKey}-${index}`}>
-                                  {entry.text.trim()}
-                                </p>
-                              ))}
+                              {savedEventEntries
+                                .map((entry, index) => ({ entry, index }))
+                                .filter(({ entry }) =>
+                                  recordDisplayMode !== 'favorites' ||
+                                  favoriteEventEntries.includes(entry),
+                                )
+                                .map(({ entry, index }) => (
+                                  <article
+                                    className="record-read-text-item"
+                                    key={`record-read-events-${dateKey}-${index}`}
+                                  >
+                                    <p>{entry.text.trim()}</p>
+                                    {renderTextRecordActions({
+                                      favoriteKey: getDailyTextRecordFavoriteKey('events', dateKey, index),
+                                      text: entry.text,
+                                      onEdit: () => setSelectedRecordDate(recordDate),
+                                    })}
+                                  </article>
+                                ))}
                             </div>
                           </div>
                         )}

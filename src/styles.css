@@ -7068,7 +7068,7 @@ h1 {
 .records-display-toggle {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   border: 1px solid rgb(197 222 184 / 72%);
   border-radius: 999px;
@@ -7121,7 +7121,7 @@ h1 {
 
 .quick-memo-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   border: 1px solid rgb(205 226 190 / 68%);
   border-radius: 14px;
@@ -7865,9 +7865,15 @@ h1 {
   gap: 4px;
 }
 
-.record-read-list p + p {
+.record-read-list p + p,
+.record-read-text-item + .record-read-text-item {
   padding-top: 5px;
   border-top: 1px dashed rgb(185 207 178 / 58%);
+}
+
+.record-read-text-item {
+  display: grid;
+  gap: 5px;
 }
 
 .record-read-todos {
@@ -9550,11 +9556,11 @@ h1 {
 
 .schedule-time-popover-header button {
   min-height: 30px;
-  border: 1px solid rgb(197 218 187 / 86%);
+  border: 1px solid rgb(48 150 88 / 36%);
   border-radius: 999px;
   padding: 4px 10px;
-  background: rgb(255 255 255 / 86%);
-  color: #526659;
+  background: linear-gradient(180deg, #f4fff4, #dff7e4);
+  color: #1f6c43;
   cursor: pointer;
   font: inherit;
   font-size: 0.76rem;
@@ -9640,6 +9646,24 @@ h1 {
   color: #174f36;
   font-size: 1.2rem;
   font-weight: 1000;
+}
+
+.schedule-time-popover-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.schedule-time-popover-actions button {
+  min-height: 28px;
+  border: 1px solid rgb(197 218 187 / 70%);
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgb(255 255 255 / 62%);
+  color: #66756d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 850;
 }
 
 .schedule-date-wheel-field {
@@ -10101,7 +10125,7 @@ h1 {
 .daily-nudge-heading {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
 }
 
 .daily-nudge-heading > span {
@@ -10112,6 +10136,15 @@ h1 {
   border-radius: 10px;
   background: #fff0b7;
   font-size: 1.08rem;
+}
+
+.daily-nudge-check input {
+  width: 20px;
+  height: 20px;
+}
+
+.daily-nudge-check input:disabled {
+  opacity: 0.4;
 }
 
 .daily-nudge-heading h2,
@@ -10251,9 +10284,18 @@ h1 {
 
 .choice-quest-heading {
   display: flex;
-  align-items: start;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+}
+
+.choice-quest-placeholder-check {
+  cursor: default;
+}
+
+.choice-quest-placeholder-check input {
+  width: 18px;
+  height: 18px;
 }
 
 .choice-quest-heading h3,
@@ -11472,6 +11514,50 @@ h1 {
   font-weight: 750;
 }
 
+.text-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-top: 1px;
+}
+
+.text-record-actions button {
+  min-height: 28px;
+  border: 1px solid rgb(198 218 197 / 56%);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgb(255 255 255 / 56%);
+  color: #64746b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.text-record-actions button[data-favorite='true'] {
+  border-color: rgb(239 195 69 / 44%);
+  background: rgb(255 247 212 / 70%);
+  color: #986800;
+}
+
+.text-record-action-toast {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 120;
+  border: 1px solid rgb(113 175 136 / 38%);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgb(255 255 255 / 94%);
+  color: #275e42;
+  font-size: 0.8rem;
+  font-weight: 900;
+  box-shadow: 0 10px 26px rgb(34 89 54 / 14%);
+}
+
 .today-record-edit-row {
   display: grid;
   gap: 8px;
@@ -11765,6 +11851,7 @@ h1 {
 }
 
 .sleep-record-dialog-header h2,
+.sleep-record-dialog-header strong,
 .sleep-record-dialog-header p {
   margin: 0;
 }
@@ -11775,10 +11862,19 @@ h1 {
   font-weight: 1000;
 }
 
+.sleep-record-dialog-header strong {
+  display: block;
+  margin-top: 10px;
+  color: #193c35;
+  font-size: 1.18rem;
+  font-weight: 1000;
+  line-height: 1.35;
+}
+
 .sleep-record-dialog-header p {
-  margin-top: 3px;
-  color: #687770;
-  font-size: 0.8rem;
+  margin-top: 5px;
+  color: #7a8781;
+  font-size: 0.76rem;
   font-weight: 800;
 }
 
