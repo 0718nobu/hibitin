@@ -32,7 +32,7 @@ import {
 type RoutineSource = 'default' | 'user' | 'ai';
 type TemplateKind = 'normal' | 'holiday';
 type GameMode = 'player' | 'developer';
-type PageName = 'today' | 'history' | 'todos' | 'schedule' | 'library';
+type PageName = 'today' | 'history' | 'todos' | 'schedule' | 'memo' | 'library';
 type MenuViewName =
   | 'list'
   | 'schedule'
@@ -241,6 +241,7 @@ const mainPageOptions: { key: PageName; icon: string; label: string }[] = [
   { key: 'history', icon: '📒', label: 'スタンプ帳' },
   { key: 'todos', icon: '✅', label: 'やること' },
   { key: 'schedule', icon: '📅', label: 'スケジュール' },
+  { key: 'memo', icon: '📝', label: 'メモ' },
   { key: 'library', icon: '🎒', label: 'かばん' },
 ];
 
@@ -313,7 +314,13 @@ type RoutineItem = {
   timerSeconds?: number;
 };
 
-type FixedQuestKind = 'wake' | 'sleep' | 'scheduleCheck' | 'todoCheck' | `choiceQuest:${string}`;
+type FixedQuestKind =
+  | 'wake'
+  | 'sleep'
+  | 'sleepRecord'
+  | 'scheduleCheck'
+  | 'todoCheck'
+  | `choiceQuest:${string}`;
 
 type RoutineSection = {
   id: string;
@@ -570,6 +577,7 @@ type DailyNudgeCandidate = {
   text: string;
   completionMessage: string;
   enabled: boolean;
+  isFavorite: boolean;
   order: number;
   createdAt: string;
   updatedAt?: string;
@@ -582,6 +590,7 @@ type DailyQuestMasterRow = {
   completion_message: string | null;
   category: string | null;
   is_active: boolean | null;
+  is_favorite: boolean | null;
   sort_order: number | null;
   created_at: string | null;
   updated_at: string | null;
@@ -727,7 +736,39 @@ type QuestManagementItem = {
     targetDays: number;
     rate: number | null;
   };
+  sleepAverages?: {
+    last7Days: number | null;
+    last30Days: number | null;
+  };
   editableSlotNumber?: number;
+};
+
+type SleepDurationOption = {
+  id: string;
+  label: string;
+  minutes: number;
+};
+
+type SleepRecord = {
+  optionId: string;
+  label: string;
+  minutes: number;
+  recordedAt: string;
+  updatedAt: string;
+};
+
+type SleepRecords = Record<string, SleepRecord>;
+
+type MonthlySleepRecordEntry = {
+  date: Date;
+  dateKey: string;
+  record: SleepRecord;
+};
+
+type MonthlySleepStats = {
+  averageMinutes: number | null;
+  recordedDays: number;
+  entries: MonthlySleepRecordEntry[];
 };
 
 type MasteryProgressState = {
@@ -761,6 +802,7 @@ const NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:nightlyQuestMasterCache:
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
 const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
+const SLEEP_RECORDS_STORAGE_KEY = 'hibitin:sleepRecords:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
@@ -1535,8 +1577,27 @@ const defaultRhythmSettings: RhythmSettings = {
   holiday: { ...defaultRhythmConfig },
 };
 
+const FIXED_SLEEP_RECORD_ID = 'fixed-sleep-record';
+const sleepDurationOptions: SleepDurationOption[] = [
+  { id: 'under-4-hours', label: '4時間未満', minutes: 210 },
+  { id: '4-hours', label: '4時間', minutes: 240 },
+  { id: '4-hours-30-minutes', label: '4時間30分', minutes: 270 },
+  { id: '5-hours', label: '5時間', minutes: 300 },
+  { id: '5-hours-30-minutes', label: '5時間30分', minutes: 330 },
+  { id: '6-hours', label: '6時間', minutes: 360 },
+  { id: '6-hours-30-minutes', label: '6時間30分', minutes: 390 },
+  { id: '7-hours', label: '7時間', minutes: 420 },
+  { id: '7-hours-30-minutes', label: '7時間30分', minutes: 450 },
+  { id: '8-hours', label: '8時間', minutes: 480 },
+  { id: '8-hours-30-minutes', label: '8時間30分', minutes: 510 },
+  { id: '9-hours', label: '9時間', minutes: 540 },
+  { id: '9-hours-30-minutes', label: '9時間30分', minutes: 570 },
+  { id: '10-hours-plus', label: '10時間以上', minutes: 600 },
+];
+
 const fixedRoutineIds = new Set([
   'morning-wake-up',
+  FIXED_SLEEP_RECORD_ID,
   'fixed-schedule-check',
   'fixed-todo-check',
   'night-sleep',
@@ -1696,6 +1757,7 @@ const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   text,
   completionMessage,
   enabled: true,
+  isFavorite: false,
   order: (index + 1) * 10,
   createdAt: '2026-07-11T00:00:00.000Z',
 }));
@@ -1832,6 +1894,7 @@ const defaultNightlyNudgeCandidates: DailyNudgeCandidate[] = [
   text,
   completionMessage,
   enabled: true,
+  isFavorite: false,
   order: (index + 1) * 10,
   createdAt: '2026-08-07T00:00:00.000Z',
 }));
@@ -2031,6 +2094,10 @@ const getQuestManagementFixedIcon = (itemId: string) => {
     return '🚶';
   }
 
+  if (itemId === FIXED_SLEEP_RECORD_ID) {
+    return '😴';
+  }
+
   if (itemId === 'night-sleep') {
     return '🛏';
   }
@@ -2053,6 +2120,10 @@ const getQuestManagementFixedTitle = (itemStats: MasteryStats) => {
 
   if (itemStats.itemId === 'core:daily-events') {
     return '今日の記録';
+  }
+
+  if (itemStats.itemId === FIXED_SLEEP_RECORD_ID) {
+    return '睡眠を記録';
   }
 
   return itemStats.label.replace(/^[^\p{L}\p{N}]+/u, '').trim() || itemStats.label;
@@ -2462,6 +2533,7 @@ const normalizeDailyNudgeCandidate = (
         ? candidate.completionMessage
         : defaultDailyNudgeCompletionMessage,
     enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : true,
+    isFavorite: typeof candidate.isFavorite === 'boolean' ? candidate.isFavorite : false,
     order: Number.isFinite(Number(candidate.order))
       ? Number(candidate.order)
       : (index + 1) * 10,
@@ -2482,10 +2554,20 @@ const mapDailyQuestMasterRowToCandidate = (
   text: row.prompt,
   completionMessage: row.completion_message?.trim() || fallbackCompletionMessage,
   enabled: row.is_active ?? true,
+  isFavorite: row.is_favorite ?? false,
   order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : (index + 1) * 10,
   createdAt: row.created_at ?? new Date().toISOString(),
   updatedAt: row.updated_at ?? undefined,
 });
+
+const sortDailyNudgeAdminCandidates = (candidates: DailyNudgeCandidate[]) =>
+  [...candidates].sort((first, second) => {
+    if (first.isFavorite !== second.isFavorite) {
+      return first.isFavorite ? -1 : 1;
+    }
+
+    return first.order - second.order;
+  });
 
 const loadQuestMasterCache = (
   storageKey: string,
@@ -3797,6 +3879,143 @@ const getDailyTodosStorageKey = (date: Date) => `hibitin:todos:${getDateKey(date
 const getDailyAnyMemoStorageKey = (date: Date) => `hibitin:anyMemo:${getDateKey(date)}`;
 const getDailyScheduleStorageKey = (date: Date) => `hibitin:schedule:${getDateKey(date)}`;
 
+const normalizeSleepRecords = (records: unknown): SleepRecords => {
+  if (!records || typeof records !== 'object' || Array.isArray(records)) {
+    return {};
+  }
+
+  return Object.entries(records as Record<string, unknown>).reduce<SleepRecords>(
+    (normalizedRecords, [dateKey, rawRecord]) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        return normalizedRecords;
+      }
+
+      if (!rawRecord || typeof rawRecord !== 'object' || Array.isArray(rawRecord)) {
+        return normalizedRecords;
+      }
+
+      const parsedRecord = rawRecord as Partial<SleepRecord>;
+      const option = sleepDurationOptions.find((candidate) => candidate.id === parsedRecord.optionId);
+      const minutes = Number(parsedRecord.minutes);
+
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        return normalizedRecords;
+      }
+
+      normalizedRecords[dateKey] = {
+        optionId: option?.id ?? 'custom',
+        label:
+          typeof parsedRecord.label === 'string' && parsedRecord.label.trim()
+            ? parsedRecord.label.trim()
+            : option?.label ?? formatSleepDurationAverage(minutes),
+        minutes,
+        recordedAt:
+          typeof parsedRecord.recordedAt === 'string'
+            ? parsedRecord.recordedAt
+            : new Date().toISOString(),
+        updatedAt:
+          typeof parsedRecord.updatedAt === 'string'
+            ? parsedRecord.updatedAt
+            : new Date().toISOString(),
+      };
+
+      return normalizedRecords;
+    },
+    {},
+  );
+};
+
+const loadSleepRecords = (): SleepRecords => {
+  const savedRecords = localStorage.getItem(SLEEP_RECORDS_STORAGE_KEY);
+
+  if (!savedRecords) {
+    return {};
+  }
+
+  try {
+    return normalizeSleepRecords(JSON.parse(savedRecords));
+  } catch {
+    return {};
+  }
+};
+
+const formatSleepDurationAverage = (minutes: number | null) => {
+  if (minutes === null || !Number.isFinite(minutes)) {
+    return '記録なし';
+  }
+
+  const roundedMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainingMinutes = roundedMinutes % 60;
+
+  return remainingMinutes === 0
+    ? `${hours}時間`
+    : `${hours}時間${remainingMinutes}分`;
+};
+
+const calculateAverageSleepMinutes = (
+  records: SleepRecords,
+  todayKey: string,
+  dayCount: number,
+) => {
+  const todayDate = getDateFromKey(todayKey);
+  const sleepMinutes: number[] = [];
+
+  for (let dayOffset = dayCount - 1; dayOffset >= 0; dayOffset -= 1) {
+    const dateKey = getDateKey(addDays(todayDate, -dayOffset));
+    const minutes = records[dateKey]?.minutes;
+
+    if (Number.isFinite(minutes) && minutes > 0) {
+      sleepMinutes.push(minutes);
+    }
+  }
+
+  if (sleepMinutes.length === 0) {
+    return null;
+  }
+
+  return sleepMinutes.reduce((total, minutes) => total + minutes, 0) / sleepMinutes.length;
+};
+
+const getMonthlySleepStats = (records: SleepRecords, monthDate: Date): MonthlySleepStats => {
+  const monthStart = getMonthStart(monthDate);
+  const year = monthStart.getFullYear();
+  const monthIndex = monthStart.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const entries = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(year, monthIndex, index + 1);
+    const dateKey = getDateKey(date);
+    const record = records[dateKey];
+
+    if (!record || !Number.isFinite(record.minutes) || record.minutes <= 0) {
+      return null;
+    }
+
+    return {
+      date,
+      dateKey,
+      record,
+    };
+  })
+    .filter((entry): entry is MonthlySleepRecordEntry => Boolean(entry))
+    .reverse();
+
+  if (entries.length === 0) {
+    return {
+      averageMinutes: null,
+      recordedDays: 0,
+      entries,
+    };
+  }
+
+  return {
+    averageMinutes:
+      entries.reduce((total, entry) => total + entry.record.minutes, 0) / entries.length,
+    recordedDays: entries.length,
+    entries,
+  };
+};
+
 type DailyTodoItem = {
   id: string;
   text: string;
@@ -3810,6 +4029,7 @@ type ManagedTodoItem = {
   text: string;
   status: TodoStatus;
   dueDate?: string;
+  isSoon?: boolean;
   folderId?: string;
   completed: boolean;
   createdAt: string;
@@ -3861,6 +4081,8 @@ type TodoFloatingMenuPosition = {
 };
 type TodoDraftMeta = {
   dueDate?: string;
+  status?: ActiveTodoStatus;
+  isSoon?: boolean;
   folderId?: string;
 };
 
@@ -4457,7 +4679,7 @@ const isActiveTodoStatus = (value: TodoStatus): value is ActiveTodoStatus =>
 const createManagedTodoItem = (
   text = '',
   status: TodoStatus = 'today',
-  options: Partial<Pick<ManagedTodoItem, 'id' | 'dueDate' | 'folderId' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus' | 'pendingReview'>> = {},
+  options: Partial<Pick<ManagedTodoItem, 'id' | 'dueDate' | 'isSoon' | 'folderId' | 'completed' | 'createdAt' | 'updatedAt' | 'completedAt' | 'originalStatus' | 'pendingReview'>> = {},
 ): ManagedTodoItem => {
   const timestamp = new Date().toISOString();
   const completed = status === 'completed' || Boolean(options.completed);
@@ -4473,6 +4695,7 @@ const createManagedTodoItem = (
     text,
     status,
     ...(options.dueDate ? { dueDate: options.dueDate } : {}),
+    ...(status === 'soon' && options.isSoon ? { isSoon: true } : {}),
     ...(options.folderId ? { folderId: options.folderId } : {}),
     completed,
     createdAt: options.createdAt ?? timestamp,
@@ -4505,6 +4728,7 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
         typeof parsedTodo.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsedTodo.dueDate)
           ? parsedTodo.dueDate
           : undefined;
+      const isSoon = parsedTodo.isSoon === true;
       const folderId =
         typeof parsedTodo.folderId === 'string' && parsedTodo.folderId.trim()
           ? parsedTodo.folderId
@@ -4548,6 +4772,7 @@ const normalizeManagedTodos = (todos: unknown): ManagedTodos => {
             : createManagedTodoId(),
         completed: status === 'completed' || Boolean(parsedTodo.completed),
         dueDate,
+        isSoon,
         folderId,
         createdAt,
         updatedAt,
@@ -5656,16 +5881,20 @@ const createFixedRoutineItem = (
     ? 'morning-wake-up'
     : kind === 'sleep'
       ? 'night-sleep'
-      : kind === 'scheduleCheck'
-        ? 'fixed-schedule-check'
-        : 'fixed-todo-check',
+      : kind === 'sleepRecord'
+        ? FIXED_SLEEP_RECORD_ID
+        : kind === 'scheduleCheck'
+          ? 'fixed-schedule-check'
+          : 'fixed-todo-check',
   label: kind === 'wake'
     ? '行動開始'
     : kind === 'sleep'
       ? 'ベッドイン'
-      : kind === 'scheduleCheck'
-        ? '📅 スケジュールをチェック'
-        : '✅ やることを眺める',
+      : kind === 'sleepRecord'
+        ? '😴 睡眠を記録'
+        : kind === 'scheduleCheck'
+          ? '📅 スケジュールをチェック'
+          : '✅ やることを眺める',
   order,
   source: 'default',
   createdAt: '2026-06-01T00:00:00.000Z',
@@ -5701,6 +5930,7 @@ const buildDisplaySections = (
       }
 
       if (section.id === rhythmConfig.startSection) {
+        fixedItems.push(createFixedRoutineItem('sleepRecord', '', -13));
         fixedItems.push(createFixedRoutineItem('scheduleCheck', '', -12));
         fixedItems.push(createFixedRoutineItem('todoCheck', '', -11));
       }
@@ -5726,12 +5956,18 @@ const buildTodayRoutineRenderSections = (sections: RoutineSection[]): RoutineSec
   const wakeItem = sections
     .flatMap((section) => section.items)
     .find((item) => item.fixedKind === 'wake');
+  const sleepRecordItem = sections
+    .flatMap((section) => section.items)
+    .find((item) => item.fixedKind === 'sleepRecord');
   const sleepItem = sections
     .flatMap((section) => section.items)
     .find((item) => item.fixedKind === 'sleep');
   const withoutWakeSleep = sections.map((section) => ({
     ...section,
-    items: section.items.filter((item) => item.fixedKind !== 'wake' && item.fixedKind !== 'sleep'),
+    items: section.items.filter((item) =>
+      item.fixedKind !== 'wake' &&
+      item.fixedKind !== 'sleepRecord' &&
+      item.fixedKind !== 'sleep'),
   }));
   const renderSections: RoutineSection[] = [];
 
@@ -5741,7 +5977,9 @@ const buildTodayRoutineRenderSections = (sections: RoutineSection[]): RoutineSec
         id: 'wake',
         title: '起床',
         order: section.order - 1,
-        items: [wakeItem],
+        items: [wakeItem, sleepRecordItem].filter(
+          (item): item is RoutineItem => Boolean(item),
+        ),
       });
     }
 
@@ -6068,6 +6306,7 @@ const createNewGameSaveBackup = (): BackupFile => ({
       [DAILY_NUDGE_RECORDS_STORAGE_KEY]: {},
       [NIGHTLY_NUDGE_RECORDS_STORAGE_KEY]: {},
       [CHOICE_QUEST_RECORDS_STORAGE_KEY]: {},
+      [SLEEP_RECORDS_STORAGE_KEY]: {},
       [GAME_MODE_STORAGE_KEY]: 'player',
       [GAME_BALANCE_STORAGE_KEY]: defaultGameBalanceSettings,
       [PLAYER_ECONOMY_STORAGE_KEY]: createDefaultPlayerEconomy(),
@@ -6265,6 +6504,7 @@ const getPointTargetKind = (
   }
 
   if (
+    item.fixedKind === 'sleepRecord' ||
     item.fixedKind === 'scheduleCheck' ||
     item.fixedKind === 'todoCheck' ||
     isChoiceQuestFixedKind(item.fixedKind)
@@ -6467,6 +6707,8 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
+  const [isSleepRecordDetailOpen, setIsSleepRecordDetailOpen] = useState(false);
+  const [sleepRecordMonth, setSleepRecordMonth] = useState(() => getMonthStart(today));
   const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
   const [scheduleYear, setScheduleYear] = useState(() => today.getFullYear());
   const [scheduleView, setScheduleView] = useState<ScheduleViewName>(INITIAL_SCHEDULE_VIEW);
@@ -6604,6 +6846,11 @@ function App() {
   );
   const [choiceQuestRecords, setChoiceQuestRecords] = useState<ChoiceQuestRecords>(() =>
     loadChoiceQuestRecords(),
+  );
+  const [sleepRecords, setSleepRecords] = useState<SleepRecords>(() => loadSleepRecords());
+  const [sleepRecordPickerDateKey, setSleepRecordPickerDateKey] = useState<string | null>(null);
+  const [sleepRecordDraftOptionId, setSleepRecordDraftOptionId] = useState<string>(
+    sleepDurationOptions[6]?.id ?? '',
   );
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile>(() => loadPlayerProfile());
@@ -6880,8 +7127,10 @@ function App() {
   const isLibraryDetailView = page === 'library' && menuView !== 'list';
   const libraryRecordView = libraryRecordViewMap[menuView] ?? null;
   const isLibraryRecordView = page === 'library' && Boolean(libraryRecordView);
+  const isMainMemoView = page === 'memo';
+  const isRecordView = isLibraryRecordView || isMainMemoView;
   const isLibraryAchievementsView = isLibraryRecordView && recordView === 'achievements';
-  const isLibraryAnyMemoView = isLibraryRecordView && recordView === 'anyMemo';
+  const isLibraryAnyMemoView = isRecordView && recordView === 'anyMemo';
   const isAnyMemoFolderDetailView = isLibraryAnyMemoView && Boolean(selectedAnyMemoFolderId);
   const isTodayScheduleView = isMenuScheduleView;
   const isTodayTodoView = isMenuTodoView;
@@ -6949,6 +7198,7 @@ function App() {
     .filter((record) => record.completed).length;
   const nightlyNudgeDisplayCount =
     nightlyNudgeCompletedTotal + (selectedNightlyNudgeRecord?.completed ? 0 : 1);
+  const selectedSleepRecord = sleepRecords[selectedDateKey] ?? null;
   const selectedChoiceQuestRecords = choiceQuestRecords[selectedDateKey] ?? {};
   const visibleChoiceQuestDefinitions = choiceQuestDefinitions;
   const selectedChoiceQuestCompletedCount = visibleChoiceQuestDefinitions.filter(
@@ -7160,9 +7410,17 @@ function App() {
           todayKey,
           (date) => isFixedQuestCompletedOnDate(itemStats.itemId, date),
         ),
+        ...(itemStats.itemId === FIXED_SLEEP_RECORD_ID
+          ? {
+              sleepAverages: {
+                last7Days: calculateAverageSleepMinutes(sleepRecords, todayKey, 7),
+                last30Days: calculateAverageSleepMinutes(sleepRecords, todayKey, 30),
+              },
+            }
+          : {}),
       }));
     },
-    [fixedQuestMasteryStats, todayKey],
+    [fixedQuestMasteryStats, sleepRecords, todayKey],
   );
   const questManagementChoiceItems = useMemo<QuestManagementItem[]>(() => {
     const firstDateKey =
@@ -7674,6 +7932,15 @@ function App() {
       total: items.reduce((total, item) => total + item.count, 0),
     };
   }, [completionCalendarDays]);
+  const calendarMonthSleepStats = useMemo(
+    () => getMonthlySleepStats(sleepRecords, calendarMonth),
+    [calendarMonth, sleepRecords],
+  );
+  const sleepRecordMonthLabel = monthFormatter.format(sleepRecordMonth);
+  const sleepRecordMonthStats = useMemo(
+    () => getMonthlySleepStats(sleepRecords, sleepRecordMonth),
+    [sleepRecordMonth, sleepRecords],
+  );
 
   useEffect(() => {
     setCheckedItems(loadCheckedItems(selectedDate));
@@ -7794,6 +8061,10 @@ function App() {
   }, [choiceQuestRecords]);
 
   useEffect(() => {
+    localStorage.setItem(SLEEP_RECORDS_STORAGE_KEY, JSON.stringify(sleepRecords));
+  }, [sleepRecords]);
+
+  useEffect(() => {
     setDailyNudgeRecords((currentRecords) => {
       if (currentRecords[selectedDateKey]) {
         return currentRecords;
@@ -7856,7 +8127,7 @@ function App() {
   }, [recordDisplayMode]);
 
   useEffect(() => {
-    if (page !== 'library' || menuView !== 'recordAnyMemo') {
+    if (!((page === 'library' && menuView === 'recordAnyMemo') || page === 'memo')) {
       return;
     }
 
@@ -9276,6 +9547,7 @@ function App() {
     completion_message: candidate.completionMessage.trim() || defaultDailyNudgeCompletionMessage,
     category: null,
     is_active: candidate.enabled,
+    is_favorite: candidate.isFavorite,
     sort_order: candidate.order,
   });
 
@@ -9291,7 +9563,7 @@ function App() {
     try {
       let query = supabase
         .from('daily_quest_master')
-        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .select('id, slug, prompt, completion_message, category, is_active, is_favorite, sort_order, created_at, updated_at')
         .order('sort_order', { ascending: true });
 
       if (!options.includeInactive) {
@@ -9347,7 +9619,7 @@ function App() {
     try {
       let query = supabase
         .from('nightly_quest_master')
-        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .select('id, slug, prompt, completion_message, category, is_active, is_favorite, sort_order, created_at, updated_at')
         .order('sort_order', { ascending: true });
 
       if (!options.includeInactive) {
@@ -9459,7 +9731,7 @@ function App() {
   const saveDailyQuestMasterCandidate = async (candidate: DailyNudgeCandidate) => {
     if (!supabase || !authUser || !isAdminUser) {
       setDailyQuestMasterMessage('管理者ログインが必要です。');
-      return;
+      return false;
     }
 
     setIsDailyQuestMasterBusy(true);
@@ -9476,7 +9748,7 @@ function App() {
           },
           { onConflict: 'slug' },
         )
-        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .select('id, slug, prompt, completion_message, category, is_active, is_favorite, sort_order, created_at, updated_at')
         .single();
 
       if (error) {
@@ -9494,11 +9766,34 @@ function App() {
       );
       await refreshDailyQuestMaster({ includeInactive: true });
       setDailyQuestMasterMessage('全プレイヤー共通のログインクエストを更新しました。');
+      return true;
     } catch (error) {
       console.warn('Daily quest master save failed:', error);
       setDailyQuestMasterMessage('更新に失敗しました。変更内容を確認してください。');
+      return false;
     } finally {
       setIsDailyQuestMasterBusy(false);
+    }
+  };
+
+  const toggleDailyQuestAdminFavorite = async (candidate: DailyNudgeCandidate) => {
+    if (isDailyQuestMasterBusy) {
+      return;
+    }
+
+    const previousCandidates = dailyQuestAdminCandidates;
+    const nextCandidate = { ...candidate, isFavorite: !candidate.isFavorite };
+
+    setDailyQuestAdminCandidates((currentCandidates) =>
+      currentCandidates.map((currentCandidate) =>
+        currentCandidate.id === candidate.id ? nextCandidate : currentCandidate,
+      ),
+    );
+
+    const didSave = await saveDailyQuestMasterCandidate(nextCandidate);
+
+    if (!didSave) {
+      setDailyQuestAdminCandidates(previousCandidates);
     }
   };
 
@@ -9573,6 +9868,7 @@ function App() {
         text: '小さな一歩をひとつ選ぼう',
         completionMessage: defaultDailyNudgeCompletionMessage,
         enabled: true,
+        isFavorite: false,
         order:
           currentCandidates.length === 0
             ? 10
@@ -9651,13 +9947,14 @@ function App() {
       candidate.completionMessage.trim() || defaultNightlyNudgeCompletionMessage,
     category: null,
     is_active: candidate.enabled,
+    is_favorite: candidate.isFavorite,
     sort_order: candidate.order,
   });
 
   const saveNightlyQuestMasterCandidate = async (candidate: DailyNudgeCandidate) => {
     if (!supabase || !authUser || !isAdminUser) {
       setNightlyQuestMasterMessage('管理者ログインが必要です。');
-      return;
+      return false;
     }
 
     setIsNightlyQuestMasterBusy(true);
@@ -9674,7 +9971,7 @@ function App() {
           },
           { onConflict: 'slug' },
         )
-        .select('id, slug, prompt, completion_message, category, is_active, sort_order, created_at, updated_at')
+        .select('id, slug, prompt, completion_message, category, is_active, is_favorite, sort_order, created_at, updated_at')
         .single();
 
       if (error) {
@@ -9696,11 +9993,34 @@ function App() {
       );
       await refreshNightlyQuestMaster({ includeInactive: true });
       setNightlyQuestMasterMessage('全プレイヤー共通のおやすみクエストを更新しました。');
+      return true;
     } catch (error) {
       console.warn('Nightly quest master save failed:', error);
       setNightlyQuestMasterMessage('更新に失敗しました。変更内容を確認してください。');
+      return false;
     } finally {
       setIsNightlyQuestMasterBusy(false);
+    }
+  };
+
+  const toggleNightlyQuestAdminFavorite = async (candidate: DailyNudgeCandidate) => {
+    if (isNightlyQuestMasterBusy) {
+      return;
+    }
+
+    const previousCandidates = nightlyQuestAdminCandidates;
+    const nextCandidate = { ...candidate, isFavorite: !candidate.isFavorite };
+
+    setNightlyQuestAdminCandidates((currentCandidates) =>
+      currentCandidates.map((currentCandidate) =>
+        currentCandidate.id === candidate.id ? nextCandidate : currentCandidate,
+      ),
+    );
+
+    const didSave = await saveNightlyQuestMasterCandidate(nextCandidate);
+
+    if (!didSave) {
+      setNightlyQuestAdminCandidates(previousCandidates);
     }
   };
 
@@ -9775,6 +10095,7 @@ function App() {
         text: '自分に「今日もお疲れさま。」と労ってあげよう。',
         completionMessage: defaultNightlyNudgeCompletionMessage,
         enabled: true,
+        isFavorite: false,
         order:
           currentCandidates.length === 0
             ? 10
@@ -9991,6 +10312,90 @@ function App() {
 
       return nextChecks;
     });
+  };
+
+  const openSleepRecordPicker = (dateKey = selectedDateKey) => {
+    const existingRecord = sleepRecords[dateKey];
+    const fallbackOptionId = sleepDurationOptions[6]?.id ?? sleepDurationOptions[0]?.id ?? '';
+
+    setSleepRecordPickerDateKey(dateKey);
+    setSleepRecordDraftOptionId(existingRecord?.optionId ?? fallbackOptionId);
+  };
+
+  const saveSleepRecordDraft = () => {
+    if (!sleepRecordPickerDateKey) {
+      return;
+    }
+
+    const selectedOption = sleepDurationOptions.find(
+      (option) => option.id === sleepRecordDraftOptionId,
+    );
+
+    if (!selectedOption) {
+      return;
+    }
+
+    const dateKey = sleepRecordPickerDateKey;
+    const targetDate = getDateFromKey(dateKey);
+    const now = new Date().toISOString();
+
+    setSleepRecords((currentRecords) => {
+      const existingRecord = currentRecords[dateKey];
+
+      return {
+        ...currentRecords,
+        [dateKey]: {
+          optionId: selectedOption.id,
+          label: selectedOption.label,
+          minutes: selectedOption.minutes,
+          recordedAt: existingRecord?.recordedAt ?? now,
+          updatedAt: now,
+        },
+      };
+    });
+
+    const storedChecks = loadCheckedItems(targetDate);
+
+    if (!storedChecks[FIXED_SLEEP_RECORD_ID]) {
+      const nextChecks = {
+        ...storedChecks,
+        [FIXED_SLEEP_RECORD_ID]: true,
+      };
+      const baseTemplate = getBaseTemplateForDate(templateSettings, targetDate);
+      const target = resolveDateTarget(
+        templateSettings,
+        dateOverrides,
+        dateSnapshots,
+        targetDate,
+        todayKey,
+      );
+      const targetSections = buildDisplaySections(
+        removeFixedRoutineItems(
+          getSectionsForTarget(templateSettings, dateOverrides, dateSnapshots, target, todayKey),
+        ),
+        rhythmSettings[baseTemplate],
+      );
+      const awardedPoints = applyPointChangeForItemCheck(
+        dateKey,
+        FIXED_SLEEP_RECORD_ID,
+        true,
+        targetSections,
+      );
+
+      localStorage.setItem(getChecksStorageKey(targetDate), JSON.stringify(nextChecks));
+
+      if (dateKey === selectedDateKey) {
+        setCheckedItems(nextChecks);
+      }
+
+      if (historySelectedDate && dateKey === historySelectedDateKey) {
+        setHistoryCheckedItems(nextChecks);
+      }
+
+      triggerQuestEmote(dateKey, FIXED_SLEEP_RECORD_ID, awardedPoints);
+    }
+
+    setSleepRecordPickerDateKey(null);
   };
 
   const toggleHistoryItem = (id: string) => {
@@ -10288,6 +10693,7 @@ function App() {
     setEditingLabel('');
     setRoutineDrafts({});
     routineDraftComposingSectionsRef.current.clear();
+    setSleepRecordPickerDateKey(null);
   };
 
   const canAddRoutineToSection = (sectionId: string) => {
@@ -12665,10 +13071,11 @@ function App() {
       currentTodos.map((todo) =>
         todo.id === id && todo.status !== 'completed'
           ? {
-              ...todo,
-              status,
-              dueDate: getDueDateForTodoStatus(status),
-              completed: false,
+	              ...todo,
+	              status,
+	              dueDate: getDueDateForTodoStatus(status),
+              isSoon: getIsSoonForTodoStatus(status),
+	              completed: false,
               completedAt: undefined,
               originalStatus: undefined,
               updatedAt: new Date().toISOString(),
@@ -12683,10 +13090,11 @@ function App() {
       currentTodos.map((todo) =>
         todo.id === id && (todo.status === 'completed' || todo.completed)
           ? {
-              ...todo,
-              status,
-              dueDate: getDueDateForTodoStatus(status),
-              completed: false,
+	              ...todo,
+	              status,
+	              dueDate: getDueDateForTodoStatus(status),
+              isSoon: getIsSoonForTodoStatus(status),
+	              completed: false,
               completedAt: undefined,
               originalStatus: undefined,
               pendingReview: undefined,
@@ -12724,6 +13132,7 @@ function App() {
         ...movingTodo,
         status: targetStatus,
         dueDate: getDueDateForTodoStatus(targetStatus),
+        isSoon: getIsSoonForTodoStatus(targetStatus),
         completed: false,
         completedAt: undefined,
         originalStatus: undefined,
@@ -12807,7 +13216,7 @@ function App() {
 
   const getTodoStatusForDueDate = (dueDate?: string): ActiveTodoStatus => {
     if (!dueDate) {
-      return 'soon';
+      return 'someday';
     }
 
     const tomorrowKey = getDateKey(addDays(today, 1));
@@ -12835,7 +13244,10 @@ function App() {
     return undefined;
   };
 
-  const addManagedTodoQuick = (text: string, dueDate?: string, folderId?: string) => {
+  const getIsSoonForTodoStatus = (status: ActiveTodoStatus) =>
+    status === 'soon' ? true : undefined;
+
+  const addManagedTodoQuick = (text: string, meta: TodoDraftMeta = {}) => {
     const trimmedText = text.trim();
 
     if (!trimmedText) {
@@ -12843,20 +13255,22 @@ function App() {
     }
 
     const timestamp = new Date().toISOString();
+    const status = meta.status ?? getTodoStatusForDueDate(meta.dueDate);
     setManagedTodos((currentTodos) => [
       ...currentTodos,
-      createManagedTodoItem(trimmedText, getTodoStatusForDueDate(dueDate), {
-        dueDate,
-        folderId,
+      createManagedTodoItem(trimmedText, status, {
+        dueDate: meta.dueDate,
+        isSoon: status === 'soon' && meta.isSoon,
+        folderId: meta.folderId,
         createdAt: timestamp,
         updatedAt: timestamp,
       }),
     ]);
 
-    if (folderId) {
+    if (meta.folderId) {
       setTodoFolders((currentFolders) =>
         currentFolders.map((folder) =>
-          folder.id === folderId ? { ...folder, updatedAt: timestamp } : folder,
+          folder.id === meta.folderId ? { ...folder, updatedAt: timestamp } : folder,
         ),
       );
     }
@@ -12888,13 +13302,13 @@ function App() {
       return false;
     }
 
-    return addManagedTodoQuick(trimmedText, meta.dueDate, meta.folderId);
+    return addManagedTodoQuick(trimmedText, meta);
   };
 
   const commitAndResetTodoDraftInputs = () => {
     commitTodoDraft('todo:list', setNewTodoText);
     commitTodoDraft('todo:today', setNewTodoTodayText, { dueDate: todayKey });
-    commitTodoDraft('todo:soon', setNewTodoSoonText);
+    commitTodoDraft('todo:soon', setNewTodoSoonText, { status: 'soon', isSoon: true });
 
     if (selectedTodoDate) {
       const dateKey = getDateKey(selectedTodoDate);
@@ -12968,7 +13382,7 @@ function App() {
   };
 
   const submitNewTodoForSoon = () => {
-    commitTodoDraft('todo:soon', setNewTodoSoonText);
+    commitTodoDraft('todo:soon', setNewTodoSoonText, { status: 'soon', isSoon: true });
     window.setTimeout(() => adjustTextareaHeight(newTodoSoonInputRef.current), 0);
   };
 
@@ -13005,10 +13419,11 @@ function App() {
       currentTodos.map((todo) =>
         todo.id === id && todo.status !== 'completed'
           ? {
-              ...todo,
-              dueDate,
-              status: getTodoStatusForDueDate(dueDate),
-              pendingReview: undefined,
+	              ...todo,
+	              dueDate,
+	              status: getTodoStatusForDueDate(dueDate),
+              isSoon: undefined,
+	              pendingReview: undefined,
 	              updatedAt: new Date().toISOString(),
 	            }
 	          : todo,
@@ -13198,10 +13613,11 @@ function App() {
       currentTodos.map((todo) =>
         targetIds.has(todo.id) && todo.status !== 'completed'
           ? {
-              ...todo,
-              dueDate,
-              status: getTodoStatusForDueDate(dueDate),
-              pendingReview: undefined,
+	              ...todo,
+	              dueDate,
+	              status: getTodoStatusForDueDate(dueDate),
+              isSoon: undefined,
+	              pendingReview: undefined,
               updatedAt: timestamp,
             }
           : todo,
@@ -13229,10 +13645,11 @@ function App() {
       currentTodos.map((todo) =>
         targetIds.has(todo.id) && todo.status !== 'completed'
           ? {
-              ...todo,
-              dueDate: undefined,
-              status: 'soon' as const,
-              pendingReview: undefined,
+	              ...todo,
+	              dueDate: undefined,
+	              status: 'soon' as const,
+              isSoon: true,
+	              pendingReview: undefined,
               updatedAt: timestamp,
             }
           : todo,
@@ -14327,6 +14744,8 @@ function App() {
 
     if (targetPage === 'history') {
       setCalendarMonth(getMonthStart(today));
+      setSleepRecordMonth(getMonthStart(today));
+      setIsSleepRecordDetailOpen(false);
       setHistorySelectedDate(null);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -14345,6 +14764,17 @@ function App() {
       scheduleAgendaScrollYearRef.current = null;
       setMenuView('list');
       showScheduleCalendarToday('smooth');
+      return;
+    }
+
+    if (targetPage === 'memo') {
+      setMenuView('list');
+      setRecordView('anyMemo');
+      setAnyMemoTab('memo');
+      setSelectedAnyMemoFolderId(null);
+      setMovingAnyMemoId(null);
+      setNewMoveFolderName('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -14378,8 +14808,19 @@ function App() {
       setSelectedScheduleDate(null);
       setScheduleView(INITIAL_SCHEDULE_VIEW);
     }
+    if (nextPage === 'history') {
+      setIsSleepRecordDetailOpen(false);
+    }
     if (nextPage === 'todos') {
       setMenuView('list');
+    }
+    if (nextPage === 'memo') {
+      setMenuView('list');
+      setRecordView('anyMemo');
+      setAnyMemoTab('memo');
+      setSelectedAnyMemoFolderId(null);
+      setMovingAnyMemoId(null);
+      setNewMoveFolderName('');
     }
     setPage(nextPage);
   };
@@ -14832,6 +15273,10 @@ function App() {
       return '今日もお疲れさまでした。決めた時間にベッドへ横になれたら、そっとチェックしておやすみしましょう。';
     }
 
+    if (fixedKind === 'sleepRecord') {
+      return '昨晩の睡眠時間を、評価せずにざっくり記録します。';
+    }
+
     if (fixedKind === 'scheduleCheck') {
       return 'スケジュールを開いたら達成';
     }
@@ -15176,6 +15621,10 @@ function App() {
       return 'sleep';
     }
 
+    if (entryKey === FIXED_SLEEP_RECORD_ID) {
+      return 'sleepRecord';
+    }
+
     if (entryKey === 'fixed-schedule-check') {
       return 'scheduleCheck';
     }
@@ -15342,7 +15791,7 @@ function App() {
     <main
       className="app"
       data-page={page}
-      data-record-view={isLibraryRecordView ? recordView : undefined}
+      data-record-view={isRecordView ? recordView : undefined}
       data-timer-alert={activeTimer?.isComplete && !timerAlertSilenced ? 'true' : 'false'}
     >
       {activeQuestInfo && typeof document !== 'undefined' && createPortal(
@@ -15372,6 +15821,57 @@ function App() {
             </button>
           )}
         </span>,
+        document.body,
+      )}
+      {sleepRecordPickerDateKey && typeof document !== 'undefined' && createPortal(
+        <div
+          className="dialog-backdrop sleep-record-dialog-backdrop"
+          onClick={() => setSleepRecordPickerDateKey(null)}
+          role="presentation"
+        >
+          <section
+            aria-label="睡眠時間を記録"
+            className="sleep-record-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sleep-record-dialog-header">
+              <div>
+                <h2>😴 睡眠を記録</h2>
+                <p>
+                  {formatQuestDateLabel(getDateFromKey(sleepRecordPickerDateKey))}の記録
+                </p>
+              </div>
+              <button
+                aria-label="睡眠記録を閉じる"
+                onClick={() => setSleepRecordPickerDateKey(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="sleep-duration-options" aria-label="昨晩の睡眠時間">
+              {sleepDurationOptions.map((option) => (
+                <button
+                  aria-pressed={sleepRecordDraftOptionId === option.id}
+                  data-selected={sleepRecordDraftOptionId === option.id ? 'true' : 'false'}
+                  key={option.id}
+                  onClick={() => setSleepRecordDraftOptionId(option.id)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="dialog-actions sleep-record-dialog-actions">
+              <button onClick={() => setSleepRecordPickerDateKey(null)} type="button">
+                キャンセル
+              </button>
+              <button onClick={saveSleepRecordDraft} type="button">
+                記録する
+              </button>
+            </div>
+          </section>
+        </div>,
         document.body,
       )}
       <nav
@@ -15438,6 +15938,7 @@ function App() {
             {page === 'history' && 'スタンプ帳'}
             {page === 'todos' && 'やること'}
             {page === 'schedule' && 'スケジュール'}
+            {page === 'memo' && 'メモ'}
             {page === 'library' && menuView === 'list' && 'かばん'}
             {page === 'library' && menuView !== 'list' && activeMenuViewOption
               ? `${activeMenuViewOption.icon} ${activeMenuViewOption.label}`
@@ -15587,6 +16088,26 @@ function App() {
                         </span>
                       </dd>
                     </div>
+                    {selectedQuestManagementItem.sleepAverages && (
+                      <>
+                        <div>
+                          <dt>直近7日平均</dt>
+                          <dd>
+                            {formatSleepDurationAverage(
+                              selectedQuestManagementItem.sleepAverages.last7Days,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>直近30日平均</dt>
+                          <dd>
+                            {formatSleepDurationAverage(
+                              selectedQuestManagementItem.sleepAverages.last30Days,
+                            )}
+                          </dd>
+                        </div>
+                      </>
+                    )}
                   </dl>
                 </article>
               );
@@ -16373,8 +16894,7 @@ function App() {
               </div>
             </div>
             <div className="daily-nudge-admin-list">
-              {[...dailyQuestAdminCandidates]
-                .sort((first, second) => first.order - second.order)
+              {sortDailyNudgeAdminCandidates(dailyQuestAdminCandidates)
                 .map((candidate, index, orderedCandidates) => (
                   <article className="daily-nudge-admin-card" key={candidate.id}>
                     <div className="daily-nudge-admin-card-header">
@@ -16394,6 +16914,25 @@ function App() {
                         <span>{candidate.enabled ? '有効' : '無効'}</span>
                       </label>
                       <div className="daily-nudge-admin-card-actions">
+                        <button
+                          aria-label={
+                            candidate.isFavorite
+                              ? 'お気に入りを解除'
+                              : 'お気に入りに追加'
+                          }
+                          className="daily-nudge-admin-favorite-button"
+                          data-favorite={candidate.isFavorite}
+                          disabled={isDailyQuestMasterBusy}
+                          onClick={() => void toggleDailyQuestAdminFavorite(candidate)}
+                          title={
+                            candidate.isFavorite
+                              ? 'お気に入りを解除'
+                              : 'お気に入りに追加'
+                          }
+                          type="button"
+                        >
+                          {candidate.isFavorite ? '★' : '☆'}
+                        </button>
                         <button
                           disabled={isDailyQuestMasterBusy || index === 0}
                           onClick={() => void moveDailyQuestAdminCandidate(candidate.id, -1)}
@@ -16483,8 +17022,7 @@ function App() {
               </div>
             </div>
             <div className="daily-nudge-admin-list">
-              {[...nightlyQuestAdminCandidates]
-                .sort((first, second) => first.order - second.order)
+              {sortDailyNudgeAdminCandidates(nightlyQuestAdminCandidates)
                 .map((candidate, index, orderedCandidates) => (
                   <article className="daily-nudge-admin-card" key={candidate.id}>
                     <div className="daily-nudge-admin-card-header">
@@ -16504,6 +17042,25 @@ function App() {
                         <span>{candidate.enabled ? '有効' : '無効'}</span>
                       </label>
                       <div className="daily-nudge-admin-card-actions">
+                        <button
+                          aria-label={
+                            candidate.isFavorite
+                              ? 'お気に入りを解除'
+                              : 'お気に入りに追加'
+                          }
+                          className="daily-nudge-admin-favorite-button"
+                          data-favorite={candidate.isFavorite}
+                          disabled={isNightlyQuestMasterBusy}
+                          onClick={() => void toggleNightlyQuestAdminFavorite(candidate)}
+                          title={
+                            candidate.isFavorite
+                              ? 'お気に入りを解除'
+                              : 'お気に入りに追加'
+                          }
+                          type="button"
+                        >
+                          {candidate.isFavorite ? '★' : '☆'}
+                        </button>
                         <button
                           disabled={isNightlyQuestMasterBusy || index === 0}
                           onClick={() => void moveNightlyQuestAdminCandidate(candidate.id, -1)}
@@ -17324,12 +17881,16 @@ function App() {
                   const choiceQuestRecord = choiceQuestId
                     ? selectedChoiceQuestRecords[choiceQuestId]
                     : null;
+                  const sleepRecordForSelectedDate =
+                    item.fixedKind === 'sleepRecord' ? selectedSleepRecord : null;
                   const isTimedFixedItem = item.fixedKind === 'wake' || item.fixedKind === 'sleep';
                   const isRoutineItemChecked =
                     isCheckMode && (
                       isChoiceQuestItem
                         ? Boolean(choiceQuestRecord?.completed)
-                        : Boolean(checkedItems[item.id])
+                        : item.fixedKind === 'sleepRecord'
+                          ? Boolean(checkedItems[item.id]) || Boolean(sleepRecordForSelectedDate)
+                          : Boolean(checkedItems[item.id])
                     );
                   const canDragQuest =
                     canEditRoutines &&
@@ -17424,6 +17985,11 @@ function App() {
                               return;
                             }
 
+                            if (item.fixedKind === 'sleepRecord') {
+                              openSleepRecordPicker(selectedDateKey);
+                              return;
+                            }
+
                             if (openFixedQuestDestination(item.fixedKind)) {
                               return;
                             }
@@ -17465,7 +18031,31 @@ function App() {
                             ) : isTimedFixedItem ? (
                               <span className="fixed-time-display">{item.time}</span>
                             ) : null}
-                            <span>{item.label}</span>
+                            {item.fixedKind === 'scheduleCheck' ||
+                            item.fixedKind === 'todoCheck' ||
+                            item.fixedKind === 'sleepRecord' ? (
+                              <button
+                                className="fixed-routine-link"
+                                onClick={() => {
+                                  if (item.fixedKind === 'sleepRecord') {
+                                    openSleepRecordPicker(selectedDateKey);
+                                    return;
+                                  }
+
+                                  openFixedQuestDestination(item.fixedKind);
+                                }}
+                                type="button"
+                              >
+                                {item.label}
+                              </button>
+                            ) : (
+                              <span>{item.label}</span>
+                            )}
+                            {sleepRecordForSelectedDate && (
+                              <span className="sleep-record-value">
+                                {sleepRecordForSelectedDate.label}
+                              </span>
+                            )}
                             {renderQuestInfoButton({
                               actionLabel: choiceQuestId ? '選択前に戻す' : undefined,
                               id: `today-routine-${item.id}`,
@@ -18500,7 +19090,7 @@ function App() {
             )
             .sort((first, second) => (second.createdAt ?? '').localeCompare(first.createdAt ?? ''));
           const todayTodos = activeTodos.filter((todo) => todo.dueDate === todayKey);
-          const soonTodos = activeTodos.filter((todo) => todo.status === 'soon');
+          const soonTodos = activeTodos.filter((todo) => todo.status === 'soon' && todo.isSoon);
           const formatTodoDueDate = (dateKey: string) => {
             const date = getDateFromKey(dateKey);
 
@@ -20483,7 +21073,74 @@ function App() {
           </section>
         )}
 
-        {page === 'history' && (
+        {page === 'history' && isSleepRecordDetailOpen && (
+          <section className="sleep-record-page record-view-content" aria-label="睡眠記録">
+            <div className="sleep-record-page-header">
+              <button
+                className="sleep-record-back-button"
+                onClick={() => {
+                  setIsSleepRecordDetailOpen(false);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                type="button"
+              >
+                ＜ スタンプ帳
+              </button>
+              <div>
+                <p>😴 睡眠記録</p>
+                <h2>{sleepRecordMonthLabel}</h2>
+              </div>
+            </div>
+            <div className="records-month-header sleep-record-month-header">
+              <button
+                aria-label="前月の睡眠記録を表示"
+                onClick={() => setSleepRecordMonth((month) => addMonths(month, -1))}
+                type="button"
+              >
+                ‹
+              </button>
+              <h2>{sleepRecordMonthLabel}</h2>
+              <button
+                aria-label="翌月の睡眠記録を表示"
+                onClick={() => setSleepRecordMonth((month) => addMonths(month, 1))}
+                type="button"
+              >
+                ›
+              </button>
+              <button
+                className="records-today-button"
+                onClick={() => setSleepRecordMonth(getMonthStart(today))}
+                type="button"
+              >
+                今月
+              </button>
+            </div>
+            <section className="sleep-record-summary-card" aria-label="今月の睡眠記録サマリー">
+              <span>今月の平均睡眠時間</span>
+              <strong>{formatSleepDurationAverage(sleepRecordMonthStats.averageMinutes)}</strong>
+              <small>記録日数 {sleepRecordMonthStats.recordedDays}日</small>
+            </section>
+            <section className="sleep-record-list-section" aria-label="日ごとの睡眠記録">
+              <h3>日ごとの記録</h3>
+              {sleepRecordMonthStats.entries.length === 0 ? (
+                <p className="sleep-record-empty">この月の睡眠記録はまだありません</p>
+              ) : (
+                <div className="sleep-record-list">
+                  {sleepRecordMonthStats.entries.map(({ date, dateKey, record }) => (
+                    <article className="sleep-record-list-item" key={dateKey}>
+                      <span>
+                        {date.getMonth() + 1}月{date.getDate()}日（{weekdayShortLabels[date.getDay()]}）
+                      </span>
+                      <strong>{record.label}</strong>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </section>
+        )}
+
+        {page === 'history' && !isSleepRecordDetailOpen && (
           <section className="completion-calendar" aria-label="今月のスタンプ帳">
             <div className="completion-calendar-header">
               <div>
@@ -20597,6 +21254,24 @@ function App() {
                     </article>
                   ))}
               </div>
+            </section>
+            <section className="monthly-record-summary" aria-label="今月の記録">
+              <div className="monthly-record-summary-heading">
+                <h3>📊 今月の記録</h3>
+              </div>
+              <button
+                className="monthly-record-summary-row"
+                onClick={() => {
+                  setSleepRecordMonth(getMonthStart(calendarMonth));
+                  setIsSleepRecordDetailOpen(true);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                type="button"
+              >
+                <span>😴 平均睡眠時間</span>
+                <strong>{formatSleepDurationAverage(calendarMonthSleepStats.averageMinutes)}</strong>
+                <small>詳細 ＞</small>
+              </button>
             </section>
             {historySelectedDate ? (
               <div className="history-detail">
