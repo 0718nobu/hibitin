@@ -50,6 +50,7 @@ type MenuViewName =
 type ScheduleViewName = 'list' | 'agenda' | 'today' | 'year';
 type RecordViewName = 'memo' | 'events' | 'anyMemo' | 'advanced' | 'achievements';
 type RecordDisplayMode = 'all' | 'withRecords' | 'favorites';
+type QuestProgressDisplayMode = 'growth' | 'stars';
 type TodoStatus = 'today' | 'tomorrow' | 'soon' | 'someday' | 'completed';
 type ActiveTodoStatus = Exclude<TodoStatus, 'completed'>;
 type TodoViewName = 'todo' | 'today' | 'soon' | 'date' | 'folders' | 'completed';
@@ -62,6 +63,7 @@ type SettingsViewName =
   | 'data'
   | 'saveData'
   | 'admin';
+type AdminManagementTab = 'login' | 'nightly' | 'welcome';
 const INITIAL_SCHEDULE_VIEW: ScheduleViewName = 'list';
 const INITIAL_TODO_VIEW: TodoViewName = 'todo';
 type TodoReviewAction = Exclude<TodoStatus, 'completed'> | 'completed' | 'delete';
@@ -608,6 +610,43 @@ type DailyNudgeRecord = {
 
 type DailyNudgeRecords = Record<string, DailyNudgeRecord>;
 
+type WelcomeCommentCandidate = {
+  id: string;
+  masterId?: string;
+  comment: string;
+  enabled: boolean;
+  order: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+type WelcomeCommentMasterRow = {
+  id: string;
+  slug: string;
+  comment: string;
+  is_active: boolean | null;
+  sort_order: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type WelcomeDisplayState = {
+  dateKey: string;
+  streakCount: number;
+  commentId: string;
+  comment: string;
+  shownAt: string;
+};
+
+type WelcomeStatusRow = {
+  last_seen_date: string | null;
+  streak_count: number | null;
+  selected_comment_id: string | null;
+  selected_comment: string | null;
+  shown_at: string | null;
+  updated_at: string | null;
+};
+
 type ChoiceQuestOption = {
   id: string;
   label: string;
@@ -619,6 +658,7 @@ type ChoiceQuestDefinition = {
   title: string;
   icon: string;
   options: ChoiceQuestOption[];
+  createdAt: string;
   unlockRank?: string | null;
 };
 
@@ -743,6 +783,15 @@ type QuestManagementItem = {
   editableSlotNumber?: number;
 };
 
+type QuestDisplayStats = {
+  totalCompletions: number;
+  recentCompletionRate: {
+    completedDays: number;
+    targetDays: number;
+    rate: number | null;
+  };
+};
+
 type SleepDurationOption = {
   id: string;
   label: string;
@@ -799,11 +848,15 @@ const ITEM_NOTES_STORAGE_KEY = 'hibitin:itemNotes:v1';
 const CORE_ROUTINE_PLACEMENTS_STORAGE_KEY = 'hibitin:coreRoutinePlacements:v1';
 const DAILY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:dailyQuestMasterCache:v1';
 const NIGHTLY_QUEST_MASTER_CACHE_STORAGE_KEY = 'hibitin:nightlyQuestMasterCache:v1';
+const WELCOME_COMMENT_MASTER_CACHE_STORAGE_KEY = 'hibitinSystem:welcomeCommentMasterCache:v1';
+const WELCOME_STATUS_STORAGE_KEY = 'hibitinSystem:welcomeStatus:v1';
 const DAILY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:dailyNudgeRecords:v1';
 const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
 const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
 const SLEEP_RECORDS_STORAGE_KEY = 'hibitin:sleepRecords:v1';
 const TEXT_RECORD_FAVORITES_STORAGE_KEY = 'hibitin:textRecordFavorites:v1';
+const QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY = 'hibitinSystem:questProgressDisplayMode:v1';
+const LEGACY_GROWTH_DISPLAY_VISIBILITY_STORAGE_KEY = 'hibitinSystem:growthDisplayVisible:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
@@ -1762,6 +1815,31 @@ const defaultDailyNudgeCandidates: DailyNudgeCandidate[] = [
   order: (index + 1) * 10,
   createdAt: '2026-07-11T00:00:00.000Z',
 }));
+
+const defaultWelcomeCommentCandidates: WelcomeCommentCandidate[] = [
+  '今日も来てくれてうれしい。ゆるっといこう。',
+  '待ってたよ。さて、今日はどんな日にしようか。',
+  'おかえり。今日もひとつずつ遊んでこう。',
+  '今日もいい日にしちゃおう。',
+  '今日のページ、開幕です。',
+  '無理せず、でもちょっと楽しくいこう。',
+  '今日もここから。よい一日を。',
+  '来た来た。今日も遊んでこう。',
+  'なんでもない今日も、けっこういい日かもしれない。',
+  '今日もよろしく。ぼちぼちいこう。',
+  'よく来たね。まずは今日を開いただけで一歩。',
+  'おはよう。今日も自分のペースでいこう。',
+  'さあ、日々ティンの今日が始まります。',
+  '今日もゆるく、でもちょっといい感じに。',
+  'おかえり。ここから今日を整えていこう。',
+].map((comment, index) => ({
+  id: `welcome-comment-${index + 1}`,
+  comment,
+  enabled: true,
+  order: (index + 1) * 10,
+  createdAt: '2026-08-28T00:00:00.000Z',
+}));
+
 const retiredDailyNudgeCandidateIds = new Set([
   'daily-nudge-done-one',
   'daily-nudge-like-one',
@@ -1906,6 +1984,7 @@ const choiceQuestDefinitions: ChoiceQuestDefinition[] = [
     title: '選択クエスト',
     icon: '🚶',
     unlockRank: 'READY',
+    createdAt: '2026-08-07T00:00:00.000Z',
     options: [
       { id: 'walk', label: '散歩', icon: '🚶' },
       { id: 'running', label: 'ランニング', icon: '🏃' },
@@ -1916,6 +1995,7 @@ const choiceQuestDefinitions: ChoiceQuestDefinition[] = [
     title: '選択クエスト',
     icon: '💪',
     unlockRank: null,
+    createdAt: '2026-08-07T00:00:00.000Z',
     options: [
       { id: 'workout', label: '筋トレ', icon: '💪' },
       { id: 'stretch', label: 'ストレッチ', icon: '🤸' },
@@ -2079,9 +2159,6 @@ const getQuestProficiency = (totalCompletions: number) =>
     .reverse()
     .find((tier) => totalCompletions >= tier.minCompletions) ?? questProficiencyTiers[0];
 
-const formatQuestProficiencyStars = (level: number) =>
-  `${'★'.repeat(Math.max(0, Math.min(5, level)))}${'☆'.repeat(Math.max(0, 5 - level))}`;
-
 const getQuestManagementFixedIcon = (itemId: string) => {
   if (itemId === 'core:daily-memo') {
     return '📝';
@@ -2141,7 +2218,7 @@ const getDateKeyFromIsoLike = (value?: string) => {
     return null;
   }
 
-  return getDateKey(date);
+  return getHibitinDateKey(date);
 };
 
 const calculateRecentQuestCompletionRate = (
@@ -2179,6 +2256,62 @@ const calculateRecentQuestCompletionRate = (
     targetDays,
     rate: targetDays > 0 ? Math.round((completedDays / targetDays) * 100) : null,
   };
+};
+
+const getConsistencyTone = (rate: number | null) => {
+  if (rate === null) {
+    return 'neutral';
+  }
+
+  if (rate >= 100) {
+    return 'complete';
+  }
+
+  if (rate >= 80) {
+    return 'special';
+  }
+
+  if (rate >= 60) {
+    return 'strong';
+  }
+
+  if (rate >= 40) {
+    return 'steady';
+  }
+
+  if (rate >= 20) {
+    return 'soft';
+  }
+
+  return 'neutral';
+};
+
+const getLifetimeCompletionIcon = (count: number) => {
+  if (count >= 300) {
+    return '👑';
+  }
+
+  if (count >= 100) {
+    return '🔥';
+  }
+
+  if (count >= 50) {
+    return '🦅';
+  }
+
+  if (count >= 30) {
+    return '🕊️';
+  }
+
+  if (count >= 10) {
+    return '🐥';
+  }
+
+  if (count >= 5) {
+    return '🐣';
+  }
+
+  return '🥚';
 };
 
 const getCoreRoutineDisplayLabel = (
@@ -2569,6 +2702,137 @@ const sortDailyNudgeAdminCandidates = (candidates: DailyNudgeCandidate[]) =>
 
     return first.order - second.order;
   });
+
+const normalizeWelcomeCommentCandidate = (
+  candidate: Partial<WelcomeCommentCandidate>,
+  index: number,
+): WelcomeCommentCandidate | null => {
+  if (typeof candidate.id !== 'string' || !candidate.id.trim()) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    masterId: typeof candidate.masterId === 'string' ? candidate.masterId : undefined,
+    comment:
+      typeof candidate.comment === 'string' && candidate.comment.trim()
+        ? candidate.comment
+        : '今日も来てくれてうれしい。ゆるっといこう。',
+    enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : true,
+    order: Number.isFinite(Number(candidate.order))
+      ? Number(candidate.order)
+      : (index + 1) * 10,
+    createdAt:
+      typeof candidate.createdAt === 'string'
+        ? candidate.createdAt
+        : new Date().toISOString(),
+    updatedAt: typeof candidate.updatedAt === 'string' ? candidate.updatedAt : undefined,
+  };
+};
+
+const mapWelcomeCommentMasterRowToCandidate = (
+  row: WelcomeCommentMasterRow,
+  index: number,
+): WelcomeCommentCandidate => ({
+  id: row.slug,
+  masterId: row.id,
+  comment: row.comment,
+  enabled: row.is_active ?? true,
+  order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : (index + 1) * 10,
+  createdAt: row.created_at ?? new Date().toISOString(),
+  updatedAt: row.updated_at ?? undefined,
+});
+
+const sortWelcomeCommentAdminCandidates = (candidates: WelcomeCommentCandidate[]) =>
+  [...candidates].sort((first, second) => {
+    if (first.order !== second.order) {
+      return first.order - second.order;
+    }
+
+    return first.comment.localeCompare(second.comment, 'ja');
+  });
+
+const loadWelcomeCommentMasterCache = () => {
+  const savedCandidates = localStorage.getItem(WELCOME_COMMENT_MASTER_CACHE_STORAGE_KEY);
+
+  if (!savedCandidates) {
+    return defaultWelcomeCommentCandidates.map((candidate) => ({ ...candidate }));
+  }
+
+  try {
+    const parsedCandidates = JSON.parse(savedCandidates) as unknown;
+
+    if (!Array.isArray(parsedCandidates)) {
+      return defaultWelcomeCommentCandidates.map((candidate) => ({ ...candidate }));
+    }
+
+    const normalizedCandidates = parsedCandidates
+      .map((candidate, index) =>
+        normalizeWelcomeCommentCandidate(candidate as Partial<WelcomeCommentCandidate>, index),
+      )
+      .filter((candidate): candidate is WelcomeCommentCandidate => candidate !== null)
+      .filter((candidate) => candidate.enabled)
+      .sort((first, second) => first.order - second.order);
+
+    return normalizedCandidates.length > 0
+      ? normalizedCandidates
+      : defaultWelcomeCommentCandidates.map((candidate) => ({ ...candidate }));
+  } catch {
+    return defaultWelcomeCommentCandidates.map((candidate) => ({ ...candidate }));
+  }
+};
+
+const loadLocalWelcomeStatus = (): WelcomeDisplayState | null => {
+  const savedStatus = localStorage.getItem(WELCOME_STATUS_STORAGE_KEY);
+
+  if (!savedStatus) {
+    return null;
+  }
+
+  try {
+    const parsedStatus = JSON.parse(savedStatus) as Partial<WelcomeDisplayState>;
+
+    if (
+      typeof parsedStatus.dateKey !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(parsedStatus.dateKey) ||
+      typeof parsedStatus.comment !== 'string' ||
+      typeof parsedStatus.commentId !== 'string' ||
+      !Number.isFinite(Number(parsedStatus.streakCount)) ||
+      typeof parsedStatus.shownAt !== 'string'
+    ) {
+      return null;
+    }
+
+    return {
+      dateKey: parsedStatus.dateKey,
+      streakCount: Math.max(1, Number(parsedStatus.streakCount)),
+      commentId: parsedStatus.commentId,
+      comment: parsedStatus.comment,
+      shownAt: parsedStatus.shownAt,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const saveLocalWelcomeStatus = (status: WelcomeDisplayState) => {
+  localStorage.setItem(WELCOME_STATUS_STORAGE_KEY, JSON.stringify(status));
+};
+
+const selectWelcomeCommentCandidate = (
+  dateKey: string,
+  candidates: WelcomeCommentCandidate[],
+) => {
+  const activeCandidates = candidates
+    .filter((candidate) => candidate.enabled)
+    .sort((first, second) => first.order - second.order);
+
+  if (activeCandidates.length === 0) {
+    return null;
+  }
+
+  return activeCandidates[getStableStringHash(`welcome:${dateKey}`) % activeCandidates.length];
+};
 
 const loadQuestMasterCache = (
   storageKey: string,
@@ -3604,6 +3868,24 @@ const getDateKey = (date: Date) => {
 
   return `${year}-${month}-${day}`;
 };
+
+const HIBITIN_DAY_SWITCH_HOUR = 4;
+
+export const getHibitinDate = (baseDate = new Date()) => {
+  const hibitinDate = new Date(baseDate);
+
+  if (hibitinDate.getHours() < HIBITIN_DAY_SWITCH_HOUR) {
+    hibitinDate.setDate(hibitinDate.getDate() - 1);
+  }
+
+  return new Date(
+    hibitinDate.getFullYear(),
+    hibitinDate.getMonth(),
+    hibitinDate.getDate(),
+  );
+};
+
+export const getHibitinDateKey = (baseDate = new Date()) => getDateKey(getHibitinDate(baseDate));
 
 const weekdayShortLabels = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -5647,6 +5929,32 @@ const loadRecordDisplayMode = (): RecordDisplayMode => {
   }
 };
 
+const loadQuestProgressDisplayMode = (): QuestProgressDisplayMode => {
+  const savedMode = localStorage.getItem(QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY);
+
+  if (savedMode === 'growth' || savedMode === 'stars') {
+    return savedMode;
+  }
+
+  try {
+    const parsedMode = JSON.parse(savedMode ?? 'null') as unknown;
+
+    if (parsedMode === 'growth' || parsedMode === 'stars') {
+      return parsedMode;
+    }
+  } catch {
+    // Fall through to the legacy visibility setting.
+  }
+
+  const legacyVisibility = localStorage.getItem(LEGACY_GROWTH_DISPLAY_VISIBILITY_STORAGE_KEY);
+
+  if (legacyVisibility === 'false') {
+    return 'stars';
+  }
+
+  return 'growth';
+};
+
 const loadTextRecordFavorites = (): Record<string, boolean> => {
   try {
     const parsedFavorites = JSON.parse(
@@ -6731,7 +7039,8 @@ const calculateMasteryStats = (
 };
 
 function App() {
-  const [today, setToday] = useState(() => new Date());
+  const [today, setToday] = useState(() => getHibitinDate());
+  const [realToday, setRealToday] = useState(() => new Date());
   const backupInputRef = useRef<HTMLInputElement>(null);
   const backupDownloadUrlRef = useRef<string | null>(null);
   const anyMemoInputRef = useRef<HTMLTextAreaElement>(null);
@@ -6760,24 +7069,29 @@ function App() {
     return initialTimerStateRef.current;
   };
   const todayKey = getDateKey(today);
+  const realTodayKey = getDateKey(realToday);
   const yesterday = useMemo(() => addDays(today, -1), [today]);
   const [page, setPage] = useState<PageName>('today');
   const [menuView, setMenuView] = useState<MenuViewName>('list');
   const [settingsView, setSettingsView] = useState<SettingsViewName>('top');
+  const [activeAdminManagementTab, setActiveAdminManagementTab] =
+    useState<AdminManagementTab>('login');
   const [isLibraryBackAnimating, setIsLibraryBackAnimating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => today);
   const [historySelectedDate, setHistorySelectedDate] = useState<Date | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => getMonthStart(today));
   const [isSleepRecordDetailOpen, setIsSleepRecordDetailOpen] = useState(false);
   const [sleepRecordMonth, setSleepRecordMonth] = useState(() => getMonthStart(today));
-  const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(today));
-  const [scheduleYear, setScheduleYear] = useState(() => today.getFullYear());
+  const [scheduleMonth, setScheduleMonth] = useState(() => getMonthStart(realToday));
+  const [scheduleYear, setScheduleYear] = useState(() => realToday.getFullYear());
   const [scheduleView, setScheduleView] = useState<ScheduleViewName>(INITIAL_SCHEDULE_VIEW);
   const [selectedScheduleYearMonth, setSelectedScheduleYearMonth] = useState<number | null>(null);
   const [recordMonth, setRecordMonth] = useState(() => getMonthStart(today));
   const [recordView, setRecordView] = useState<RecordViewName>('memo');
   const [recordDisplayMode, setRecordDisplayMode] =
     useState<RecordDisplayMode>(() => loadRecordDisplayMode());
+  const [questProgressDisplayMode, setQuestProgressDisplayMode] =
+    useState<QuestProgressDisplayMode>(() => loadQuestProgressDisplayMode());
   const [selectedQuestManagementItemKey, setSelectedQuestManagementItemKey] = useState<string | null>(null);
   const [questManagementEditText, setQuestManagementEditText] = useState('');
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
@@ -6863,7 +7177,7 @@ function App() {
     todo.status === 'completed' &&
     typeof todo.completedAt === 'string' &&
     !Number.isNaN(Date.parse(todo.completedAt)) &&
-    getDateKey(new Date(todo.completedAt)) === dateKey;
+    getHibitinDateKey(new Date(todo.completedAt)) === dateKey;
   const checksStorageKey = getChecksStorageKey(selectedDate);
   const memoStorageKey = getDailyMemoStorageKey(selectedDate);
   const eventStorageKey = getDailyEventStorageKey(selectedDate);
@@ -6893,14 +7207,23 @@ function App() {
   );
   const [dailyQuestAdminCandidates, setDailyQuestAdminCandidates] = useState<DailyNudgeCandidate[]>([]);
   const [nightlyQuestAdminCandidates, setNightlyQuestAdminCandidates] = useState<DailyNudgeCandidate[]>([]);
+  const [welcomeCommentCandidates, setWelcomeCommentCandidates] = useState<WelcomeCommentCandidate[]>(() =>
+    loadWelcomeCommentMasterCache(),
+  );
+  const [welcomeCommentAdminCandidates, setWelcomeCommentAdminCandidates] = useState<WelcomeCommentCandidate[]>([]);
   const [dailyQuestMasterStatus, setDailyQuestMasterStatus] =
     useState<DailyQuestMasterStatus>('idle');
   const [nightlyQuestMasterStatus, setNightlyQuestMasterStatus] =
     useState<DailyQuestMasterStatus>('idle');
+  const [welcomeCommentMasterStatus, setWelcomeCommentMasterStatus] =
+    useState<DailyQuestMasterStatus>('idle');
   const [dailyQuestMasterMessage, setDailyQuestMasterMessage] = useState('');
   const [nightlyQuestMasterMessage, setNightlyQuestMasterMessage] = useState('');
+  const [welcomeCommentMasterMessage, setWelcomeCommentMasterMessage] = useState('');
   const [isDailyQuestMasterBusy, setIsDailyQuestMasterBusy] = useState(false);
   const [isNightlyQuestMasterBusy, setIsNightlyQuestMasterBusy] = useState(false);
+  const [isWelcomeCommentMasterBusy, setIsWelcomeCommentMasterBusy] = useState(false);
+  const [welcomeDisplay, setWelcomeDisplay] = useState<WelcomeDisplayState | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isAdminChecking, setIsAdminChecking] = useState(false);
   const [dailyNudgeRecords, setDailyNudgeRecords] = useState<DailyNudgeRecords>(() =>
@@ -7057,6 +7380,7 @@ function App() {
   const pendingInitialCloudBackupUserIdRef = useRef<string | null>(null);
   const scheduleCloudBackupRef = useRef<() => void>(() => {});
   const saveSlotMigrationAttemptedUserIdsRef = useRef<Set<string>>(new Set());
+  const welcomeAttemptedKeyRef = useRef<string | null>(null);
   const currentSaveContextRef = useRef<{ saveId: string | null; saveName: string | null }>({
     saveId: getCurrentSaveId(),
     saveName: getCurrentSaveName(),
@@ -7106,14 +7430,21 @@ function App() {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setToday((currentToday) => {
-        const nextToday = new Date();
+        const nextToday = getHibitinDate();
 
         return getDateKey(currentToday) === getDateKey(nextToday) ? currentToday : nextToday;
+      });
+      setRealToday((currentRealToday) => {
+        const nextRealToday = new Date();
+
+        return getDateKey(currentRealToday) === getDateKey(nextRealToday)
+          ? currentRealToday
+          : nextRealToday;
       });
     }, 60 * 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [selectedTodoDate, selectedTodoFolderId, todayKey]);
+  }, []);
 
   useEffect(() => {
     if (!activeQuestInfo) {
@@ -7535,6 +7866,7 @@ function App() {
         recentCompletionRate: calculateRecentQuestCompletionRate(
           todayKey,
           (_date, dateKey) => Boolean(choiceQuestRecords[dateKey]?.[definition.id]?.completed),
+          getDateKeyFromIsoLike(definition.createdAt),
         ),
       };
     });
@@ -7578,10 +7910,117 @@ function App() {
     () => questManagementSections.flatMap((section) => section.items),
     [questManagementSections],
   );
+  const choiceQuestManagementItemById = useMemo(
+    () =>
+      new Map(
+        questManagementChoiceItems.map((item) => [
+          item.key.replace(/^choice:/, ''),
+          item,
+        ]),
+      ),
+    [questManagementChoiceItems],
+  );
   const selectedQuestManagementItem =
     selectedQuestManagementItemKey === null
       ? null
       : questManagementItems.find((item) => item.key === selectedQuestManagementItemKey) ?? null;
+  const getTodayQuestDisplayStats = (
+    item: RoutineItem,
+    itemMasteryStats?: MasteryStats,
+  ): QuestDisplayStats | null => {
+    const choiceQuestId = getChoiceQuestIdFromFixedKind(item.fixedKind);
+
+    if (choiceQuestId) {
+      const choiceQuestItem = choiceQuestManagementItemById.get(choiceQuestId);
+
+      return choiceQuestItem
+        ? {
+            totalCompletions: choiceQuestItem.totalCompletions,
+            recentCompletionRate: choiceQuestItem.recentCompletionRate,
+          }
+        : null;
+    }
+
+    if (!itemMasteryStats) {
+      return null;
+    }
+
+    return {
+      totalCompletions: itemMasteryStats.totalCompletions,
+      recentCompletionRate: calculateRecentQuestCompletionRate(
+        todayKey,
+        (date) => Boolean(loadCheckedItems(date)[item.id]),
+        getDateKeyFromIsoLike(item.createdAt),
+      ),
+    };
+  };
+  const getCoreRoutineQuestDisplayStats = (
+    coreRoutine: CoreRoutineDefinition,
+  ): QuestDisplayStats | null => {
+    const itemId = `core:${coreRoutine.id}`;
+    const itemMasteryStats = masteryStatsByItemId.get(itemId);
+
+    if (!itemMasteryStats) {
+      return null;
+    }
+
+    return {
+      totalCompletions: itemMasteryStats.totalCompletions,
+      recentCompletionRate: calculateRecentQuestCompletionRate(
+        todayKey,
+        (date) => {
+          const completion = getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date));
+
+          return Boolean(completion[coreRoutine.id]);
+        },
+      ),
+    };
+  };
+  const renderTodayQuestDisplayStats = (stats: QuestDisplayStats | null) => {
+    if (!stats) {
+      return null;
+    }
+
+    const rateLabel =
+      stats.recentCompletionRate.rate === null
+        ? '--%'
+        : `${stats.recentCompletionRate.rate}%`;
+    const consistencyTone = getConsistencyTone(stats.recentCompletionRate.rate);
+    const lifetimeIcon = getLifetimeCompletionIcon(stats.totalCompletions);
+
+    return (
+      <span
+        className="quest-progress-badge"
+        title={`直近30日 ${rateLabel} / 累計 ${stats.totalCompletions}回`}
+      >
+        <span data-consistency-tone={consistencyTone}>
+          {rateLabel}
+        </span>
+        <span aria-hidden="true">｜</span>
+        <span>
+          <span aria-hidden="true">{lifetimeIcon}</span>
+          {stats.totalCompletions}回
+        </span>
+      </span>
+    );
+  };
+  const renderTodayQuestMasteryStars = (itemMasteryStats?: MasteryStats | null) => {
+    if (
+      !itemMasteryStats ||
+      (itemMasteryStats.starCount === 0 && itemMasteryStats.trophyCount === 0)
+    ) {
+      return null;
+    }
+
+    return (
+      <span
+        className="mastery-badge"
+        title={`現在 ${itemMasteryStats.currentStreak}日連続 / 累計 ${itemMasteryStats.totalCompletions}回`}
+      >
+        {formatMasteryStars(itemMasteryStats.starCount, itemMasteryStats.trophyCount)}
+      </span>
+    );
+  };
   const calendarMonthLabel = monthFormatter.format(calendarMonth);
   const todoMonthLabel = monthFormatter.format(todoMonth);
   const todoMonthDates = useMemo(
@@ -7825,8 +8264,8 @@ function App() {
     if (
       !isTodayScheduleView ||
       scheduleView !== 'year' ||
-      selectedScheduleYearMonth !== today.getMonth() ||
-      getDateKey(scheduleMonth) !== getDateKey(getMonthStart(today))
+      selectedScheduleYearMonth !== realToday.getMonth() ||
+      getDateKey(scheduleMonth) !== getDateKey(getMonthStart(realToday))
     ) {
       return;
     }
@@ -7840,21 +8279,21 @@ function App() {
     scheduleTodayScrollMonthRef.current = scrollKey;
     window.requestAnimationFrame(() => {
       document
-        .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${todayKey}"]`)
+        .querySelector<HTMLElement>(`.schedule-day-list [data-date-key="${realTodayKey}"]`)
         ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
-  }, [isTodayScheduleView, scheduleMonth, scheduleView, selectedScheduleYearMonth, today, todayKey]);
+  }, [isTodayScheduleView, realToday, realTodayKey, scheduleMonth, scheduleView, selectedScheduleYearMonth]);
 
   useEffect(() => {
     if (
       !isTodayScheduleView ||
       scheduleView !== 'list' ||
-      scheduleYear !== today.getFullYear()
+      scheduleYear !== realToday.getFullYear()
     ) {
       return;
     }
 
-    const scrollKey = `schedule-list:${scheduleYear}:${todayKey}`;
+    const scrollKey = `schedule-list:${scheduleYear}:${realTodayKey}`;
 
     if (scheduleListScrollYearRef.current === scrollKey) {
       return;
@@ -7866,27 +8305,27 @@ function App() {
         .querySelector<HTMLElement>(`.schedule-list-day-button[data-today="true"]`)
         ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
-  }, [isTodayScheduleView, scheduleView, scheduleYear, today, todayKey]);
+  }, [isTodayScheduleView, realToday, realTodayKey, scheduleView, scheduleYear]);
 
   useEffect(() => {
     if (
       !isTodayScheduleView ||
       scheduleView !== 'agenda' ||
-      scheduleYear !== today.getFullYear() ||
+      scheduleYear !== realToday.getFullYear() ||
       yearlyScheduleGroups.length === 0
     ) {
       return;
     }
 
     const agendaDays = yearlyScheduleGroups.flatMap((group) => group.days);
-    const firstUpcomingDay = agendaDays.find((day) => day.dateKey >= todayKey);
+    const firstUpcomingDay = agendaDays.find((day) => day.dateKey >= realTodayKey);
     const targetDay = firstUpcomingDay ?? agendaDays[agendaDays.length - 1];
 
     if (!targetDay) {
       return;
     }
 
-    const scrollKey = `schedule-agenda:${scheduleYear}:${todayKey}:${targetDay.dateKey}`;
+    const scrollKey = `schedule-agenda:${scheduleYear}:${realTodayKey}:${targetDay.dateKey}`;
 
     if (scheduleAgendaScrollYearRef.current === scrollKey) {
       return;
@@ -7898,7 +8337,7 @@ function App() {
         .querySelector<HTMLElement>(`[data-schedule-agenda-date="${targetDay.dateKey}"]`)
         ?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
-  }, [isTodayScheduleView, scheduleView, scheduleYear, today, todayKey, yearlyScheduleGroups]);
+  }, [isTodayScheduleView, realToday, realTodayKey, scheduleView, scheduleYear, yearlyScheduleGroups]);
   useEffect(() => {
     if (!isLibraryRecordView || getDateKey(recordMonth) !== getDateKey(getMonthStart(today))) {
       return;
@@ -8219,6 +8658,13 @@ function App() {
   useEffect(() => {
     localStorage.setItem(RECORD_DISPLAY_MODE_STORAGE_KEY, JSON.stringify(recordDisplayMode));
   }, [recordDisplayMode]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY,
+      questProgressDisplayMode,
+    );
+  }, [questProgressDisplayMode]);
 
   useEffect(() => {
     if (!((page === 'library' && menuView === 'recordAnyMemo') || page === 'memo')) {
@@ -9663,6 +10109,11 @@ function App() {
 
   const refreshDailyQuestMaster = async (options: { includeInactive?: boolean } = {}) => {
     if (!supabase) {
+      const cachedCandidates = loadDailyQuestMasterCache();
+      if (options.includeInactive) {
+        setDailyQuestAdminCandidates(cachedCandidates);
+      }
+      setDailyNudgeCandidates(cachedCandidates);
       setDailyQuestMasterStatus('cache');
       setDailyQuestMasterMessage('Supabase未設定のため、端末内キャッシュまたは予備候補を使用しています。');
       return;
@@ -9705,12 +10156,18 @@ function App() {
       }
 
       const cachedCandidates = loadDailyQuestMasterCache();
+      if (options.includeInactive) {
+        setDailyQuestAdminCandidates(cachedCandidates);
+      }
       setDailyNudgeCandidates(cachedCandidates);
       setDailyQuestMasterStatus('cache');
       setDailyQuestMasterMessage('共通候補が空のため、端末内キャッシュまたは予備候補を使用しています。');
     } catch (error) {
       console.warn('Daily quest master fetch failed:', error);
       const cachedCandidates = loadDailyQuestMasterCache();
+      if (options.includeInactive) {
+        setDailyQuestAdminCandidates(cachedCandidates);
+      }
       setDailyNudgeCandidates(cachedCandidates);
       setDailyQuestMasterStatus('cache');
       setDailyQuestMasterMessage('共通候補を取得できませんでした。端末内キャッシュまたは予備候補を使用しています。');
@@ -9785,6 +10242,7 @@ function App() {
       setIsAdminUser(false);
       setDailyQuestAdminCandidates([]);
       setNightlyQuestAdminCandidates([]);
+      setWelcomeCommentAdminCandidates([]);
       return;
     }
 
@@ -9807,15 +10265,18 @@ function App() {
       if (nextIsAdmin) {
         void refreshDailyQuestMaster({ includeInactive: true });
         void refreshNightlyQuestMaster({ includeInactive: true });
+        void refreshWelcomeCommentMaster({ includeInactive: true });
       } else {
         setDailyQuestAdminCandidates([]);
         setNightlyQuestAdminCandidates([]);
+        setWelcomeCommentAdminCandidates([]);
       }
     } catch (error) {
       console.warn('Admin status check failed:', error);
       setIsAdminUser(false);
       setDailyQuestAdminCandidates([]);
       setNightlyQuestAdminCandidates([]);
+      setWelcomeCommentAdminCandidates([]);
     } finally {
       setIsAdminChecking(false);
     }
@@ -10257,6 +10718,376 @@ function App() {
       setNightlyQuestMasterMessage('削除に失敗しました。');
     } finally {
       setIsNightlyQuestMasterBusy(false);
+    }
+  };
+
+  const getWelcomeCommentMasterPayload = (candidate: WelcomeCommentCandidate) => ({
+    slug: candidate.id,
+    comment: candidate.comment.trim() || '今日も来てくれてうれしい。ゆるっといこう。',
+    is_active: candidate.enabled,
+    sort_order: candidate.order,
+  });
+
+  const refreshWelcomeCommentMaster = async (options: { includeInactive?: boolean } = {}) => {
+    if (!supabase) {
+      setWelcomeCommentMasterStatus('cache');
+      setWelcomeCommentMasterMessage('Supabase未設定のため、端末内キャッシュまたは予備候補を使用しています。');
+      return;
+    }
+
+    setWelcomeCommentMasterStatus('loading');
+
+    try {
+      let query = supabase
+        .from('welcome_comment_master')
+        .select('id, slug, comment, is_active, sort_order, created_at, updated_at')
+        .order('sort_order', { ascending: true });
+
+      if (!options.includeInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      const candidates = ((data ?? []) as WelcomeCommentMasterRow[])
+        .map((row, index) => mapWelcomeCommentMasterRowToCandidate(row, index))
+        .sort((first, second) => first.order - second.order);
+      const activeCandidates = candidates.filter((candidate) => candidate.enabled);
+
+      if (options.includeInactive) {
+        setWelcomeCommentAdminCandidates(candidates);
+      }
+
+      if (activeCandidates.length > 0) {
+        setWelcomeCommentCandidates(activeCandidates);
+        localStorage.setItem(WELCOME_COMMENT_MASTER_CACHE_STORAGE_KEY, JSON.stringify(activeCandidates));
+        setWelcomeCommentMasterStatus('success');
+        setWelcomeCommentMasterMessage('全プレイヤー共通のウェルカムコメントを取得しました。');
+        return;
+      }
+
+      const cachedCandidates = loadWelcomeCommentMasterCache();
+      if (options.includeInactive) {
+        setWelcomeCommentAdminCandidates(cachedCandidates);
+      }
+      setWelcomeCommentCandidates(cachedCandidates);
+      setWelcomeCommentMasterStatus('cache');
+      setWelcomeCommentMasterMessage('共通候補が空のため、端末内キャッシュまたは予備候補を使用しています。');
+    } catch (error) {
+      console.warn('Welcome comment master fetch failed:', error);
+      const cachedCandidates = loadWelcomeCommentMasterCache();
+      if (options.includeInactive) {
+        setWelcomeCommentAdminCandidates(cachedCandidates);
+      }
+      setWelcomeCommentCandidates(cachedCandidates);
+      setWelcomeCommentMasterStatus('cache');
+      setWelcomeCommentMasterMessage('共通候補を取得できませんでした。端末内キャッシュまたは予備候補を使用しています。');
+    }
+  };
+
+  const updateWelcomeCommentAdminCandidate = (
+    candidateId: string,
+    field: keyof Pick<WelcomeCommentCandidate, 'comment' | 'enabled'>,
+    value: string | boolean,
+  ) => {
+    setWelcomeCommentAdminCandidates((currentCandidates) =>
+      currentCandidates.map((candidate) =>
+        candidate.id === candidateId
+          ? { ...candidate, [field]: value }
+          : candidate,
+      ),
+    );
+  };
+
+  const saveWelcomeCommentMasterCandidate = async (candidate: WelcomeCommentCandidate) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setWelcomeCommentMasterMessage('管理者ログインが必要です。');
+      return false;
+    }
+
+    setIsWelcomeCommentMasterBusy(true);
+    setWelcomeCommentMasterMessage('');
+
+    try {
+      const { data, error } = await supabase
+        .from('welcome_comment_master')
+        .upsert(
+          {
+            ...getWelcomeCommentMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          },
+          { onConflict: 'slug' },
+        )
+        .select('id, slug, comment, is_active, sort_order, created_at, updated_at')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const savedCandidate = mapWelcomeCommentMasterRowToCandidate(
+        data as WelcomeCommentMasterRow,
+        0,
+      );
+
+      setWelcomeCommentAdminCandidates((currentCandidates) =>
+        currentCandidates
+          .map((currentCandidate) =>
+            currentCandidate.id === candidate.id ? savedCandidate : currentCandidate,
+          )
+          .sort((first, second) => first.order - second.order),
+      );
+      await refreshWelcomeCommentMaster({ includeInactive: true });
+      setWelcomeCommentMasterMessage('全プレイヤー共通のウェルカムコメントを更新しました。');
+      return true;
+    } catch (error) {
+      console.warn('Welcome comment master save failed:', error);
+      setWelcomeCommentMasterMessage('更新に失敗しました。変更内容を確認してください。');
+      return false;
+    } finally {
+      setIsWelcomeCommentMasterBusy(false);
+    }
+  };
+
+  const moveWelcomeCommentAdminCandidate = async (candidateId: string, direction: -1 | 1) => {
+    if (!supabase || !authUser || !isAdminUser || isWelcomeCommentMasterBusy) {
+      return;
+    }
+
+    const previousCandidates = welcomeCommentAdminCandidates;
+    const orderedCandidates = [...previousCandidates].sort(
+      (first, second) => first.order - second.order,
+    );
+    const currentIndex = orderedCandidates.findIndex((candidate) => candidate.id === candidateId);
+    const nextIndex = currentIndex + direction;
+
+    if (
+      currentIndex === -1 ||
+      nextIndex < 0 ||
+      nextIndex >= orderedCandidates.length
+    ) {
+      return;
+    }
+
+    const nextCandidates = [...orderedCandidates];
+    const [movedCandidate] = nextCandidates.splice(currentIndex, 1);
+
+    nextCandidates.splice(nextIndex, 0, movedCandidate);
+
+    const reorderedCandidates = nextCandidates.map((candidate, index) => ({
+      ...candidate,
+      order: (index + 1) * 10,
+    }));
+
+    setWelcomeCommentAdminCandidates(reorderedCandidates);
+    setIsWelcomeCommentMasterBusy(true);
+    setWelcomeCommentMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('welcome_comment_master')
+        .upsert(
+          reorderedCandidates.map((candidate) => ({
+            ...getWelcomeCommentMasterPayload(candidate),
+            created_by: authUser.id,
+            updated_by: authUser.id,
+          })),
+          { onConflict: 'slug' },
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshWelcomeCommentMaster({ includeInactive: true });
+      setWelcomeCommentMasterMessage('並び順を保存しました。');
+    } catch (error) {
+      console.warn('Welcome comment master reorder failed:', error);
+      setWelcomeCommentAdminCandidates(previousCandidates);
+      setWelcomeCommentMasterMessage('並び替えの保存に失敗しました。');
+    } finally {
+      setIsWelcomeCommentMasterBusy(false);
+    }
+  };
+
+  const addWelcomeCommentAdminCandidate = () => {
+    const newCandidateId = createRoutineId('welcome-comment');
+
+    setWelcomeCommentAdminCandidates((currentCandidates) => [
+      ...currentCandidates,
+      {
+        id: newCandidateId,
+        comment: '今日も来てくれてうれしい。ゆるっといこう。',
+        enabled: true,
+        order:
+          currentCandidates.length === 0
+            ? 10
+            : Math.max(...currentCandidates.map((candidate) => candidate.order)) + 10,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  };
+
+  const deleteWelcomeCommentAdminCandidate = async (candidateId: string) => {
+    if (!supabase || !authUser || !isAdminUser) {
+      setWelcomeCommentMasterMessage('管理者ログインが必要です。');
+      return;
+    }
+
+    const candidate = welcomeCommentAdminCandidates.find(
+      (currentCandidate) => currentCandidate.id === candidateId,
+    );
+
+    if (!candidate) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `「${candidate.comment}」を共通候補から削除しますか？今日すでに表示済みのウェルカムコメントは残ります。`,
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setIsWelcomeCommentMasterBusy(true);
+    setWelcomeCommentMasterMessage('');
+
+    try {
+      const { error } = await supabase
+        .from('welcome_comment_master')
+        .delete()
+        .eq('slug', candidate.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await refreshWelcomeCommentMaster({ includeInactive: true });
+      setWelcomeCommentMasterMessage('全プレイヤー共通のウェルカムコメントを更新しました。');
+    } catch (error) {
+      console.warn('Welcome comment master delete failed:', error);
+      setWelcomeCommentMasterMessage('削除に失敗しました。');
+    } finally {
+      setIsWelcomeCommentMasterBusy(false);
+    }
+  };
+
+  const createWelcomeDisplayState = (
+    dateKey: string,
+    streakCount: number,
+    candidates = welcomeCommentCandidates,
+  ): WelcomeDisplayState => {
+    const candidate =
+      selectWelcomeCommentCandidate(dateKey, candidates) ??
+      defaultWelcomeCommentCandidates[0];
+
+    return {
+      dateKey,
+      streakCount: Math.max(1, streakCount),
+      commentId: candidate.id,
+      comment: candidate.comment,
+      shownAt: new Date().toISOString(),
+    };
+  };
+
+  const showWelcomeWithLocalFallback = (dateKey: string) => {
+    const currentStatus = loadLocalWelcomeStatus();
+
+    if (currentStatus?.dateKey === dateKey) {
+      return;
+    }
+
+    const yesterdayKey = getDateKey(addDays(getDateFromKey(dateKey), -1));
+    const nextStreak = currentStatus?.dateKey === yesterdayKey
+      ? currentStatus.streakCount + 1
+      : 1;
+    const nextStatus = createWelcomeDisplayState(dateKey, nextStreak);
+
+    saveLocalWelcomeStatus(nextStatus);
+    setWelcomeDisplay(nextStatus);
+  };
+
+  const ensureWelcomeForToday = async (dateKey: string, user: User | null) => {
+    const attemptKey = `${user?.id ?? 'local'}:${dateKey}`;
+
+    if (welcomeAttemptedKeyRef.current === attemptKey) {
+      return;
+    }
+
+    welcomeAttemptedKeyRef.current = attemptKey;
+
+    if (!supabase || !user) {
+      showWelcomeWithLocalFallback(dateKey);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('welcome_comment_status')
+        .select('last_seen_date, streak_count, selected_comment_id, selected_comment, shown_at, updated_at')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      const currentStatus = data as WelcomeStatusRow | null;
+
+      if (currentStatus?.last_seen_date === dateKey) {
+        if (
+          currentStatus.selected_comment_id &&
+          currentStatus.selected_comment &&
+          currentStatus.shown_at
+        ) {
+          saveLocalWelcomeStatus({
+            dateKey,
+            streakCount: Math.max(1, currentStatus.streak_count ?? 1),
+            commentId: currentStatus.selected_comment_id,
+            comment: currentStatus.selected_comment,
+            shownAt: currentStatus.shown_at,
+          });
+        }
+
+        return;
+      }
+
+      const yesterdayKey = getDateKey(addDays(getDateFromKey(dateKey), -1));
+      const nextStreak = currentStatus?.last_seen_date === yesterdayKey
+        ? (currentStatus.streak_count ?? 0) + 1
+        : 1;
+      const nextStatus = createWelcomeDisplayState(dateKey, nextStreak);
+
+      const { error: upsertError } = await supabase
+        .from('welcome_comment_status')
+        .upsert(
+          {
+            user_id: user.id,
+            last_seen_date: nextStatus.dateKey,
+            streak_count: nextStatus.streakCount,
+            selected_comment_id: nextStatus.commentId,
+            selected_comment: nextStatus.comment,
+            shown_at: nextStatus.shownAt,
+            updated_at: nextStatus.shownAt,
+          },
+          { onConflict: 'user_id' },
+        );
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      saveLocalWelcomeStatus(nextStatus);
+      setWelcomeDisplay(nextStatus);
+    } catch (error) {
+      console.warn('Welcome comment status sync failed:', error);
+      showWelcomeWithLocalFallback(dateKey);
     }
   };
 
@@ -12496,6 +13327,7 @@ function App() {
   useEffect(() => {
     void refreshDailyQuestMaster();
     void refreshNightlyQuestMaster();
+    void refreshWelcomeCommentMaster();
   }, []);
 
   useEffect(() => {
@@ -12550,6 +13382,10 @@ function App() {
       }
     })();
   }, [authUser]);
+
+  useEffect(() => {
+    void ensureWelcomeForToday(todayKey, authUser);
+  }, [authUser, todayKey]);
 
   useEffect(() => {
     const retryPendingCloudBackup = () => {
@@ -14808,8 +15644,8 @@ function App() {
     scheduleTodayScrollMonthRef.current = null;
     scheduleListScrollYearRef.current = null;
     setScheduleView('list');
-    setScheduleYear(today.getFullYear());
-    setScheduleMonth(getMonthStart(today));
+    setScheduleYear(realToday.getFullYear());
+    setScheduleMonth(getMonthStart(realToday));
     setSelectedScheduleYearMonth(null);
     setSelectedScheduleDate(null);
     setActiveScheduleMenuId(null);
@@ -14912,8 +15748,8 @@ function App() {
       scheduleListScrollYearRef.current = null;
       scheduleAgendaScrollYearRef.current = null;
       setMenuView('list');
-      setScheduleMonth(getMonthStart(today));
-      setScheduleYear(today.getFullYear());
+      setScheduleMonth(getMonthStart(realToday));
+      setScheduleYear(realToday.getFullYear());
       setSelectedScheduleYearMonth(null);
       setSelectedScheduleDate(null);
       setScheduleView(INITIAL_SCHEDULE_VIEW);
@@ -14946,8 +15782,8 @@ function App() {
       scheduleTodayScrollMonthRef.current = null;
       scheduleListScrollYearRef.current = null;
       scheduleAgendaScrollYearRef.current = null;
-      setScheduleMonth(getMonthStart(today));
-      setScheduleYear(today.getFullYear());
+      setScheduleMonth(getMonthStart(realToday));
+      setScheduleYear(realToday.getFullYear());
       setSelectedScheduleYearMonth(null);
       setSelectedScheduleDate(null);
       setScheduleView(INITIAL_SCHEDULE_VIEW);
@@ -14969,8 +15805,8 @@ function App() {
     scheduleAgendaScrollYearRef.current = null;
     setPage('schedule');
     setMenuView('list');
-    setScheduleMonth(getMonthStart(today));
-    setScheduleYear(today.getFullYear());
+    setScheduleMonth(getMonthStart(realToday));
+    setScheduleYear(realToday.getFullYear());
     setSelectedScheduleYearMonth(null);
     setSelectedScheduleDate(null);
     setScheduleView('today');
@@ -15589,25 +16425,38 @@ function App() {
     onEdit: () => void;
   }) => {
     const isFavorite = Boolean(textRecordFavorites[favoriteKey]);
+    const favoriteLabel = isFavorite ? 'お気に入りから外す' : 'お気に入りに追加';
 
     return (
       <div className="text-record-actions" aria-label="文章操作">
-        <button onClick={() => copyTextRecord(text)} type="button">
-          コピー
+        <button aria-label="コピー" onClick={() => copyTextRecord(text)} title="コピー" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <rect x="8" y="8" width="11" height="11" rx="2" />
+            <path d="M5 15V6a1 1 0 0 1 1-1h9" />
+          </svg>
         </button>
         <button
+          aria-label={favoriteLabel}
           aria-pressed={isFavorite}
           data-favorite={isFavorite ? 'true' : 'false'}
           onClick={() => toggleTextRecordFavorite(favoriteKey)}
+          title={favoriteLabel}
           type="button"
         >
           {isFavorite ? '★' : '☆'}
         </button>
-        <button onClick={() => shareTextRecord(text)} type="button">
-          共有
+        <button aria-label="共有" onClick={() => shareTextRecord(text)} title="共有" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 16V4" />
+            <path d="m7 9 5-5 5 5" />
+            <path d="M6 14v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-4" />
+          </svg>
         </button>
-        <button onClick={onEdit} type="button">
-          編集
+        <button aria-label="編集" onClick={onEdit} title="編集" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+            <path d="m14 8 2 2" />
+          </svg>
         </button>
       </div>
     );
@@ -16015,6 +16864,28 @@ function App() {
           {textRecordActionFeedback}
         </div>
       )}
+      {welcomeDisplay && (
+        <div
+          className="dialog-backdrop welcome-comment-backdrop"
+          onClick={() => setWelcomeDisplay(null)}
+          role="presentation"
+        >
+          <section
+            aria-labelledby="welcome-comment-title"
+            aria-modal="true"
+            className="welcome-comment-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <p className="welcome-comment-kicker">🌱 おかえり！</p>
+            <h2 id="welcome-comment-title">連続ログイン {welcomeDisplay.streakCount}日目</h2>
+            <p className="welcome-comment-text">{welcomeDisplay.comment}</p>
+            <button onClick={() => setWelcomeDisplay(null)} type="button">
+              はじめる
+            </button>
+          </section>
+        </div>
+      )}
       {sleepRecordPickerDateKey && typeof document !== 'undefined' && createPortal(
         <div
           className="dialog-backdrop sleep-record-dialog-backdrop"
@@ -16258,9 +17129,6 @@ function App() {
                     <p className="quest-proficiency-rank">
                       <span>{proficiency.icon}</span>
                       <strong>{proficiency.label}</strong>
-                    </p>
-                    <p className="mastery-stars">
-                      {formatQuestProficiencyStars(proficiency.level)}
                     </p>
                   </section>
                   <dl className="quest-management-metrics">
@@ -17068,29 +17936,56 @@ function App() {
                 <p>全プレイヤー共通のhibitin設定を管理します。</p>
               </div>
               <button
-                disabled={isDailyQuestMasterBusy || isNightlyQuestMasterBusy}
+                disabled={
+                  isDailyQuestMasterBusy ||
+                  isNightlyQuestMasterBusy ||
+                  isWelcomeCommentMasterBusy
+                }
                 onClick={() => {
                   void refreshDailyQuestMaster({ includeInactive: true });
                   void refreshNightlyQuestMaster({ includeInactive: true });
+                  void refreshWelcomeCommentMaster({ includeInactive: true });
                 }}
                 type="button"
               >
                 再取得
               </button>
             </div>
-            <div className="supabase-connection-status" data-status={dailyQuestMasterStatus}>
-              <span>ログインクエスト共通マスター</span>
-              <strong>{dailyQuestMasterStatusLabels[dailyQuestMasterStatus]}</strong>
+            <div className="admin-management-tabs" aria-label="管理項目切り替え">
+              {([
+                ['login', 'ログイン'],
+                ['nightly', 'おやすみ'],
+                ['welcome', 'ウェルカム'],
+              ] as const).map(([tabName, label]) => (
+                <button
+                  aria-current={activeAdminManagementTab === tabName ? 'page' : undefined}
+                  data-active={activeAdminManagementTab === tabName ? 'true' : 'false'}
+                  key={tabName}
+                  onClick={() => setActiveAdminManagementTab(tabName)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div className="settings-header compact-settings-header">
-              <div>
-                <h3>ログインクエスト管理</h3>
-                <p>
-                  ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
-                </p>
-              </div>
-            </div>
-            <div className="daily-nudge-admin-list">
+            {activeAdminManagementTab === 'login' && (
+              <>
+                <details className="admin-master-info">
+                  <summary>マスター情報</summary>
+                  <div className="supabase-connection-status" data-status={dailyQuestMasterStatus}>
+                    <span>ログインクエスト共通マスター</span>
+                    <strong>{dailyQuestMasterStatusLabels[dailyQuestMasterStatus]}</strong>
+                  </div>
+                  <p>
+                    ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
+                  </p>
+                </details>
+                <div className="settings-header compact-settings-header">
+                  <div>
+                    <h3>ログインクエスト管理</h3>
+                  </div>
+                </div>
+                <div className="daily-nudge-admin-list">
               {sortDailyNudgeAdminCandidates(dailyQuestAdminCandidates)
                 .map((candidate, index, orderedCandidates) => (
                   <article className="daily-nudge-admin-card" key={candidate.id}>
@@ -17206,19 +18101,26 @@ function App() {
             {dailyQuestMasterMessage && (
               <p className="account-message">{dailyQuestMasterMessage}</p>
             )}
-            <div className="supabase-connection-status" data-status={nightlyQuestMasterStatus}>
-              <span>おやすみクエスト共通マスター</span>
-              <strong>{dailyQuestMasterStatusLabels[nightlyQuestMasterStatus]}</strong>
-            </div>
-            <div className="settings-header compact-settings-header">
-              <div>
-                <h3>おやすみクエスト管理</h3>
-                <p>
-                  ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
-                </p>
-              </div>
-            </div>
-            <div className="daily-nudge-admin-list">
+              </>
+            )}
+            {activeAdminManagementTab === 'nightly' && (
+              <>
+                <details className="admin-master-info">
+                  <summary>マスター情報</summary>
+                  <div className="supabase-connection-status" data-status={nightlyQuestMasterStatus}>
+                    <span>おやすみクエスト共通マスター</span>
+                    <strong>{dailyQuestMasterStatusLabels[nightlyQuestMasterStatus]}</strong>
+                  </div>
+                  <p>
+                    ここで保存した候補は全プレイヤー共通で使われます。今日すでに割り当て済みの記録は変更されません。
+                  </p>
+                </details>
+                <div className="settings-header compact-settings-header">
+                  <div>
+                    <h3>おやすみクエスト管理</h3>
+                  </div>
+                </div>
+                <div className="daily-nudge-admin-list">
               {sortDailyNudgeAdminCandidates(nightlyQuestAdminCandidates)
                 .map((candidate, index, orderedCandidates) => (
                   <article className="daily-nudge-admin-card" key={candidate.id}>
@@ -17333,6 +18235,109 @@ function App() {
             </button>
             {nightlyQuestMasterMessage && (
               <p className="account-message">{nightlyQuestMasterMessage}</p>
+            )}
+              </>
+            )}
+            {activeAdminManagementTab === 'welcome' && (
+              <>
+                <details className="admin-master-info">
+                  <summary>マスター情報</summary>
+                  <div className="supabase-connection-status" data-status={welcomeCommentMasterStatus}>
+                    <span>ウェルカムコメント共通マスター</span>
+                    <strong>{dailyQuestMasterStatusLabels[welcomeCommentMasterStatus]}</strong>
+                  </div>
+                  <p>
+                    日付が変わって最初に開いた時だけ表示する、全プレイヤー共通の歓迎コメントを管理します。
+                  </p>
+                </details>
+                <div className="settings-header compact-settings-header">
+                  <div>
+                    <h3>ウェルカムコメント管理</h3>
+                  </div>
+                </div>
+                <div className="daily-nudge-admin-list">
+              {sortWelcomeCommentAdminCandidates(welcomeCommentAdminCandidates)
+                .map((candidate, index, orderedCandidates) => (
+                  <article className="daily-nudge-admin-card" key={candidate.id}>
+                    <div className="daily-nudge-admin-card-header">
+                      <label>
+                        <input
+                          checked={candidate.enabled}
+                          disabled={isWelcomeCommentMasterBusy}
+                          onChange={(event) => {
+                            updateWelcomeCommentAdminCandidate(
+                              candidate.id,
+                              'enabled',
+                              event.target.checked,
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{candidate.enabled ? '有効' : '無効'}</span>
+                      </label>
+                      <div className="daily-nudge-admin-card-actions">
+                        <button
+                          disabled={isWelcomeCommentMasterBusy || index === 0}
+                          onClick={() => void moveWelcomeCommentAdminCandidate(candidate.id, -1)}
+                          type="button"
+                        >
+                          上へ
+                        </button>
+                        <button
+                          disabled={isWelcomeCommentMasterBusy || index === orderedCandidates.length - 1}
+                          onClick={() => void moveWelcomeCommentAdminCandidate(candidate.id, 1)}
+                          type="button"
+                        >
+                          下へ
+                        </button>
+                        <button
+                          disabled={isWelcomeCommentMasterBusy}
+                          onClick={() => void deleteWelcomeCommentAdminCandidate(candidate.id)}
+                          type="button"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                    <label>
+                      <span>コメント</span>
+                      <textarea
+                        disabled={isWelcomeCommentMasterBusy}
+                        onChange={(event) =>
+                          updateWelcomeCommentAdminCandidate(candidate.id, 'comment', event.target.value)
+                        }
+                        rows={2}
+                        value={candidate.comment}
+                      />
+                    </label>
+                    <p className="daily-nudge-admin-id">
+                      slug: {candidate.id}
+                      {candidate.masterId ? ` / id: ${candidate.masterId}` : ' / 未保存'}
+                    </p>
+                    <div className="daily-nudge-admin-card-actions">
+                      <button
+                        disabled={isWelcomeCommentMasterBusy}
+                        onClick={() => void saveWelcomeCommentMasterCandidate(candidate)}
+                        type="button"
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </article>
+                ))}
+            </div>
+            <button
+              className="daily-nudge-add-button"
+              disabled={isWelcomeCommentMasterBusy}
+              onClick={addWelcomeCommentAdminCandidate}
+              type="button"
+            >
+              候補追加
+            </button>
+            {welcomeCommentMasterMessage && (
+              <p className="account-message">{welcomeCommentMasterMessage}</p>
+            )}
+              </>
             )}
           </section>
         )}
@@ -17760,6 +18765,62 @@ function App() {
                 <span aria-hidden="true">🎮</span>
                 <h2>{isToday ? '今日のクエスト' : '昨日のクエスト'}</h2>
               </div>
+              {!isEditMode && (
+                <div className="growth-display-controls">
+                  <details className="quest-progress-mode-menu">
+                    <summary>
+                      {questProgressDisplayMode === 'growth' ? '🌱 成長度' : '⭐ 星'}
+                    </summary>
+                    <div aria-label="クエスト右端の表示" role="menu">
+                      <button
+                        aria-checked={questProgressDisplayMode === 'growth'}
+                        onClick={(event) => {
+                          setQuestProgressDisplayMode('growth');
+                          event.currentTarget.closest('details')?.removeAttribute('open');
+                        }}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span aria-hidden="true">
+                          {questProgressDisplayMode === 'growth' ? '●' : '○'}
+                        </span>
+                        🌱 成長度
+                      </button>
+                      <button
+                        aria-checked={questProgressDisplayMode === 'stars'}
+                        onClick={(event) => {
+                          setQuestProgressDisplayMode('stars');
+                          event.currentTarget.closest('details')?.removeAttribute('open');
+                        }}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span aria-hidden="true">
+                          {questProgressDisplayMode === 'stars' ? '●' : '○'}
+                        </span>
+                        ⭐ 星
+                      </button>
+                    </div>
+                  </details>
+                  <details className="quest-progress-guide">
+                    <summary aria-label="成長度の説明">?</summary>
+                    <div>
+                      <h3>🌱 成長度</h3>
+                      <p>
+                        最近の継続率と、これまでのクリア回数を表示します。継続率は数字の色、クリア回数はアイコンで変化します。
+                      </p>
+                      <p>
+                        始めて1ヶ月未満のクエストは、始めた日から計算します。
+                      </p>
+                      <h3>⭐ 星</h3>
+                      <p>
+                        クエストを続けることで育っていく星を表示します。星1〜3は3日連続、星4は5日連続、星5は7日連続で増えます。
+                      </p>
+                      <p>どちらも同じ達成履歴から見せ方だけを切り替えています。</p>
+                    </div>
+                  </details>
+                </div>
+              )}
             </div>
           )}
           {page === 'today' && (
@@ -17948,6 +19009,10 @@ function App() {
                     const coreRoutineLabel = coreRoutine.label
                       .replace('今日', coreRoutineDateLabel)
                       .replace('を残す', '');
+                    const coreRoutineMasteryStats =
+                      masteryStatsByItemId.get(`core:${coreRoutine.id}`);
+                    const coreRoutineQuestDisplayStats =
+                      getCoreRoutineQuestDisplayStats(coreRoutine);
 
                     return (
                       <div
@@ -18075,6 +19140,11 @@ function App() {
                             開く
                           </button>
                         </div>
+                        {page === 'today' &&
+                          !isEditMode &&
+                          (questProgressDisplayMode === 'growth'
+                            ? renderTodayQuestDisplayStats(coreRoutineQuestDisplayStats)
+                            : renderTodayQuestMasteryStars(coreRoutineMasteryStats))}
                       </div>
                     );
                   }
@@ -18104,6 +19174,7 @@ function App() {
                     isCoreRoutineSectionId(section.id) &&
                     !isFixedItem;
                   const itemMasteryStats = masteryStatsByItemId.get(item.id);
+                  const itemQuestDisplayStats = getTodayQuestDisplayStats(item, itemMasteryStats);
                   const questEmote = questEmotes[getQuestEmoteKey(selectedDateKey, item.id)];
                   return (
                     <div
@@ -18309,15 +19380,9 @@ function App() {
                       {page === 'today' &&
                         !isEditMode &&
                         !isBonusSection &&
-                        itemMasteryStats &&
-                        (itemMasteryStats.starCount > 0 || itemMasteryStats.trophyCount > 0) && (
-                        <span
-                          className="mastery-badge"
-                          title={`現在 ${itemMasteryStats.currentStreak}日連続 / 累計 ${itemMasteryStats.totalCompletions}回`}
-                        >
-                          {formatMasteryStars(itemMasteryStats.starCount, itemMasteryStats.trophyCount)}
-                        </span>
-                      )}
+                        (questProgressDisplayMode === 'growth'
+                          ? renderTodayQuestDisplayStats(itemQuestDisplayStats)
+                          : renderTodayQuestMasteryStars(itemMasteryStats))}
                       {questEmote && (
                         <div className="quest-emote" key={questEmote.id} role="status">
                           <span>{questEmote.message}</span>
@@ -18413,6 +19478,8 @@ function App() {
                       const inputId = `routine-${choiceQuestItem.id}`;
                       const isRoutineItemChecked =
                         isCheckMode && Boolean(selectedChoiceQuestRecord?.completed);
+                      const choiceQuestMasteryStats = masteryStatsByItemId.get(choiceQuestItem.id);
+                      const choiceQuestDisplayStats = getTodayQuestDisplayStats(choiceQuestItem);
 
                       return (
                         <div
@@ -18452,6 +19519,11 @@ function App() {
                               })}
                             </span>
                           </div>
+                          {page === 'today' &&
+                            !isEditMode &&
+                            (questProgressDisplayMode === 'growth'
+                              ? renderTodayQuestDisplayStats(choiceQuestDisplayStats)
+                              : renderTodayQuestMasteryStars(choiceQuestMasteryStats))}
                         </div>
                       );
                     }
@@ -18752,10 +19824,10 @@ function App() {
               ))}
             </div>
             {scheduleView === 'today' && (() => {
-              const todayScheduleItems = loadDailySchedule(today);
-              const todayHolidayName = getHolidayName(today);
-              const todayScheduleTitle = `${today.getMonth() + 1}月${today.getDate()}日（${
-                weekdayShortLabels[today.getDay()]
+              const todayScheduleItems = loadDailySchedule(realToday);
+              const todayHolidayName = getHolidayName(realToday);
+              const todayScheduleTitle = `${realToday.getMonth() + 1}月${realToday.getDate()}日（${
+                weekdayShortLabels[realToday.getDay()]
               }${todayHolidayName ? `・${todayHolidayName}` : ''}）`;
 
               return (
@@ -18772,7 +19844,7 @@ function App() {
                         <button
                           className="schedule-today-item"
                           key={scheduleItem.id}
-                          onClick={() => openScheduleEditor(today)}
+                          onClick={() => openScheduleEditor(realToday)}
                           type="button"
                         >
                           <time>{formatScheduleTimeLabel(scheduleItem.time)}</time>
@@ -18783,7 +19855,7 @@ function App() {
                   )}
                   <button
                     className="schedule-today-add-button"
-                    onClick={() => openScheduleEditor(today, { closeAfterAdd: true, resetDraft: true })}
+                    onClick={() => openScheduleEditor(realToday, { closeAfterAdd: true, resetDraft: true })}
                     type="button"
                   >
                     ＋ 予定を追加
@@ -18812,7 +19884,7 @@ function App() {
                 </div>
                 <button
                   className="schedule-agenda-add-button"
-                  onClick={() => openScheduleEditor(today)}
+                  onClick={() => openScheduleEditor(realToday)}
                   type="button"
                 >
                   ＋予定を追加
@@ -18832,9 +19904,9 @@ function App() {
                             return (
                               <article
                                 className="schedule-agenda-day"
-                                data-past={day.dateKey < todayKey ? 'true' : 'false'}
+                                data-past={day.dateKey < realTodayKey ? 'true' : 'false'}
                                 data-schedule-agenda-date={day.dateKey}
-                                data-today={day.dateKey === todayKey ? 'true' : 'false'}
+                                data-today={day.dateKey === realTodayKey ? 'true' : 'false'}
                                 key={day.dateKey}
                               >
                                 <button
@@ -18843,7 +19915,7 @@ function App() {
                                   type="button"
                                 >
                                   <span>{dateTitle}</span>
-                                  {day.dateKey === todayKey && <strong>今日</strong>}
+                                  {day.dateKey === realTodayKey && <strong>今日</strong>}
                                 </button>
                                 <div className="schedule-agenda-items">
                                   {day.items.map((scheduleItem) => (
@@ -18939,14 +20011,14 @@ function App() {
                                 className="schedule-list-day-button"
                                 data-day-kind={dayKind}
                                 data-has-schedule={scheduleItems.length > 0 ? 'true' : 'false'}
-                                data-today={dateKey === todayKey ? 'true' : 'false'}
+                                data-today={dateKey === realTodayKey ? 'true' : 'false'}
                                 key={dateKey}
                                 onClick={() => openScheduleEditor(date)}
                                 type="button"
                               >
                                 <span className="schedule-list-day-header">
                                   <span className="schedule-list-day-number">{date.getDate()}</span>
-                                  {dateKey === todayKey && (
+                                  {dateKey === realTodayKey && (
                                     <span className="schedule-list-today-badge">今日</span>
                                   )}
                                 </span>
@@ -19051,7 +20123,7 @@ function App() {
                             data-date-key={dateKey}
                             data-day-kind={dayKind}
                             data-empty={!hasSchedule ? 'true' : 'false'}
-                            data-today={dateKey === todayKey ? 'true' : 'false'}
+                            data-today={dateKey === realTodayKey ? 'true' : 'false'}
                             key={dateKey}
                           >
                             <button
@@ -19060,9 +20132,9 @@ function App() {
                               type="button"
                             >
                               <span className="record-day-date">🗓️ {dateTitle}</span>
-                              {(dateKey === todayKey || hasSchedule) && (
+                              {(dateKey === realTodayKey || hasSchedule) && (
                                 <span className="record-day-meta">
-                                  {dateKey === todayKey && <strong>今日</strong>}
+                                  {dateKey === realTodayKey && <strong>今日</strong>}
                                   {hasSchedule && `${scheduleItems.length}件`}
                                 </span>
                               )}
