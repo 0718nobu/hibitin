@@ -11257,19 +11257,21 @@ h1 {
 
 .quest-progress-badge {
   display: inline-flex;
-  min-height: 24px;
+  min-width: 44px;
+  min-height: 30px;
   flex: 0 0 auto;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 1px;
   border: 1px solid rgb(57 129 93 / 14%);
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 3px 5px;
   background: rgb(255 255 255 / 62%);
   color: #496156;
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 950;
-  line-height: 1.15;
+  line-height: 1.05;
   white-space: nowrap;
 }
 
@@ -11279,33 +11281,40 @@ h1 {
   gap: 2px;
 }
 
+.quest-progress-rate {
+  font-size: 0.68rem;
+}
+
+.quest-progress-count {
+  font-size: 0.62rem;
+}
+
 .quest-progress-badge [data-consistency-tone] {
   font-weight: 1000;
 }
 
 .quest-progress-badge [data-consistency-tone='neutral'] {
-  color: #6f7d76;
+  color: #8a948e;
 }
 
 .quest-progress-badge [data-consistency-tone='soft'] {
-  color: #5f8b72;
+  color: #789486;
 }
 
 .quest-progress-badge [data-consistency-tone='steady'] {
-  color: #2f7d55;
+  color: #63a579;
 }
 
 .quest-progress-badge [data-consistency-tone='strong'] {
-  color: #138152;
+  color: #2f8a5d;
 }
 
 .quest-progress-badge [data-consistency-tone='special'] {
-  color: #0b8f7a;
+  color: #176b49;
 }
 
 .quest-progress-badge [data-consistency-tone='complete'] {
-  color: #9a6500;
-  text-shadow: 0 1px 0 rgb(255 255 255 / 70%);
+  color: #b38300;
 }
 
 .growth-display-controls {
@@ -12778,14 +12787,7 @@ h1 {
 
 @media (max-width: 430px) {
   .quest-progress-badge {
-    min-width: 58px;
-    flex-direction: column;
-    gap: 1px;
-    padding: 3px 5px;
-    font-size: 0.68rem;
-  }
-
-  .quest-progress-badge > span[aria-hidden='true'] {
-    display: none;
+    min-width: 42px;
+    padding-inline: 4px;
   }
 }

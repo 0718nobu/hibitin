@@ -855,8 +855,7 @@ const NIGHTLY_NUDGE_RECORDS_STORAGE_KEY = 'hibitin:nightlyNudgeRecords:v1';
 const CHOICE_QUEST_RECORDS_STORAGE_KEY = 'hibitin:choiceQuestRecords:v1';
 const SLEEP_RECORDS_STORAGE_KEY = 'hibitin:sleepRecords:v1';
 const TEXT_RECORD_FAVORITES_STORAGE_KEY = 'hibitin:textRecordFavorites:v1';
-const QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY = 'hibitinSystem:questProgressDisplayMode:v1';
-const LEGACY_GROWTH_DISPLAY_VISIBILITY_STORAGE_KEY = 'hibitinSystem:growthDisplayVisible:v1';
+const TEXT_RECORD_ARCHIVES_STORAGE_KEY = 'hibitin:textRecordArchives:v1';
 const LEGACY_RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:lifestyleSettings:v1';
 const RHYTHM_SETTINGS_STORAGE_KEY = 'hibitin:rhythmSettings:v1';
 const GAME_MODE_STORAGE_KEY = 'hibitin:gameMode:v1';
@@ -5419,9 +5418,10 @@ type AnyMemoItem = {
 };
 
 type AnyMemoListItem = AnyMemoItem & {
-  source: 'item' | 'legacy';
+  source: 'item' | 'legacy' | 'folder';
   dateKey?: string;
   hasTime: boolean;
+  folderId?: string;
 };
 
 type AnyMemoFolder = {
@@ -5436,7 +5436,7 @@ type AnyMemoFolderMemoItem = AnyMemoItem & {
   folderId: string;
 };
 
-type AnyMemoTabName = 'memo' | 'favorites' | 'folders';
+type AnyMemoTabName = 'memo' | 'favorites' | 'folders' | 'archives';
 
 const createDailyRecordEntry = (
   text = '',
@@ -5877,11 +5877,19 @@ const getLegacyAnyMemoItems = (): AnyMemoListItem[] => {
   return legacyItems;
 };
 
-const getAnyMemoListItems = (items: AnyMemoItem[]): AnyMemoListItem[] =>
+const getAnyMemoListItems = (
+  items: AnyMemoItem[],
+  folderItems: AnyMemoFolderMemoItem[] = [],
+): AnyMemoListItem[] =>
   [
     ...items.map((item) => ({
       ...item,
       source: 'item' as const,
+      hasTime: true,
+    })),
+    ...folderItems.map((item) => ({
+      ...item,
+      source: 'folder' as const,
       hasTime: true,
     })),
     ...getLegacyAnyMemoItems(),
@@ -5929,32 +5937,6 @@ const loadRecordDisplayMode = (): RecordDisplayMode => {
   }
 };
 
-const loadQuestProgressDisplayMode = (): QuestProgressDisplayMode => {
-  const savedMode = localStorage.getItem(QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY);
-
-  if (savedMode === 'growth' || savedMode === 'stars') {
-    return savedMode;
-  }
-
-  try {
-    const parsedMode = JSON.parse(savedMode ?? 'null') as unknown;
-
-    if (parsedMode === 'growth' || parsedMode === 'stars') {
-      return parsedMode;
-    }
-  } catch {
-    // Fall through to the legacy visibility setting.
-  }
-
-  const legacyVisibility = localStorage.getItem(LEGACY_GROWTH_DISPLAY_VISIBILITY_STORAGE_KEY);
-
-  if (legacyVisibility === 'false') {
-    return 'stars';
-  }
-
-  return 'growth';
-};
-
 const loadTextRecordFavorites = (): Record<string, boolean> => {
   try {
     const parsedFavorites = JSON.parse(
@@ -5988,14 +5970,51 @@ const saveTextRecordFavorites = (favorites: Record<string, boolean>) => {
   localStorage.removeItem(TEXT_RECORD_FAVORITES_STORAGE_KEY);
 };
 
+const loadTextRecordArchives = (): Record<string, string> => {
+  try {
+    const parsedArchives = JSON.parse(
+      localStorage.getItem(TEXT_RECORD_ARCHIVES_STORAGE_KEY) ?? '{}',
+    ) as unknown;
+
+    if (!parsedArchives || typeof parsedArchives !== 'object' || Array.isArray(parsedArchives)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedArchives as Record<string, unknown>)
+        .filter(([key, value]) => key.trim() && isValidIsoDateString(value))
+        .map(([key, value]) => [key, value as string]),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveTextRecordArchives = (archives: Record<string, string>) => {
+  const activeArchives = Object.fromEntries(
+    Object.entries(archives).filter(([, archivedAt]) => isValidIsoDateString(archivedAt)),
+  );
+
+  if (Object.keys(activeArchives).length > 0) {
+    localStorage.setItem(TEXT_RECORD_ARCHIVES_STORAGE_KEY, JSON.stringify(activeArchives));
+    return;
+  }
+
+  localStorage.removeItem(TEXT_RECORD_ARCHIVES_STORAGE_KEY);
+};
+
 const getDailyTextRecordFavoriteKey = (
   kind: Extract<RecordViewName, 'memo' | 'events'>,
   dateKey: string,
   index: number,
 ) => `daily:${kind}:${dateKey}:${index}`;
 
-const getAnyMemoFavoriteKey = (item: Pick<AnyMemoListItem, 'id' | 'source' | 'dateKey'>) =>
-  item.source === 'legacy' && item.dateKey
+const getAnyMemoFavoriteKey = (
+  item: Pick<AnyMemoListItem, 'id' | 'source' | 'dateKey' | 'folderId'>,
+) =>
+  item.source === 'folder' || item.folderId
+    ? `anyMemo:folder:${item.id}`
+    : item.source === 'legacy' && item.dateKey
     ? `anyMemo:legacy:${item.dateKey}`
     : `anyMemo:item:${item.id}`;
 
@@ -6676,6 +6695,7 @@ const createNewGameSaveBackup = (): BackupFile => ({
       [NIGHTLY_NUDGE_RECORDS_STORAGE_KEY]: {},
       [CHOICE_QUEST_RECORDS_STORAGE_KEY]: {},
       [SLEEP_RECORDS_STORAGE_KEY]: {},
+      [TEXT_RECORD_ARCHIVES_STORAGE_KEY]: {},
       [GAME_MODE_STORAGE_KEY]: 'player',
       [GAME_BALANCE_STORAGE_KEY]: defaultGameBalanceSettings,
       [PLAYER_ECONOMY_STORAGE_KEY]: createDefaultPlayerEconomy(),
@@ -7091,7 +7111,7 @@ function App() {
   const [recordDisplayMode, setRecordDisplayMode] =
     useState<RecordDisplayMode>(() => loadRecordDisplayMode());
   const [questProgressDisplayMode, setQuestProgressDisplayMode] =
-    useState<QuestProgressDisplayMode>(() => loadQuestProgressDisplayMode());
+    useState<QuestProgressDisplayMode>('stars');
   const [selectedQuestManagementItemKey, setSelectedQuestManagementItemKey] = useState<string | null>(null);
   const [questManagementEditText, setQuestManagementEditText] = useState('');
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<Date | null>(null);
@@ -7153,6 +7173,9 @@ function App() {
   const [textRecordActionFeedback, setTextRecordActionFeedback] = useState('');
   const [textRecordFavorites, setTextRecordFavorites] = useState<Record<string, boolean>>(
     () => loadTextRecordFavorites(),
+  );
+  const [textRecordArchives, setTextRecordArchives] = useState<Record<string, string>>(
+    () => loadTextRecordArchives(),
   );
   const [anyMemoFolders, setAnyMemoFolders] = useState<AnyMemoFolder[]>(() => loadAnyMemoFolders());
   const [anyMemoFolderItems, setAnyMemoFolderItems] = useState<AnyMemoFolderMemoItem[]>(() =>
@@ -7993,11 +8016,10 @@ function App() {
         className="quest-progress-badge"
         title={`直近30日 ${rateLabel} / 累計 ${stats.totalCompletions}回`}
       >
-        <span data-consistency-tone={consistencyTone}>
+        <span className="quest-progress-rate" data-consistency-tone={consistencyTone}>
           {rateLabel}
         </span>
-        <span aria-hidden="true">｜</span>
-        <span>
+        <span className="quest-progress-count">
           <span aria-hidden="true">{lifetimeIcon}</span>
           {stats.totalCompletions}回
         </span>
@@ -8168,25 +8190,25 @@ function App() {
   const visibleRecordDaySummaries = recordDisplayMode === 'withRecords' || recordDisplayMode === 'favorites'
     ? recordDaySummaries.filter((summary) => summary.hasRecordContent)
     : recordDaySummaries;
+  const allAnyMemoListItems = useMemo(
+    () => getAnyMemoListItems(anyMemoItems, anyMemoFolderItems),
+    [anyMemoFolderItems, anyMemoItems, recordRevision],
+  );
+  const isAnyMemoArchived = (item: Pick<AnyMemoListItem, 'id' | 'source' | 'dateKey' | 'folderId'>) =>
+    Boolean(textRecordArchives[getAnyMemoFavoriteKey(item)]);
   const anyMemoListItems = useMemo(
-    () => getAnyMemoListItems(anyMemoItems),
-    [anyMemoItems, recordRevision],
+    () => allAnyMemoListItems.filter((item) => !isAnyMemoArchived(item)),
+    [allAnyMemoListItems, textRecordArchives],
+  );
+  const archivedAnyMemoListItems = useMemo(
+    () => allAnyMemoListItems.filter((item) => isAnyMemoArchived(item)),
+    [allAnyMemoListItems, textRecordArchives],
   );
   const favoriteAnyMemoListItems = useMemo(() => {
-    const folderItems: AnyMemoListItem[] = anyMemoFolderItems.map((item) => ({
-      ...item,
-      source: 'item',
-      hasTime: true,
-    }));
-
-    return [...anyMemoListItems, ...folderItems].filter((item) => {
-      const favoriteKey = 'folderId' in item
-        ? getFolderMemoFavoriteKey(item)
-        : getAnyMemoFavoriteKey(item);
-
-      return Boolean(textRecordFavorites[favoriteKey]);
-    });
-  }, [anyMemoFolderItems, anyMemoListItems, textRecordFavorites]);
+    return anyMemoListItems.filter((item) =>
+      Boolean(textRecordFavorites[getAnyMemoFavoriteKey(item)]),
+    );
+  }, [anyMemoListItems, textRecordFavorites]);
   const sortedAnyMemoFolders = useMemo(
     () => [...anyMemoFolders].sort((first, second) =>
       Date.parse(second.updatedAt) - Date.parse(first.updatedAt),
@@ -8244,8 +8266,9 @@ function App() {
     () =>
       anyMemoFolderItems
         .filter((item) => item.folderId === selectedAnyMemoFolderId)
+        .filter((item) => !textRecordArchives[getFolderMemoFavoriteKey(item)])
         .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt)),
-    [anyMemoFolderItems, selectedAnyMemoFolderId],
+    [anyMemoFolderItems, selectedAnyMemoFolderId, textRecordArchives],
   );
   const selectedAnyMemoFolderPath = useMemo(
     () => getAnyMemoFolderPath(selectedAnyMemoFolderId),
@@ -8356,6 +8379,37 @@ function App() {
         ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
   }, [isLibraryRecordView, menuView, page, recordMonth, today, todayKey]);
+  const getLiveCheckedItemsForCalendarDate = (date: Date, dateKey: string) => {
+    if (dateKey === selectedDateKey) {
+      return checkedItems;
+    }
+
+    if (historySelectedDate && dateKey === historySelectedDateKey) {
+      return historyCheckedItems;
+    }
+
+    return loadCheckedItems(date);
+  };
+  const getLiveCoreRoutineCompletionForCalendarDate = (date: Date, dateKey: string) => {
+    const memoEntries =
+      dateKey === selectedDateKey && dailyMemoDateKey === selectedDateKey
+        ? dailyMemo
+        : historySelectedDate &&
+            dateKey === historySelectedDateKey &&
+            historyDailyMemoDateKey === historySelectedDateKey
+          ? historyDailyMemo
+          : loadDailyMemo(date);
+    const eventEntries =
+      dateKey === selectedDateKey && dailyEventDateKey === selectedDateKey
+        ? dailyEvent
+        : historySelectedDate &&
+            dateKey === historySelectedDateKey &&
+            historyDailyEventDateKey === historySelectedDateKey
+          ? historyDailyEvent
+          : loadDailyEvent(date);
+
+    return getCoreRoutineCompletion(memoEntries, eventEntries);
+  };
   const completionCalendarDays = useMemo(() => (
     getMonthDateCells(calendarMonth).map((date) => {
       if (!date) {
@@ -8381,8 +8435,8 @@ function App() {
       ));
       const daySections = buildDisplaySections(sections, rhythmSettings[baseTemplate]);
       const stats = addFixedRecordQuestStats(
-        calculateCompletionStats(daySections, loadCheckedItems(date)),
-        getCoreRoutineCompletion(loadDailyMemo(date), loadDailyEvent(date)),
+        calculateCompletionStats(daySections, getLiveCheckedItemsForCalendarDate(date, dateKey)),
+        getLiveCoreRoutineCompletionForCalendarDate(date, dateKey),
         dateKey <= todayKey,
         {
           completedCount: dateKey <= todayKey
@@ -8426,11 +8480,21 @@ function App() {
     dateOverrides,
     dateSnapshots,
     dailyNudgeRecords,
+    dailyEvent,
+    dailyEventDateKey,
+    dailyMemo,
+    dailyMemoDateKey,
     nightlyNudgeRecords,
     checkedItems,
+    historyDailyEvent,
+    historyDailyEventDateKey,
+    historyDailyMemo,
+    historyDailyMemoDateKey,
+    historySelectedDate,
     historyCheckedItems,
     historySelectedDateKey,
     rhythmSettings,
+    selectedDateKey,
     templateSettings,
     todayKey,
   ]);
@@ -8660,13 +8724,6 @@ function App() {
   }, [recordDisplayMode]);
 
   useEffect(() => {
-    localStorage.setItem(
-      QUEST_PROGRESS_DISPLAY_MODE_STORAGE_KEY,
-      questProgressDisplayMode,
-    );
-  }, [questProgressDisplayMode]);
-
-  useEffect(() => {
     if (!((page === 'library' && menuView === 'recordAnyMemo') || page === 'memo')) {
       return;
     }
@@ -8757,6 +8814,10 @@ function App() {
   useEffect(() => {
     saveTextRecordFavorites(textRecordFavorites);
   }, [textRecordFavorites]);
+
+  useEffect(() => {
+    saveTextRecordArchives(textRecordArchives);
+  }, [textRecordArchives]);
 
   useEffect(() => {
     if (!textRecordActionFeedback) {
@@ -14994,6 +15055,24 @@ function App() {
 
     if (item.source === 'legacy' && item.dateKey) {
       updateRecordAnyMemo(getDateFromKey(item.dateKey), text);
+    } else if (item.source === 'folder' && item.folderId) {
+      const timestamp = new Date().toISOString();
+      persistAnyMemoFolderItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.id === item.id
+            ? {
+                ...currentItem,
+                text,
+                updatedAt: timestamp,
+              }
+            : currentItem,
+        ),
+      );
+      persistAnyMemoFolders((currentFolders) =>
+        currentFolders.map((folder) =>
+          folder.id === item.folderId ? { ...folder, updatedAt: timestamp } : folder,
+        ),
+      );
     } else {
       persistAnyMemoItems((currentItems) =>
         currentItems.map((currentItem) =>
@@ -15022,6 +15101,10 @@ function App() {
       localStorage.removeItem(getDailyAnyMemoStorageKey(getDateFromKey(item.dateKey)));
       syncRecordAnyMemoToActiveDates(getDateFromKey(item.dateKey), '');
       setRecordRevision((revision) => revision + 1);
+    } else if (item.source === 'folder') {
+      persistAnyMemoFolderItems((currentItems) =>
+        currentItems.filter((currentItem) => currentItem.id !== item.id),
+      );
     } else {
       persistAnyMemoItems((currentItems) =>
         currentItems.filter((currentItem) => currentItem.id !== item.id),
@@ -15039,6 +15122,13 @@ function App() {
       localStorage.removeItem(getDailyAnyMemoStorageKey(getDateFromKey(item.dateKey)));
       syncRecordAnyMemoToActiveDates(getDateFromKey(item.dateKey), '');
       setRecordRevision((revision) => revision + 1);
+      return;
+    }
+
+    if (item.source === 'folder') {
+      persistAnyMemoFolderItems((currentItems) =>
+        currentItems.filter((currentItem) => currentItem.id !== item.id),
+      );
       return;
     }
 
@@ -15305,12 +15395,34 @@ function App() {
     }
 
     const timestamp = new Date().toISOString();
+
+    if (item.source === 'folder' && item.folderId) {
+      persistAnyMemoFolderItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.id === item.id
+            ? { ...currentItem, folderId, updatedAt: timestamp }
+            : currentItem,
+        ),
+      );
+      persistAnyMemoFolders((currentFolders) =>
+        currentFolders.map((folder) =>
+          folder.id === folderId || folder.id === item.folderId
+            ? { ...folder, updatedAt: timestamp }
+            : folder,
+        ),
+      );
+      setMovingAnyMemoId(null);
+      setNewMoveFolderName('');
+      setAnyMemoStatusMessage(`「${targetFolder.name}」へ移動しました`);
+      return;
+    }
+
     const movedItem: AnyMemoFolderMemoItem = {
-      id: item.source === 'item' ? item.id : createAnyMemoId(),
+      id: item.source === 'legacy' ? createAnyMemoId() : item.id,
       folderId,
       text: item.text,
       createdAt: item.createdAt,
-      updatedAt: item.updatedAt ?? timestamp,
+      updatedAt: timestamp,
     };
 
     removeAnyMemoFromSource(item);
@@ -15344,11 +15456,11 @@ function App() {
       updatedAt: timestamp,
     };
     const movedItem: AnyMemoFolderMemoItem = {
-      id: item.source === 'item' ? item.id : createAnyMemoId(),
+      id: item.source === 'legacy' ? createAnyMemoId() : item.id,
       folderId: folder.id,
       text: item.text,
       createdAt: item.createdAt,
-      updatedAt: item.updatedAt ?? timestamp,
+      updatedAt: timestamp,
     };
 
     removeAnyMemoFromSource(item);
@@ -16413,6 +16525,25 @@ function App() {
       ...currentFavorites,
       [favoriteKey]: !currentFavorites[favoriteKey],
     }));
+  };
+
+  const archiveAnyMemoItem = (item: AnyMemoListItem) => {
+    setTextRecordArchives((currentArchives) => ({
+      ...currentArchives,
+      [getAnyMemoFavoriteKey(item)]: new Date().toISOString(),
+    }));
+    setMovingAnyMemoId(null);
+    setNewMoveFolderName('');
+    setAnyMemoStatusMessage('保管しました');
+  };
+
+  const restoreArchivedAnyMemoItem = (item: AnyMemoListItem) => {
+    setTextRecordArchives((currentArchives) => {
+      const nextArchives = { ...currentArchives };
+      delete nextArchives[getAnyMemoFavoriteKey(item)];
+      return nextArchives;
+    });
+    setAnyMemoStatusMessage('一覧に戻しました');
   };
 
   const renderTextRecordActions = ({
@@ -18771,36 +18902,36 @@ function App() {
                     <summary>
                       {questProgressDisplayMode === 'growth' ? '🌱 成長度' : '⭐ 星'}
                     </summary>
-                    <div aria-label="クエスト右端の表示" role="menu">
-                      <button
-                        aria-checked={questProgressDisplayMode === 'growth'}
-                        onClick={(event) => {
-                          setQuestProgressDisplayMode('growth');
-                          event.currentTarget.closest('details')?.removeAttribute('open');
-                        }}
-                        role="menuitemradio"
-                        type="button"
-                      >
-                        <span aria-hidden="true">
-                          {questProgressDisplayMode === 'growth' ? '●' : '○'}
-                        </span>
-                        🌱 成長度
-                      </button>
-                      <button
-                        aria-checked={questProgressDisplayMode === 'stars'}
-                        onClick={(event) => {
-                          setQuestProgressDisplayMode('stars');
-                          event.currentTarget.closest('details')?.removeAttribute('open');
-                        }}
-                        role="menuitemradio"
-                        type="button"
-                      >
-                        <span aria-hidden="true">
-                          {questProgressDisplayMode === 'stars' ? '●' : '○'}
-                        </span>
-                        ⭐ 星
-                      </button>
-                    </div>
+                      <div aria-label="クエスト右端の表示" role="menu">
+                        <button
+                          aria-checked={questProgressDisplayMode === 'stars'}
+                          onClick={(event) => {
+                            setQuestProgressDisplayMode('stars');
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                          }}
+                          role="menuitemradio"
+                          type="button"
+                        >
+                          <span aria-hidden="true">
+                            {questProgressDisplayMode === 'stars' ? '●' : '○'}
+                          </span>
+                          ⭐ 星
+                        </button>
+                        <button
+                          aria-checked={questProgressDisplayMode === 'growth'}
+                          onClick={(event) => {
+                            setQuestProgressDisplayMode('growth');
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                          }}
+                          role="menuitemradio"
+                          type="button"
+                        >
+                          <span aria-hidden="true">
+                            {questProgressDisplayMode === 'growth' ? '●' : '○'}
+                          </span>
+                          🌱 成長度
+                        </button>
+                      </div>
                   </details>
                   <details className="quest-progress-guide">
                     <summary aria-label="成長度の説明">?</summary>
@@ -21450,6 +21581,7 @@ function App() {
                 ['memo', '一覧'],
                 ['favorites', 'お気に入り'],
                 ['folders', 'フォルダ'],
+                ['archives', '保管'],
               ] as const).map(([tabName, label]) => (
                 <button
                   aria-current={anyMemoTab === tabName ? 'page' : undefined}
@@ -21590,6 +21722,9 @@ function App() {
                                   </div>
                                 </section>
                               )}
+                              <button onClick={() => archiveAnyMemoItem(item)} type="button">
+                                保管する
+                              </button>
                               <button onClick={() => deleteAnyMemoItem(item)} type="button">
                                 削除
                               </button>
@@ -21754,6 +21889,162 @@ function App() {
               </section>
             )}
 
+            {anyMemoTab === 'archives' && (
+              <section className="quick-memo-list-section" aria-label="保管メモ">
+                <div className="quick-memo-list-heading">
+                  <h3>保管</h3>
+                  <span>{archivedAnyMemoListItems.length}件</span>
+                </div>
+                {archivedAnyMemoListItems.length === 0 ? (
+                  <p className="quick-memo-empty">保管中のメモはまだありません。</p>
+                ) : (
+                  <div className="quick-memo-list">
+                    {archivedAnyMemoListItems.map((item) => {
+                      const isEditing = editingAnyMemoId === item.id;
+                      const isExpanded = Boolean(expandedAnyMemoIds[item.id]);
+                      const lineCount = item.text.split(/\r?\n/).length;
+                      const isLongMemo = item.text.length > 120 || lineCount > 5;
+
+                      return (
+                        <article
+                          className="quick-memo-item"
+                          data-expanded={isExpanded ? 'true' : 'false'}
+                          key={getAnyMemoFavoriteKey(item)}
+                        >
+                          <div className="quick-memo-item-meta">
+                            <time dateTime={item.createdAt}>
+                              {formatAnyMemoTimestamp(item, today)}
+                            </time>
+                            <details className="quick-memo-menu">
+                              <summary aria-label="メモ操作">…</summary>
+                              <div className="quick-memo-menu-panel">
+                                <button onClick={() => restoreArchivedAnyMemoItem(item)} type="button">
+                                  一覧に戻す
+                                </button>
+                                <button onClick={() => startEditingAnyMemo(item)} type="button">
+                                  編集
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setMovingAnyMemoId((currentId) =>
+                                      currentId === item.id ? null : item.id,
+                                    );
+                                    setNewMoveFolderName('');
+                                  }}
+                                  type="button"
+                                >
+                                  フォルダへ移動
+                                </button>
+                                {movingAnyMemoId === item.id && (
+                                  <section
+                                    aria-label="移動先フォルダ"
+                                    className="quick-memo-move-panel"
+                                  >
+                                    <p>移動先を選ぶ</p>
+                                    {sortedAnyMemoFolders.length > 0 && (
+                                      <div className="quick-memo-move-folder-list">
+                                        {sortedAnyMemoFolders
+                                          .filter((folder) => folder.id !== item.folderId)
+                                          .map((folder) => (
+                                            <button
+                                              key={folder.id}
+                                              onClick={() => moveAnyMemoItemToFolder(item, folder.id)}
+                                              type="button"
+                                            >
+                                              📁 {getAnyMemoFolderDisplayName(folder)}
+                                            </button>
+                                          ))}
+                                      </div>
+                                    )}
+                                    <div className="quick-memo-new-folder-move">
+                                      <input
+                                        aria-label="新しい移動先フォルダ名"
+                                        onChange={(event) => setNewMoveFolderName(event.target.value)}
+                                        onKeyDown={(event) => {
+                                          if (event.key === 'Enter') {
+                                            createFolderAndMoveAnyMemoItem(item);
+                                          }
+                                        }}
+                                        placeholder="新しいフォルダ"
+                                        type="text"
+                                        value={newMoveFolderName}
+                                      />
+                                      <button
+                                        disabled={!newMoveFolderName.trim()}
+                                        onClick={() => createFolderAndMoveAnyMemoItem(item)}
+                                        type="button"
+                                      >
+                                        ＋ 新しいフォルダ
+                                      </button>
+                                    </div>
+                                  </section>
+                                )}
+                                <button onClick={() => deleteAnyMemoItem(item)} type="button">
+                                  削除
+                                </button>
+                              </div>
+                            </details>
+                          </div>
+
+                          {isEditing ? (
+                            <div className="quick-memo-edit">
+                              <textarea
+                                aria-label="メモ本文を編集"
+                                onChange={(event) => {
+                                  setEditingAnyMemoText(event.target.value);
+                                  adjustTextareaHeight(event.currentTarget);
+                                }}
+                                onInput={(event) => adjustTextareaHeight(event.currentTarget)}
+                                ref={adjustTextareaHeight}
+                                rows={3}
+                                value={editingAnyMemoText}
+                              />
+                              <div className="quick-memo-edit-actions">
+                                <button onClick={cancelEditingAnyMemo} type="button">
+                                  キャンセル
+                                </button>
+                                <button
+                                  disabled={!hasMeaningfulText(editingAnyMemoText)}
+                                  onClick={() => saveEditingAnyMemo(item)}
+                                  type="button"
+                                >
+                                  保存
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                className="quick-memo-text"
+                                onClick={() => startEditingAnyMemo(item)}
+                                type="button"
+                              >
+                                {item.text.trim()}
+                              </button>
+                              {renderTextRecordActions({
+                                favoriteKey: getAnyMemoFavoriteKey(item),
+                                text: item.text,
+                                onEdit: () => startEditingAnyMemo(item),
+                              })}
+                              {isLongMemo && (
+                                <button
+                                  className="quick-memo-expand-button"
+                                  onClick={() => toggleAnyMemoExpansion(item.id)}
+                                  type="button"
+                                >
+                                  {isExpanded ? '閉じる' : '続きを読む'}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
+
             {anyMemoTab === 'folders' && !selectedAnyMemoFolder && (
               <section className="memo-folder-page" aria-label="メモフォルダ">
                 <section className="memo-folder-create" aria-label="フォルダ作成">
@@ -21790,7 +22081,9 @@ function App() {
                   <div className="memo-folder-list">
                     {visibleAnyMemoFolders.map((folder) => {
                       const folderMemoCount = anyMemoFolderItems.filter(
-                        (item) => item.folderId === folder.id,
+                        (item) =>
+                          item.folderId === folder.id &&
+                          !textRecordArchives[getFolderMemoFavoriteKey(item)],
                       ).length;
                       const childFolderCount = anyMemoFolders.filter(
                         (childFolder) => childFolder.parentFolderId === folder.id,
@@ -21909,7 +22202,9 @@ function App() {
                     <div className="memo-folder-list">
                       {visibleAnyMemoFolders.map((folder) => {
                         const folderMemoCount = anyMemoFolderItems.filter(
-                          (item) => item.folderId === folder.id,
+                          (item) =>
+                            item.folderId === folder.id &&
+                            !textRecordArchives[getFolderMemoFavoriteKey(item)],
                         ).length;
                         const childFolderCount = anyMemoFolders.filter(
                           (childFolder) => childFolder.parentFolderId === folder.id,
@@ -22073,7 +22368,7 @@ function App() {
                       {selectedAnyMemoFolderItems.map((item) => {
                         const displayItem: AnyMemoListItem = {
                           ...item,
-                          source: 'item',
+                          source: 'folder',
                           hasTime: true,
                         };
                         const isEditing = editingAnyMemoId === item.id;
@@ -22129,6 +22424,18 @@ function App() {
                                       </div>
                                     </section>
                                   )}
+                                  <button
+                                    onClick={() =>
+                                      archiveAnyMemoItem({
+                                        ...item,
+                                        source: 'folder',
+                                        hasTime: true,
+                                      })
+                                    }
+                                    type="button"
+                                  >
+                                    保管する
+                                  </button>
                                   <button onClick={() => deleteFolderMemoItem(item)} type="button">
                                     削除
                                   </button>
