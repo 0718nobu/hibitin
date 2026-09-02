@@ -7232,20 +7232,26 @@ h1 {
 }
 
 .quick-memo-tabs {
+  position: sticky;
+  top: max(8px, env(safe-area-inset-top));
+  z-index: 20;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
   border: 1px solid rgb(205 226 190 / 68%);
   border-radius: 14px;
-  background: rgb(255 255 249 / 86%);
-  box-shadow: 0 8px 18px rgb(53 93 48 / 8%);
-  padding: 5px;
+  background: rgb(255 255 249 / 96%);
+  box-shadow: 0 8px 18px rgb(53 93 48 / 8%), 0 1px 0 rgb(198 222 197 / 58%);
+  padding: 6px;
+  backdrop-filter: blur(10px);
 }
 
 .quick-memo-tabs button {
+  min-width: 0;
   min-height: 38px;
   border: 1px solid transparent;
   border-radius: 11px;
+  padding: 0 4px;
   background: transparent;
   color: #61725f;
   cursor: pointer;
@@ -12884,8 +12890,8 @@ h1 {
   }
 
   .quick-memo-tabs button {
-    min-height: 36px;
-    font-size: 0.8rem;
+    min-height: 34px;
+    font-size: 0.75rem;
   }
 
   .today-record-write-cards {

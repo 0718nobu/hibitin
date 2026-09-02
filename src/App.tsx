@@ -7157,6 +7157,7 @@ function App() {
   } | null>(null);
   const dailyRecordScrollPositionsRef = useRef<Record<string, number>>({});
   const dailyRecordEditTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const dailyRecordEditScrollTopRef = useRef(0);
   const historyDailyMemoTextareaRef = useRef<HTMLTextAreaElement>(null);
   const historyDailyEventTextareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTimerStateRef = useRef<StoredTimerState | null>(null);
@@ -8965,7 +8966,7 @@ function App() {
       }
 
       adjustTextareaHeight(textarea);
-      textarea.scrollTop = editingDailyRecord.scrollTop;
+      textarea.scrollTop = dailyRecordEditScrollTopRef.current;
       textarea.focus({ preventScroll: true });
     }, 80);
 
@@ -16635,6 +16636,9 @@ function App() {
     text: string,
     scrollTop = dailyRecordScrollPositionsRef.current[`${kind}:${index}`] ?? 0,
   ) => {
+    const normalizedText = typeof text === 'string' ? text : String(text ?? '');
+    const safeScrollTop = Number.isFinite(scrollTop) ? Math.max(0, scrollTop) : 0;
+
     if (
       editingDailyRecord &&
       editingDailyRecord.text !== editingDailyRecord.originalText &&
@@ -16643,20 +16647,22 @@ function App() {
       return;
     }
 
+    dailyRecordEditScrollTopRef.current = safeScrollTop;
     setEditingDailyRecord({
       kind,
       index,
-      text,
-      originalText: text,
-      scrollTop,
+      text: normalizedText,
+      originalText: normalizedText,
+      scrollTop: safeScrollTop,
     });
   };
   const cancelDailyRecordEdit = () => {
     if (editingDailyRecord) {
       dailyRecordScrollPositionsRef.current[`${editingDailyRecord.kind}:${editingDailyRecord.index}`] =
-        dailyRecordEditTextareaRef.current?.scrollTop ?? editingDailyRecord.scrollTop;
+        dailyRecordEditTextareaRef.current?.scrollTop ?? dailyRecordEditScrollTopRef.current;
     }
 
+    dailyRecordEditTextareaRef.current = null;
     setEditingDailyRecord(null);
   };
   const saveDailyRecordEdit = () => {
@@ -16666,7 +16672,7 @@ function App() {
 
     const { kind, index, text } = editingDailyRecord;
     dailyRecordScrollPositionsRef.current[`${kind}:${index}`] =
-      dailyRecordEditTextareaRef.current?.scrollTop ?? editingDailyRecord.scrollTop;
+      dailyRecordEditTextareaRef.current?.scrollTop ?? dailyRecordEditScrollTopRef.current;
 
     if (kind === 'memo') {
       setDailyMemoDateKey(selectedDateKey);
@@ -16681,6 +16687,7 @@ function App() {
     }
 
     setRecordRevision((revision) => revision + 1);
+    dailyRecordEditTextareaRef.current = null;
     setEditingDailyRecord(null);
   };
 
@@ -16796,7 +16803,7 @@ function App() {
     }));
     setMovingAnyMemoId(null);
     setNewMoveFolderName('');
-    setAnyMemoStatusMessage('保管しました');
+    setAnyMemoStatusMessage('保管庫に移動しました');
   };
 
   const restoreArchivedAnyMemoItem = (item: AnyMemoListItem) => {
@@ -16891,6 +16898,7 @@ function App() {
         {savedEntries.length > 0 && (
           <div className="today-record-saved-list">
             {savedEntries.map(({ entry, index }) => {
+              const entryText = typeof entry.text === 'string' ? entry.text : String(entry.text ?? '');
               const savedTime = formatDailyRecordSavedTime(entry.savedAt);
               const isEditing =
                 editingDailyRecord?.kind === kind && editingDailyRecord.index === index;
@@ -16909,12 +16917,12 @@ function App() {
                           adjustTextareaHeight(event.currentTarget);
                           dailyRecordScrollPositionsRef.current[getDailyRecordScrollKey(kind, index)] =
                             event.currentTarget.scrollTop;
+                          dailyRecordEditScrollTopRef.current = event.currentTarget.scrollTop;
                           setEditingDailyRecord((currentEdit) =>
                             currentEdit && currentEdit.kind === kind && currentEdit.index === index
                               ? {
                                   ...currentEdit,
                                   text: event.target.value,
-                                  scrollTop: event.currentTarget.scrollTop,
                                 }
                               : currentEdit,
                           );
@@ -16927,19 +16935,17 @@ function App() {
                         }}
                         ref={(element) => {
                           dailyRecordEditTextareaRef.current = element;
-                          adjustTextareaHeight(element);
-                          if (element) {
-                            element.scrollTop = editingDailyRecord.scrollTop;
+                          if (!element) {
+                            return;
                           }
+
+                          adjustTextareaHeight(element);
+                          element.scrollTop = dailyRecordEditScrollTopRef.current;
                         }}
                         onScroll={(event) => {
                           const scrollTop = event.currentTarget.scrollTop;
                           dailyRecordScrollPositionsRef.current[getDailyRecordScrollKey(kind, index)] = scrollTop;
-                          setEditingDailyRecord((currentEdit) =>
-                            currentEdit && currentEdit.kind === kind && currentEdit.index === index
-                              ? { ...currentEdit, scrollTop }
-                              : currentEdit,
-                          );
+                          dailyRecordEditScrollTopRef.current = scrollTop;
                         }}
                         rows={isMemo ? 2 : 4}
                         value={editingDailyRecord.text}
@@ -16968,7 +16974,7 @@ function App() {
                             startDailyRecordEdit(
                               kind,
                               index,
-                              entry.text,
+                              entryText,
                               event.currentTarget.scrollTop,
                             );
                           }
@@ -16980,7 +16986,7 @@ function App() {
                           )
                         }
                         onPointerUp={(event) =>
-                          handleDailyRecordTextPointerUp(kind, index, entry.text, event)
+                          handleDailyRecordTextPointerUp(kind, index, entryText, event)
                         }
                         onPointerCancel={() => {
                           dailyRecordPointerRef.current = null;
@@ -16998,7 +17004,7 @@ function App() {
                         role="button"
                         tabIndex={0}
                       >
-                        {entry.text.trim()}
+                        {entryText.trim()}
                       </div>
                       {renderTextRecordActions({
                         favoriteKey: getDailyTextRecordFavoriteKey(
@@ -17006,8 +17012,8 @@ function App() {
                           selectedDateKey,
                           index,
                         ),
-                        text: entry.text,
-                        onEdit: () => startDailyRecordEdit(kind, index, entry.text),
+                        text: entryText,
+                        onEdit: () => startDailyRecordEdit(kind, index, entryText),
                       })}
                       {savedTime && <time dateTime={entry.savedAt}>{savedTime}</time>}
                     </>
@@ -22037,7 +22043,7 @@ function App() {
                 ['memo', '一覧'],
                 ['favorites', 'お気に入り'],
                 ['folders', 'フォルダ'],
-                ['archives', '保管'],
+                ['archives', '保管庫'],
               ] as const).map(([tabName, label]) => (
                 <button
                   aria-current={anyMemoTab === tabName ? 'page' : undefined}
@@ -22179,7 +22185,7 @@ function App() {
                                 </section>
                               )}
                               <button onClick={() => archiveAnyMemoItem(item)} type="button">
-                                保管する
+                                保管庫に移動
                               </button>
                               <button onClick={() => deleteAnyMemoItem(item)} type="button">
                                 削除
@@ -22348,13 +22354,13 @@ function App() {
             )}
 
             {anyMemoTab === 'archives' && (
-              <section className="quick-memo-list-section" aria-label="保管メモ">
+              <section className="quick-memo-list-section" aria-label="保管庫のメモ">
                 <div className="quick-memo-list-heading">
-                  <h3>保管</h3>
+                  <h3>保管庫</h3>
                   <span>{archivedAnyMemoListItems.length}件</span>
                 </div>
                 {archivedAnyMemoListItems.length === 0 ? (
-                  <p className="quick-memo-empty">保管中のメモはまだありません。</p>
+                  <p className="quick-memo-empty">保管庫のメモはまだありません。</p>
                 ) : (
                   <div className="quick-memo-list">
                     {archivedAnyMemoListItems.map((item) => {
@@ -22893,7 +22899,7 @@ function App() {
                                     }
                                     type="button"
                                   >
-                                    保管する
+                                    保管庫に移動
                                   </button>
                                   <button onClick={() => deleteFolderMemoItem(item)} type="button">
                                     削除
